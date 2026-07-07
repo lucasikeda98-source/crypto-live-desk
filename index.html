@@ -6,17 +6,21 @@
     <title>Crypto Live Market Dashboard Pro</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
-  <body>
+  <body data-view="dashboard">
     <main class="shell">
       <header class="topbar">
         <div class="identity">
           <div class="mark">B</div>
           <div>
             <h1>Crypto Live Desk Pro</h1>
-            <p id="sourceLine">Binance spot/futuros + on-chain BTC + noticias/macro</p>
+            <p id="sourceLine">Binance + DeFiLlama + CoinGecko + CoinPaprika + sentimento + noticias/macro</p>
           </div>
         </div>
         <div class="controls">
+          <nav class="desk-nav" aria-label="Navegacao do painel">
+            <button id="viewDashboardButton" class="nav-button active" type="button">Geral</button>
+            <button id="viewAssetButton" class="nav-button" type="button">Ativo</button>
+          </nav>
           <label class="field asset-field">
             <span>Par</span>
             <select id="symbolSelect"></select>
@@ -43,15 +47,43 @@
         </div>
       </header>
 
-      <section class="market-strip">
+      <section class="overview-hero panel view-dashboard">
+        <div class="section-head compact board-head">
+          <div>
+            <h2>Dashboard geral</h2>
+            <p id="overviewSummary">Consolidando mercado, sentimento, DeFi, derivativos e radar multiativos.</p>
+          </div>
+          <span id="overviewUpdated">--</span>
+        </div>
+        <div class="overview-grid">
+          <div class="overview-card primary"><span class="label">Melhor score</span><strong id="overviewBestAsset">--</strong><small id="overviewBestScore">--</small></div>
+          <div class="overview-card"><span class="label">Maior risco</span><strong id="overviewRiskAsset">--</strong><small id="overviewRiskScore">--</small></div>
+          <div class="overview-card"><span class="label">Mercado cripto</span><strong id="overviewMarketCap">--</strong><small id="overviewMarketMove">--</small></div>
+          <div class="overview-card"><span class="label">DeFi / DEX</span><strong id="overviewDefiTvl">--</strong><small id="overviewDexVolume">--</small></div>
+          <div class="overview-card"><span class="label">Sentimento</span><strong id="overviewFearGreed">--</strong><small id="overviewContextScore">--</small></div>
+        </div>
+        <div class="overview-lists">
+          <div>
+            <div class="mini-head"><span>Oportunidades</span><strong id="leadersCount">--</strong></div>
+            <div id="overviewLeaders" class="compact-list"></div>
+          </div>
+          <div>
+            <div class="mini-head"><span>Alertas</span><strong id="risksCount">--</strong></div>
+            <div id="overviewRisks" class="compact-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="market-strip view-asset">
         <div class="quote-panel primary"><span class="label">Preco</span><strong id="lastPrice">--</strong><small id="priceChange">--</small></div>
         <div class="quote-panel"><span class="label">Range 24h</span><strong id="dayRange">--</strong><small id="weightedAvg">--</small></div>
         <div class="quote-panel"><span class="label">Funding</span><strong id="fundingRate">--</strong><small id="nextFunding">--</small></div>
         <div class="quote-panel"><span class="label">Open Interest</span><strong id="openInterest">--</strong><small id="basisLine">--</small></div>
         <div class="quote-panel"><span class="label">On-chain BTC</span><strong id="mempoolLine">--</strong><small id="feeLine">--</small></div>
+        <div class="quote-panel"><span class="label">Sentimento</span><strong id="fearGreedLine">--</strong><small id="globalRiskLine">--</small></div>
       </section>
 
-      <section class="confluence-panel panel">
+      <section class="confluence-panel panel view-asset">
         <div class="section-head compact board-head">
           <div>
             <h2>Confluencia quantitativa</h2>
@@ -68,6 +100,7 @@
               </select>
             </label>
             <button id="newsRefreshButton" class="chip-button">Atualizar noticias</button>
+            <button id="externalRefreshButton" class="chip-button">Atualizar dados</button>
           </div>
         </div>
         <div class="confluence-grid">
@@ -86,7 +119,24 @@
         </div>
       </section>
 
-      <section class="market-board panel">
+      <section class="analysis-report panel view-asset">
+        <div class="section-head compact board-head">
+          <div>
+            <h2>Analise escrita do ativo</h2>
+            <p id="analysisSubtitle">Leitura automatica conciliando tecnica, fluxo, derivativos, on-chain, noticias e contexto externo.</p>
+          </div>
+          <span id="analysisQuality">--</span>
+        </div>
+        <div class="report-grid">
+          <div class="report-main">
+            <strong id="analysisHeadline">Aguardando dados suficientes.</strong>
+            <p id="analysisBody">Assim que os dados carregarem, a analise aparece aqui.</p>
+          </div>
+          <div id="analysisChecklist" class="report-checklist"></div>
+        </div>
+      </section>
+
+      <section class="market-board panel view-dashboard">
         <div class="section-head compact board-head">
           <div>
             <h2>Radar multiativos</h2>
@@ -101,11 +151,76 @@
         <div id="assetGrid" class="asset-grid"></div>
       </section>
 
-      <section class="workspace">
+      <section class="intel-grid">
+        <div class="panel asset-focus-panel view-asset">
+          <div class="section-head compact">
+            <h2>Foco do par</h2>
+            <span id="pairContextUpdated">--</span>
+          </div>
+          <div class="asset-focus-title">
+            <div>
+              <span class="label" id="focusAssetKind">--</span>
+              <strong id="focusAssetName">--</strong>
+            </div>
+            <span id="focusRank" class="rank-badge">--</span>
+          </div>
+          <p id="focusNarrative" class="intel-copy">Aguardando contexto externo.</p>
+          <div class="metric-grid triad">
+            <div><span>Market cap</span><strong id="focusMarketCap">--</strong></div>
+            <div><span>7d / 30d</span><strong id="focusChange">--</strong></div>
+            <div><span>Liquidez 24h</span><strong id="focusVolume">--</strong></div>
+          </div>
+          <div class="metric-grid triad asset-extra-metrics">
+            <div><span>1h / 24h</span><strong id="focusShortChange">--</strong></div>
+            <div><span>Dist. ATH</span><strong id="focusAth">--</strong></div>
+            <div><span>Supply circ.</span><strong id="focusSupply">--</strong></div>
+          </div>
+          <div class="context-split">
+            <div><span class="label">Chain/TVL</span><strong id="focusChain">--</strong><small id="focusChainTvl">--</small></div>
+            <div><span class="label">Protocolo</span><strong id="focusProtocol">--</strong><small id="focusProtocolTvl">--</small></div>
+          </div>
+        </div>
+        <div class="panel macro-panel view-dashboard">
+          <div class="section-head compact">
+            <h2>Mercado global</h2>
+            <span id="externalStatus">--</span>
+          </div>
+          <div class="metric-grid">
+            <div><span>Market cap cripto</span><strong id="globalMarketCap">--</strong></div>
+            <div><span>Volume 24h</span><strong id="globalVolume">--</strong></div>
+            <div><span>Dominancia BTC</span><strong id="btcDominance">--</strong></div>
+            <div><span>DeFi TVL</span><strong id="defiTvl">--</strong></div>
+            <div><span>Stablecoins</span><strong id="stablecoinCap">--</strong></div>
+            <div><span>DEX 24h</span><strong id="dexVolume">--</strong></div>
+            <div><span>Fees 24h</span><strong id="fees24h">--</strong></div>
+            <div><span>Perps OI DeFi</span><strong id="defiPerpsOi">--</strong></div>
+          </div>
+          <p id="trendingLine" class="mini-caption">--</p>
+        </div>
+        <div class="panel source-panel view-dashboard">
+          <div class="section-head compact">
+            <h2>Fontes gratuitas</h2>
+            <span id="sourceCount">--</span>
+          </div>
+          <div id="dataSources" class="source-list"></div>
+          <p class="mini-caption">Dados sem chave atualizam em ciclos diferentes: ativo em foco 3s, radar multiativos 15s, contexto externo 2min, noticias 5min.</p>
+        </div>
+      </section>
+
+      <section class="workspace view-asset">
         <div class="chart-zone">
-          <div class="section-head">
+          <div class="section-head chart-head">
             <div><h2 id="chartTitle">Price Action BTCUSDT</h2><p id="structureLine">Aguardando candles...</p></div>
-            <div class="time-tabs" id="timeTabs"><button data-interval="1m">1m</button><button data-interval="3m">3m</button><button data-interval="5m" class="active">5m</button><button data-interval="15m">15m</button><button data-interval="30m">30m</button><button data-interval="1h">1h</button><button data-interval="2h">2h</button><button data-interval="4h">4h</button><button data-interval="6h">6h</button><button data-interval="12h">12h</button><button data-interval="1d">1d</button></div>
+            <div class="chart-controls">
+              <div class="time-tabs" id="timeTabs"><button data-interval="1m">1m</button><button data-interval="3m">3m</button><button data-interval="5m" class="active">5m</button><button data-interval="15m">15m</button><button data-interval="30m">30m</button><button data-interval="1h">1h</button><button data-interval="2h">2h</button><button data-interval="4h">4h</button><button data-interval="6h">6h</button><button data-interval="12h">12h</button><button data-interval="1d">1d</button></div>
+              <div class="overlay-toggles" aria-label="Camadas do grafico">
+                <label><input type="checkbox" data-overlay="ema9" checked /> EMA 9</label>
+                <label><input type="checkbox" data-overlay="ema21" checked /> EMA 21</label>
+                <label><input type="checkbox" data-overlay="ema50" checked /> EMA 50</label>
+                <label><input type="checkbox" data-overlay="bb" /> Bollinger</label>
+                <label><input type="checkbox" data-overlay="levels" checked /> Niveis</label>
+              </div>
+            </div>
           </div>
           <div class="chart-frame"><canvas id="priceCanvas" width="1200" height="620"></canvas></div>
           <div class="signal-row">
@@ -130,18 +245,24 @@
             <div class="decision-item"><span>Book</span><strong id="bookSignal">--</strong></div>
             <div class="decision-item"><span>Derivativos</span><strong id="derivativesSignal">--</strong></div>
             <div class="decision-item"><span>On-chain</span><strong id="chainSignal">--</strong></div>
+            <div class="decision-item"><span>Sentimento</span><strong id="sentimentSignal">--</strong></div>
+            <div class="decision-item"><span>Global/DeFi</span><strong id="externalSignal">--</strong></div>
           </div>
           <div class="playbook"><h3>Plano</h3><p id="playbookText">Aguardando atualizacao.</p></div>
         </aside>
       </section>
 
-      <section class="analytics-grid">
+      <section class="analytics-grid view-asset">
         <div class="panel"><div class="section-head compact"><h2>Indicadores</h2></div><div class="metric-grid"><div><span>EMA 9</span><strong id="ema9">--</strong></div><div><span>EMA 21</span><strong id="ema21">--</strong></div><div><span>EMA 50</span><strong id="ema50">--</strong></div><div><span>EMA 200</span><strong id="ema200">--</strong></div><div><span>RSI 14</span><strong id="rsi14">--</strong></div><div><span>Stoch RSI</span><strong id="stochRsi">--</strong></div><div><span>MACD</span><strong id="macdLine">--</strong></div><div><span>MFI</span><strong id="mfi14">--</strong></div><div><span>ATR 14</span><strong id="atr14">--</strong></div><div><span>Bandas BB</span><strong id="bbLine">--</strong></div><div><span>VWAP</span><strong id="vwapLine">--</strong></div><div><span>Vol/Media</span><strong id="volumeRatio">--</strong></div></div></div>
+        <div class="panel advanced-indicators"><div class="section-head compact"><h2>Indicadores avancados</h2></div><div class="metric-grid"><div><span>ADX / DI</span><strong id="adxLine">--</strong></div><div><span>Supertrend</span><strong id="supertrendLine">--</strong></div><div><span>Keltner</span><strong id="keltnerLine">--</strong></div><div><span>Donchian</span><strong id="donchianLine">--</strong></div><div><span>BB %B / Width</span><strong id="bbStatsLine">--</strong></div><div><span>ROC 12</span><strong id="rocLine">--</strong></div><div><span>OBV</span><strong id="obvLine">--</strong></div><div><span>CMF 20</span><strong id="cmfLine">--</strong></div></div></div>
+        <div class="panel setup-quality"><div class="section-head compact"><h2>Qualidade do setup</h2><span id="setupScoreLine">--</span></div><div id="setupChecklist" class="setup-checklist"></div><p class="mini-caption" id="setupCaption">--</p></div>
+        <div class="panel liquidity-panel"><div class="section-head compact"><h2>Liquidez e execucao</h2></div><div class="metric-grid"><div><span>Spread bps</span><strong id="spreadBpsLine">--</strong></div><div><span>Microprice</span><strong id="micropriceLine">--</strong></div><div><span>Book 0.1%</span><strong id="book01Line">--</strong></div><div><span>Book 0.5%</span><strong id="book05Line">--</strong></div><div><span>Slippage compra</span><strong id="buySlipLine">--</strong></div><div><span>Slippage venda</span><strong id="sellSlipLine">--</strong></div></div></div>
         <div class="panel"><div class="section-head compact"><h2>Fluxo</h2></div><div class="chart-mini"><canvas id="flowCanvas" width="640" height="230"></canvas></div><div class="mini-caption" id="flowCaption">--</div></div>
         <div class="panel"><div class="section-head compact"><h2>Livro</h2></div><div class="book-stack"><div class="book-bar"><span id="bidBar"></span><span id="askBar"></span></div><div class="book-numbers"><strong id="bidDepth">--</strong><strong id="askDepth">--</strong></div></div><p class="mini-caption" id="spreadLine">--</p></div>
         <div class="panel"><div class="section-head compact"><h2>On-chain BTC</h2></div><div class="metric-grid"><div><span>Bloco</span><strong id="blockHeight">--</strong></div><div><span>Mempool</span><strong id="mempoolTx">--</strong></div><div><span>Fee rapida</span><strong id="fastFee">--</strong></div><div><span>Fee baixa</span><strong id="lowFee">--</strong></div></div></div>
+        <div class="panel derivatives-detail"><div class="section-head compact"><h2>Derivativos Binance</h2></div><div class="metric-grid"><div><span>OI historico</span><strong id="oiChangeLine">--</strong></div><div><span>Funding medio</span><strong id="fundingAvgLine">--</strong></div><div><span>Long/Short</span><strong id="longShortLine">--</strong></div><div><span>Taker L/S</span><strong id="takerRatioLine">--</strong></div></div><p class="mini-caption" id="derivativesCaption">--</p></div>
       </section>
-      <footer class="status-bar"><span id="statusText">Inicializando painel...</span><span>Mercado: 12s | noticias/macro: 5min | sinal analitico, nao recomendacao</span></footer>
+      <footer class="status-bar"><span id="statusText">Inicializando painel...</span><span>Ativo: 3s | radar: 15s | contexto externo: 2min | noticias/macro: 5min | sinal analitico, nao recomendacao</span></footer>
     </main>
     <script src="app.js"></script>
   </body>
