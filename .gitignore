@@ -1,0 +1,6 @@
+.vercel/
+.gitdir/
+.git.invalid-onedrive-backup*/
+.git.onedrive-blocked-*/
+git-write-test/
+write-test.txt
