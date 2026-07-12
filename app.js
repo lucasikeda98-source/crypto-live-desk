@@ -793,6 +793,7 @@
     state.liquidationSocket = socket;
     socket.onopen = function () {
       state.liquidationConnected = true;
+      state.liquidationRetryMs = 3000;
       health('Binance liquidations', true, 'stream conectado');
       renderLiquidations();
       renderSourceHealth(state.external || {});
@@ -826,7 +827,9 @@
       state.liquidationConnected = false;
       renderLiquidations();
       if (state.live && state.liquidationSymbol === state.symbol) {
-        state.liquidationReconnectTimer = setTimeout(function () { connectLiquidationStream(state.symbol); }, 3000);
+        var retryMs = state.liquidationRetryMs || 3000;
+        state.liquidationRetryMs = Math.min(retryMs * 2, 60000);
+        state.liquidationReconnectTimer = setTimeout(function () { connectLiquidationStream(state.symbol); }, retryMs);
       }
     };
   }
@@ -1872,7 +1875,7 @@
       card.innerHTML = '<div class="asset-top"><div><span class="asset-symbol">' + baseAsset(item.symbol) + '</span><small>' + (ASSET_NAMES[item.symbol] || item.symbol) + '</small></div><div><span class="asset-score ' + scoreClass(a.bias) + '" title="Radar Score preview ' + MODEL_VERSION + '">' + a.score + '</span><span class="radar-confidence">DC preview ' + (a.radar ? a.radar.dataConfidence : 0) + '%</span></div></div>' +
         '<div class="asset-row"><div><span>Preco</span><strong>' + money(a.close) + '</strong></div><div><span>24h</span><strong class="' + ((+t.priceChangePercent || 0) >= 0 ? 'up' : 'down') + '">' + percent(+t.priceChangePercent) + '</strong></div></div>' +
         sparkline(item.candles) +
-        '<div class="asset-meta"><div><span>Bias</span><strong>' + a.bias + '</strong></div><div><span>RSI/MFI</span><strong>' + num(a.rsi14, 0) + ' / ' + num(a.mfi14, 0) + '</strong></div><div><span>Rank/MCap</span><strong>' + (market && market.market_cap_rank ? '#' + market.market_cap_rank + ' ' + compactUsd(+market.market_cap) : '--') + '</strong></div><div><span>7d/30d</span><strong>' + (market ? percent(+market.price_change_percentage_7d_in_currency, 1) + ' / ' + percent(+market.price_change_percentage_30d_in_currency, 1) : '--') + '</strong></div><div><span>Funding</span><strong>' + (Number.isFinite(a.funding) ? percent(a.funding * 100, 4) : '--') + '</strong></div><div><span>Contexto</span><strong>' + signed(contextScore) + '</strong></div><div><span>Historico</span><strong>' + (historyFresh(a.history) ? signed(a.history.score) + ' | ' + a.history.samples + ' amostras' : a.history ? 'stale | fora do score' : 'carregando') + '</strong></div><div><span>Regime</span><strong>' + escapeHTML(a.regime || '--') + '</strong></div></div>' +
+        '<div class="asset-meta"><div><span>Bias</span><strong>' + a.bias + '</strong></div><div><span>RSI/MFI</span><strong>' + num(a.rsi14, 0) + ' / ' + num(a.mfi14, 0) + '</strong></div><div><span>Rank/MCap</span><strong>' + (market && Number.isFinite(+market.market_cap_rank) ? '#' + (+market.market_cap_rank) + ' ' + compactUsd(+market.market_cap) : '--') + '</strong></div><div><span>7d/30d</span><strong>' + (market ? percent(+market.price_change_percentage_7d_in_currency, 1) + ' / ' + percent(+market.price_change_percentage_30d_in_currency, 1) : '--') + '</strong></div><div><span>Funding</span><strong>' + (Number.isFinite(a.funding) ? percent(a.funding * 100, 4) : '--') + '</strong></div><div><span>Contexto</span><strong>' + signed(contextScore) + '</strong></div><div><span>Historico</span><strong>' + (historyFresh(a.history) ? signed(a.history.score) + ' | ' + a.history.samples + ' amostras' : a.history ? 'stale | fora do score' : 'carregando') + '</strong></div><div><span>Regime</span><strong>' + escapeHTML(a.regime || '--') + '</strong></div></div>' +
         '<div class="asset-context"><span>' + escapeHTML(contextName) + '</span><strong>' + (a.supports[0] ? money(a.supports[0]) : '--') + ' / ' + (a.resistances[0] ? money(a.resistances[0]) : '--') + '</strong></div>';
       grid.appendChild(card);
     });
@@ -2187,7 +2190,8 @@
     if (node) node.innerHTML = reasons.length ? reasons.map(function (item) { return '<div class="reason-item"><span class="reason-dot ' + (item.tone === 'good' ? 'good' : item.tone === 'bad' ? 'bad' : '') + '"></span><span>' + escapeHTML(item.text) + '</span></div>'; }).join('') : '<div class="reason-item"><span class="reason-dot"></span><span>Dados insuficientes para classificar o risco.</span></div>';
   }
   function liquidationSummary() {
-    var rows = state.liquidations.filter(function (row) { return row.symbol === state.symbol; });
+    var cutoffHour = Date.now() - 60 * 60 * 1000;
+    var rows = state.liquidations.filter(function (row) { return row.symbol === state.symbol && row.time >= cutoffHour; });
     var cutoff15 = Date.now() - 15 * 60 * 1000;
     var recent = rows.filter(function (row) { return row.time >= cutoff15; });
     var longValue = recent.filter(function (row) { return row.side === 'long'; }).reduce(function (sum, row) { return sum + row.notional; }, 0);
@@ -2335,7 +2339,8 @@
     var grid = $('coverageGrid');
     if (grid) grid.innerHTML = checks.map(function (check) { return '<div class="coverage-item ' + (check.ok ? 'ok' : 'fail') + '"><span>' + escapeHTML(check.name) + '</span><strong>' + escapeHTML(check.ok ? 'Coberto | ' + check.detail : check.detail) + '</strong></div>'; }).join('');
   }
-  function calculatorNumber(id) { var node = $(id), value = node ? +node.value : NaN; return Number.isFinite(value) ? value : 0; }
+  function calculatorNumber(id) { var node = $(id); if (!node || String(node.value).trim() === '') return NaN; var value = +node.value; return Number.isFinite(value) ? value : NaN; }
+  function calculatorValue(id, fallback) { var value = calculatorNumber(id); return Number.isFinite(value) ? value : fallback; }
   function calculatePosition() {
     var modeNode = $('calcMode'), sideNode = $('calcSide');
     var calculatorMode = modeNode ? modeNode.value : 'spot';
@@ -2344,29 +2349,42 @@
       sideNode.disabled = calculatorMode === 'spot';
       sideNode.title = calculatorMode === 'spot' ? 'Spot usa compra/long; short exige a modalidade Futuros.' : '';
     }
+    var currentQty = calculatorNumber('calcCurrentQty');
+    var currentPrice = calculatorNumber('calcCurrentPrice');
+    var addMultiple = calculatorValue('calcAddMultiple', 0);
+    var addPrice = calculatorNumber('calcAddPrice');
+    var addLegIncomplete = addMultiple > 0 && !Number.isFinite(addPrice);
+    if (addLegIncomplete) addMultiple = 0;
+    var baseIncomplete = !Number.isFinite(currentQty) || !Number.isFinite(currentPrice);
+    if (baseIncomplete) {
+      ['calcFinalQty', 'calcAveragePrice', 'calcNotional', 'calcFees', 'calcMargin', 'calcBreakEven', 'calcLiquidation'].forEach(function (id) { text(id, '--'); });
+      text('calculatorModeLabel', calculatorMode === 'futures' ? 'Futuros' : 'Spot');
+      text('calculatorNote', 'Preencha quantidade e preco atuais para calcular a posicao.');
+      return;
+    }
     var result = AnalyticsCore.calculatePosition({
       mode: calculatorMode,
       side: sideNode ? sideNode.value : 'long',
-      currentQty: calculatorNumber('calcCurrentQty'),
-      currentPrice: calculatorNumber('calcCurrentPrice'),
-      addMultiple: calculatorNumber('calcAddMultiple'),
-      addPrice: calculatorNumber('calcAddPrice'),
-      entryFeePct: calculatorNumber('calcEntryFee'),
-      exitFeePct: calculatorNumber('calcExitFee'),
-      leverage: calculatorNumber('calcLeverage'),
-      fundingRatePct: calculatorNumber('calcFunding'),
-      fundingPeriods: calculatorNumber('calcFundingPeriods'),
-      maintenancePct: calculatorNumber('calcMaintenance')
+      currentQty: currentQty,
+      currentPrice: currentPrice,
+      addMultiple: addMultiple,
+      addPrice: calculatorValue('calcAddPrice', 0),
+      entryFeePct: calculatorValue('calcEntryFee', 0),
+      exitFeePct: calculatorValue('calcExitFee', 0),
+      leverage: calculatorValue('calcLeverage', 1),
+      fundingRatePct: calculatorValue('calcFunding', 0),
+      fundingPeriods: calculatorValue('calcFundingPeriods', 0),
+      maintenancePct: calculatorValue('calcMaintenance', 0)
     });
-    text('calculatorModeLabel', result.mode === 'futures' ? 'Futuros ' + num(result.mode === 'futures' ? Math.max(1, calculatorNumber('calcLeverage')) : 1, 0) + 'x' : 'Spot');
+    text('calculatorModeLabel', result.mode === 'futures' ? 'Futuros ' + num(Math.max(1, calculatorValue('calcLeverage', 1)), 0) + 'x' : 'Spot');
     text('calcFinalQty', num(result.quantity, 8) + ' ' + baseAsset(state.symbol));
     text('calcAveragePrice', money(result.averageWithEntryFee));
     text('calcNotional', compactMoney(result.notional));
     text('calcFees', money(result.totalCosts));
     text('calcMargin', money(result.margin));
     text('calcBreakEven', money(result.breakEven));
-    text('calcLiquidation', Number.isFinite(result.liquidationPrice) && calculatorNumber('calcLeverage') > 1 ? money(Math.max(0, result.liquidationPrice)) + ' aprox.' : '--');
-    text('calculatorNote', 'Funding positivo: long paga e short recebe; funding negativo inverte os lados. Custos liquidos positivos sao pagos pela posicao e negativos representam credito. Liquidacao continua aproximada.');
+    text('calcLiquidation', Number.isFinite(result.liquidationPrice) && calculatorValue('calcLeverage', 1) > 1 ? money(Math.max(0, result.liquidationPrice)) + ' aprox.' : '--');
+    text('calculatorNote', (addLegIncomplete ? 'Preco da nova entrada vazio; calculando sem a nova perna. ' : '') + 'Funding positivo: long paga e short recebe; funding negativo inverte os lados. Custos liquidos positivos sao pagos pela posicao e negativos representam credito. Liquidacao continua aproximada.');
   }
   function applyIndicatorHelp() {
     var help = {
@@ -2591,11 +2609,16 @@
   function drawFlowChart() {
     var canvas = $('flowCanvas'); if (!canvas || !state.klines.length) return;
     var c = setupCanvas(canvas), ctx = c.ctx, w = c.w, h = c.h; ctx.clearRect(0, 0, w, h); ctx.fillStyle = '#101318'; ctx.fillRect(0, 0, w, h);
-    var rows = state.klines.slice(-48).map(function (bar) { return bar.takerBuy - Math.max(0, bar.volume - bar.takerBuy); });
-    var max = Math.max.apply(null, rows.map(Math.abs)) || 1, mid = h / 2, bw = Math.max(3, w / rows.length * .62);
+    var rows = state.klines.slice(-48).map(function (bar) {
+      if (!Number.isFinite(bar.takerBuy) || !Number.isFinite(bar.volume)) return null;
+      return bar.takerBuy - Math.max(0, bar.volume - bar.takerBuy);
+    });
+    var finiteRows = rows.filter(function (v) { return v !== null; });
+    var max = Math.max.apply(null, finiteRows.map(Math.abs).concat([1])), mid = h / 2, bw = Math.max(3, w / rows.length * .62);
     ctx.strokeStyle = '#303741'; ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(w, mid); ctx.stroke();
-    rows.forEach(function (v, i) { var x = i * (w / rows.length) + 3; var height = Math.abs(v) / max * (h * .42); ctx.fillStyle = v >= 0 ? '#22c783' : '#ff5c70'; ctx.fillRect(x, v >= 0 ? mid - height : mid, bw, height); });
-    var sum = rows.reduce(function (a, b) { return a + b; }, 0); text('flowCaption', 'Delta taker aprox. ' + num(sum, 3) + ' ' + baseAsset(state.symbol) + ' nos ultimos candles');
+    rows.forEach(function (v, i) { if (v === null) return; var x = i * (w / rows.length) + 3; var height = Math.abs(v) / max * (h * .42); ctx.fillStyle = v >= 0 ? '#22c783' : '#ff5c70'; ctx.fillRect(x, v >= 0 ? mid - height : mid, bw, height); });
+    var sum = finiteRows.reduce(function (a, b) { return a + b; }, 0);
+    text('flowCaption', finiteRows.length ? 'Delta taker aprox. ' + num(sum, 3) + ' ' + baseAsset(state.symbol) + ' nos ultimos candles' + (finiteRows.length < rows.length ? ' (' + finiteRows.length + '/' + rows.length + ' com dado de taker)' : '') : 'Sem dado de taker nos candles recentes');
   }
   function drawRsiChart() {
     var canvas = $('rsiCanvas'); if (!canvas || !state.analysis) return;
@@ -2650,13 +2673,15 @@
     var pad = { l: 22, r: 14, t: 12, b: 22 };
     var bw = Math.max(2, ((w - pad.l - pad.r) / rows.length) * .7);
     rows.forEach(function (bar, i) {
+      if (!Number.isFinite(bar.volume)) return;
       var x = pad.l + i * ((w - pad.l - pad.r) / Math.max(1, rows.length - 1));
       var height = (bar.volume / maxVol) * (h - pad.t - pad.b);
-      var delta = bar.takerBuy - Math.max(0, bar.volume - bar.takerBuy);
-      ctx.fillStyle = delta >= 0 ? 'rgba(34,199,131,.72)' : 'rgba(255,92,112,.72)';
+      var hasTaker = Number.isFinite(bar.takerBuy);
+      var delta = hasTaker ? bar.takerBuy - Math.max(0, bar.volume - bar.takerBuy) : NaN;
+      ctx.fillStyle = !hasTaker ? 'rgba(157,167,179,.5)' : delta >= 0 ? 'rgba(34,199,131,.72)' : 'rgba(255,92,112,.72)';
       ctx.fillRect(x - bw / 2, h - pad.b - height, bw, height);
     });
-    var mean = avg(rows.map(function (bar) { return bar.volume; }));
+    var mean = avg(rows.map(function (bar) { return bar.volume; }).filter(Number.isFinite));
     var meanY = h - pad.b - (mean / maxVol) * (h - pad.t - pad.b);
     ctx.strokeStyle = 'rgba(245,184,75,.72)'; ctx.setLineDash([5, 5]); ctx.beginPath(); ctx.moveTo(pad.l, meanY); ctx.lineTo(w - pad.r, meanY); ctx.stroke(); ctx.setLineDash([]);
   }
@@ -2719,31 +2744,36 @@
     }).join('');
     select.value = state.symbol;
   }
+  function on(id, eventName, handler) {
+    var node = $(id);
+    if (!node) { if (typeof console !== 'undefined' && console.warn) console.warn('bind: elemento ausente #' + id); return; }
+    node.addEventListener(eventName, handler);
+  }
   function bind() {
     populateAssetSelect();
     setAssetTab(state.assetTab);
     setView(state.view);
-    $('viewDashboardButton').addEventListener('click', function () { setView('dashboard'); });
-    $('viewAssetButton').addEventListener('click', function () { setView('asset'); });
-    $('refreshButton').addEventListener('click', function () { refresh(true); });
-    $('intervalSelect').addEventListener('change', function (e) { setIntervalChoice(e.target.value); });
-    $('symbolSelect').addEventListener('change', function (e) { selectSymbol(e.target.value, true); });
-    $('liveButton').addEventListener('click', function () {
+    on('viewDashboardButton', 'click', function () { setView('dashboard'); });
+    on('viewAssetButton', 'click', function () { setView('asset'); });
+    on('refreshButton', 'click', function () { refresh(true); });
+    on('intervalSelect', 'change', function (e) { setIntervalChoice(e.target.value); });
+    on('symbolSelect', 'change', function (e) { selectSymbol(e.target.value, true); });
+    on('liveButton', 'click', function () {
       state.live = !state.live;
-      $('liveButton').classList.toggle('is-on', state.live);
-      $('liveButton').setAttribute('aria-pressed', String(state.live));
+      var live = $('liveButton');
+      if (live) { live.classList.toggle('is-on', state.live); live.setAttribute('aria-pressed', String(state.live)); }
       if (state.live) connectLiquidationStream(state.symbol); else closeLiquidationStream();
       renderLiquidations();
     });
-    $('timeTabs').addEventListener('click', function (e) { if (e.target.dataset.interval) setIntervalChoice(e.target.dataset.interval); });
-    $('assetTabs').addEventListener('click', function (e) { if (e.target.dataset.assetTab) setAssetTab(e.target.dataset.assetTab); });
-    $('assetGrid').addEventListener('click', function (e) { var card = e.target.closest('.asset-card'); if (card) selectSymbol(card.dataset.symbol, true); });
-    $('overviewLeaders').addEventListener('click', function (e) { var row = e.target.closest('[data-symbol]'); if (row) selectSymbol(row.dataset.symbol, true); });
-    $('overviewRisks').addEventListener('click', function (e) { var row = e.target.closest('[data-symbol]'); if (row) selectSymbol(row.dataset.symbol, true); });
-    $('sortScoreButton').addEventListener('click', function () { setSort('score'); });
-    $('sortChangeButton').addEventListener('click', function () { setSort('change'); });
-    $('sortVolumeButton').addEventListener('click', function () { setSort('volume'); });
-    $('newsModeSelect').addEventListener('change', function (e) {
+    on('timeTabs', 'click', function (e) { if (e.target.dataset.interval) setIntervalChoice(e.target.dataset.interval); });
+    on('assetTabs', 'click', function (e) { if (e.target.dataset.assetTab) setAssetTab(e.target.dataset.assetTab); });
+    on('assetGrid', 'click', function (e) { var card = e.target.closest('.asset-card'); if (card) selectSymbol(card.dataset.symbol, true); });
+    on('overviewLeaders', 'click', function (e) { var row = e.target.closest('[data-symbol]'); if (row) selectSymbol(row.dataset.symbol, true); });
+    on('overviewRisks', 'click', function (e) { var row = e.target.closest('[data-symbol]'); if (row) selectSymbol(row.dataset.symbol, true); });
+    on('sortScoreButton', 'click', function () { setSort('score'); });
+    on('sortChangeButton', 'click', function () { setSort('change'); });
+    on('sortVolumeButton', 'click', function () { setSort('volume'); });
+    on('newsModeSelect', 'change', function (e) {
       state.newsMode = e.target.value;
       if (state.analysis && analysisMatchesSelection(state.analysis)) {
         stampAnalysisSnapshot(state.analysis, 'news-mode');
@@ -2752,7 +2782,7 @@
         updateScore(state.analysis);
       }
     });
-    $('newsRefreshButton').addEventListener('click', async function () {
+    on('newsRefreshButton', 'click', async function () {
       text('newsStatus', 'Atualizando noticias e macro...');
       await loadNewsIfNeeded(true);
       if (state.analysis && analysisMatchesSelection(state.analysis)) {
@@ -2762,7 +2792,7 @@
         updateScore(state.analysis);
       }
     });
-    $('externalRefreshButton').addEventListener('click', async function () {
+    on('externalRefreshButton', 'click', async function () {
       text('externalStatus', 'Atualizando...');
       await loadExternalContext(true);
       reapplyExternalContext();
@@ -2773,8 +2803,9 @@
         drawPriceChart();
       });
     });
-    $('candleCountSelect').addEventListener('change', function (e) { state.chart.candles = +e.target.value || 120; drawPriceChart(); });
-    document.querySelectorAll('.position-calculator input, .position-calculator select').forEach(function (input) { input.addEventListener('input', calculatePosition); input.addEventListener('change', calculatePosition); });
+    on('candleCountSelect', 'change', function (e) { state.chart.candles = +e.target.value || 120; drawPriceChart(); });
+    document.querySelectorAll('.position-calculator input').forEach(function (input) { input.addEventListener('input', calculatePosition); });
+    document.querySelectorAll('.position-calculator select').forEach(function (select) { select.addEventListener('change', calculatePosition); });
     applyIndicatorHelp();
     calculatePosition();
     window.addEventListener('resize', function () { drawPriceChart(); drawRsiChart(); drawMacdChart(); drawVolumeChart(); drawFlowChart(); });

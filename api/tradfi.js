@@ -1,16 +1,16 @@
 const analyticsCore = require('../lib/analytics-core');
 
 const SYMBOLS = [
-  { symbol: 'COIN', query: 'coin.us', name: 'Coinbase', group: 'Crypto equity' },
-  { symbol: 'MSTR', query: 'mstr.us', name: 'Strategy', group: 'BTC treasury' },
-  { symbol: 'MARA', query: 'mara.us', name: 'MARA', group: 'Bitcoin miner' },
-  { symbol: 'RIOT', query: 'riot.us', name: 'Riot Platforms', group: 'Bitcoin miner' },
-  { symbol: 'HOOD', query: 'hood.us', name: 'Robinhood', group: 'Broker / crypto' },
-  { symbol: 'NVDA', query: 'nvda.us', name: 'Nvidia', group: 'Technology' },
-  { symbol: 'QQQ', query: 'qqq.us', name: 'Nasdaq 100 ETF', group: 'Risk proxy' },
-  { symbol: 'SPY', query: 'spy.us', name: 'S&P 500 ETF', group: 'Global risk' },
-  { symbol: 'GLD', query: 'gld.us', name: 'Gold ETF', group: 'Defensive proxy' },
-  { symbol: 'TLT', query: 'tlt.us', name: 'Treasury ETF', group: 'Rates proxy' },
+  { symbol: 'COIN', name: 'Coinbase', group: 'Crypto equity' },
+  { symbol: 'MSTR', name: 'Strategy', group: 'BTC treasury' },
+  { symbol: 'MARA', name: 'MARA', group: 'Bitcoin miner' },
+  { symbol: 'RIOT', name: 'Riot Platforms', group: 'Bitcoin miner' },
+  { symbol: 'HOOD', name: 'Robinhood', group: 'Broker / crypto' },
+  { symbol: 'NVDA', name: 'Nvidia', group: 'Technology' },
+  { symbol: 'QQQ', name: 'Nasdaq 100 ETF', group: 'Risk proxy' },
+  { symbol: 'SPY', name: 'S&P 500 ETF', group: 'Global risk' },
+  { symbol: 'GLD', name: 'Gold ETF', group: 'Defensive proxy' },
+  { symbol: 'TLT', name: 'Treasury ETF', group: 'Rates proxy' },
 ];
 
 async function loadSymbol(meta) {

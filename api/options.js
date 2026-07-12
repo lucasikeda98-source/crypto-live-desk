@@ -59,7 +59,7 @@ module.exports = async function handler(request, response) {
   }
 
   const parsedUrl = new URL(request.url || '/', 'http://localhost');
-  const requested = String(request.query && request.query.currency || parsedUrl.searchParams.get('currency') || 'BTC').toUpperCase();
+  const requested = String(parsedUrl.searchParams.get('currency') || 'BTC').toUpperCase();
   const currency = ['BTC', 'ETH', 'SOL'].includes(requested) ? requested : 'BTC';
   const now = Date.now();
   const start = now - 7 * 24 * 60 * 60 * 1000;
