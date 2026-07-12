@@ -20,7 +20,10 @@ async function loadSymbol(meta) {
     signal: AbortSignal.timeout(9000),
   });
   if (!response.ok) throw new Error(`${meta.symbol}: HTTP ${response.status}`);
-  return analyticsCore.normalizeTradFiChart(await response.json(), meta);
+  const payload = await response.json();
+  const asset = analyticsCore.normalizeTradFiChart(payload, meta);
+  asset.series = analyticsCore.normalizeTradFiRows(payload).slice(-60).map((row) => ({ date: row.date, close: row.close }));
+  return asset;
 }
 
 module.exports = async function handler(request, response) {

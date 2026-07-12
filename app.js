@@ -1941,6 +1941,8 @@
     state.institutionalFetchedAt = institutional ? Date.now() : state.institutionalFetchedAt;
     state.mtf = mtf;
     render(value(results[3]), value(results[4]), value(results[2]), chain || {}, value(results[1]));
+    maybeRecordSignal(analysis, confluenceFor(analysis));
+    processAlerts(analysis, confluenceFor(analysis));
     connectLiquidationStream(symbol);
     ensureHistoricalProfile(symbol, true).then(function (profile) {
       if (!profile || !refreshGate.isCurrent(requestId) || state.symbol !== symbol || state.interval !== interval || state.analysis !== analysis) return;
@@ -2037,7 +2039,7 @@
     text('rsiState', a.rsi14 >= 70 ? 'Sobrecompra' : a.rsi14 <= 30 ? 'Sobrevenda' : 'Neutro');
     text('macdState', a.macd.hist > 0 ? 'Acima do sinal' : 'Abaixo do sinal');
     text('volumeState', Number.isFinite(a.avgVol) && a.lastVol > a.avgVol * 1.35 ? 'Volume alto' : 'Normal');
-    updateScore(a); updateBook(a); updateChain(chain); renderCoinMetrics(a); renderExternalContext(a); renderAdvancedIndicators(a); renderSetupQuality(a); renderLiquidity(a); renderDerivativesDetails(a); renderMultiTimeframe(a); renderHistoricalProfile(a); renderSmartMoney(a); renderConfluence(a); renderWrittenAnalysis(a); renderHistoricalLab(a); renderFuturesConsole(a); renderLiquidations(); renderOptions(); renderExchangeFlows(a); renderInstitutional(); renderMacroFlow(a); calculatePosition(); drawPriceChart(); drawRsiChart(); drawMacdChart(); drawVolumeChart(); drawFlowChart(); renderBoard();
+    updateScore(a); updateBook(a); updateChain(chain); renderCoinMetrics(a); renderExternalContext(a); renderAdvancedIndicators(a); renderSetupQuality(a); renderLiquidity(a); renderDerivativesDetails(a); renderMultiTimeframe(a); renderHistoricalProfile(a); renderSmartMoney(a); renderConfluence(a); renderWrittenAnalysis(a); renderHistoricalLab(a); renderFuturesConsole(a); renderLiquidations(); renderOptions(); renderExchangeFlows(a); renderInstitutional(); renderMacroFlow(a); renderCorrelation(a); calculatePosition(); drawPriceChart(); drawRsiChart(); drawMacdChart(); drawVolumeChart(); drawFlowChart(); renderBoard();
     renderSnapshotStamp(a);
     document.title = state.symbol + ' ' + money(a.close);
   }
@@ -2830,11 +2832,12 @@
     setTimeout(function () { drawPriceChart(); drawRsiChart(); drawMacdChart(); drawVolumeChart(); drawFlowChart(); }, 0);
   }
   function setAssetTab(tab) {
-    var allowed = ['summary', 'chart', 'history', 'futures', 'institutional', 'macro', 'calculator'];
+    var allowed = ['summary', 'chart', 'history', 'futures', 'institutional', 'macro', 'signals', 'calculator'];
     state.assetTab = allowed.indexOf(tab) === -1 ? 'summary' : tab;
     document.body.setAttribute('data-asset-tab', state.assetTab);
     document.querySelectorAll('#assetTabs [data-asset-tab]').forEach(function (button) { button.classList.toggle('active', button.dataset.assetTab === state.assetTab); });
     if (state.assetTab === 'chart') setTimeout(function () { drawPriceChart(); drawRsiChart(); drawMacdChart(); drawVolumeChart(); drawFlowChart(); }, 0);
+    if (state.assetTab === 'signals') renderSignals();
   }
   function selectSymbol(symbol, openAsset) {
     var nextSymbol = normalizeSymbol(symbol);
@@ -2855,6 +2858,195 @@
       return '<option value="' + symbol + '">' + baseAsset(symbol) + ' - ' + (ASSET_NAMES[symbol] || symbol) + '</option>';
     }).join('');
     select.value = state.symbol;
+  }
+  var SIGNAL_JOURNAL_KEY = 'cld-signal-journal:' + MODEL_VERSION;
+  var SIGNAL_JOURNAL_CAP = 500;
+  function loadSignalJournal() {
+    var records = safeStorageGet(SIGNAL_JOURNAL_KEY);
+    return Array.isArray(records) ? records : [];
+  }
+  function saveSignalJournal(records) {
+    safeStorageSet(SIGNAL_JOURNAL_KEY, records.slice(-SIGNAL_JOURNAL_CAP));
+  }
+  function maybeRecordSignal(analysis, confluence) {
+    if (!analysis || !confluence || !analysis.snapshot) return;
+    var records = loadSignalJournal();
+    var lastForPair = null;
+    for (var index = records.length - 1; index >= 0; index -= 1) {
+      if (records[index].symbol === analysis.snapshot.symbol && records[index].interval === analysis.snapshot.interval) { lastForPair = records[index]; break; }
+    }
+    var candidate = { symbol: analysis.snapshot.symbol, interval: analysis.snapshot.interval, signalCloseTime: analysis.snapshot.signalCloseTime };
+    if (!AnalyticsCore.shouldRecordSignal(lastForPair, candidate)) return;
+    records.push({
+      recordedAt: Date.now(),
+      inputSnapshotId: analysis.snapshot.inputSnapshotId,
+      modelVersion: MODEL_VERSION,
+      rulesetHash: RULESET_HASH,
+      symbol: candidate.symbol,
+      interval: candidate.interval,
+      signalCloseTime: candidate.signalCloseTime,
+      price: analysis.signalCandle ? analysis.signalCandle.close : analysis.close,
+      setupScore: confluence.total,
+      radarScore: analysis.radar ? analysis.radar.score : null,
+      dataConfidence: confluence.dataConfidence,
+      decision: confluence.decision,
+      outcome: null
+    });
+    saveSignalJournal(records);
+    if (state.assetTab === 'signals') renderSignals();
+  }
+  function renderSignals() {
+    var rows = $('signalRows');
+    if (!rows) return;
+    var records = loadSignalJournal();
+    var visible = records.slice(-40).reverse();
+    var pct = function (value) { return value === null || value === undefined ? '--' : percent(+value, 2); };
+    rows.innerHTML = visible.length ? visible.map(function (record) {
+      return '<tr><td>' + new Date(record.recordedAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + '</td><td>' + escapeHTML(baseAsset(record.symbol)) + '</td><td>' + escapeHTML(intervalLabel(record.interval)) + '</td><td>' + signed(record.setupScore) + '</td><td>' + record.dataConfidence + '%</td><td>' + escapeHTML(record.decision) + '</td><td>' + money(record.price) + '</td><td>' + pct(record.outcome && record.outcome.r1h) + '</td><td>' + pct(record.outcome && record.outcome.r24h) + '</td><td>' + pct(record.outcome && record.outcome.r7d) + '</td></tr>';
+    }).join('') : '<tr><td colspan="10">Nenhum sinal registrado ainda nesta versao do modelo.</td></tr>';
+    var pending = records.filter(function (record) { return !record.outcome && Date.now() - record.signalCloseTime > 3600000; }).length;
+    text('signalsStatus', records.length + ' sinais registrados (' + MODEL_VERSION + ') | ' + pending + ' aguardando avaliacao | avaliacao busca candles 1h da Binance sob demanda.');
+    var summaryRows = $('signalSummaryRows');
+    if (summaryRows) {
+      var summary = AnalyticsCore.summarizeSignalJournal(records);
+      summaryRows.innerHTML = summary.map(function (row) {
+        return '<tr><td>' + escapeHTML(row.band) + '</td><td>' + row.total + '</td><td>' + row.evaluated + '</td><td>' + (row.hitRate === null ? '--' : num(row.hitRate, 0) + '%') + '</td><td>' + (row.median24h === null ? '--' : percent(row.median24h, 2)) + '</td></tr>';
+      }).join('');
+      text('signalSummaryCount', records.length + ' sinais');
+    }
+  }
+  async function evaluateSignalOutcomes() {
+    var records = loadSignalJournal();
+    var pending = records.filter(function (record) { return !record.outcome && Date.now() - record.signalCloseTime > 3600000; }).slice(0, 10);
+    if (!pending.length) { text('signalsStatus', 'Nenhum sinal pendente com pelo menos 1h decorrida.'); return; }
+    text('signalsStatus', 'Avaliando ' + pending.length + ' sinais...');
+    for (var index = 0; index < pending.length; index += 1) {
+      var record = pending[index];
+      try {
+        var rows = await fetchSpotJSON('/api/v3/klines?symbol=' + encodeURIComponent(record.symbol) + '&interval=1h&startTime=' + record.signalCloseTime + '&limit=200', 10000, 'Binance spot');
+        var candles = AnalyticsCore.selectClosedCandles(parseKlines(rows), Date.now());
+        var outcome = AnalyticsCore.evaluateSignalOutcome(record, candles);
+        if (outcome) {
+          var stored = loadSignalJournal();
+          var match = stored.find(function (row) { return row.inputSnapshotId === record.inputSnapshotId && row.signalCloseTime === record.signalCloseTime; });
+          if (match) { match.outcome = outcome; match.evaluatedAt = Date.now(); saveSignalJournal(stored); }
+        }
+      } catch (error) { /* fonte indisponivel; tenta na proxima avaliacao */ }
+    }
+    renderSignals();
+  }
+  var alertState = { enabled: false, lastBySymbol: {}, lastFiredAt: {} };
+  function alertRulesConfig() {
+    var config = {};
+    document.querySelectorAll('[data-alert-rule]').forEach(function (input) { config[input.dataset.alertRule] = input.checked; });
+    return config;
+  }
+  function captureAlertSnapshot(analysis, confluence) {
+    var liq = liquidationSummary();
+    return {
+      symbol: analysis.snapshot ? analysis.snapshot.symbol : state.symbol,
+      setupScore: confluence.total,
+      bias: analysis.bias,
+      regime: analysis.regime,
+      funding: analysis.funding,
+      liquidation15m: liq.total
+    };
+  }
+  function notifyAlert(alert) {
+    var log = $('alertLog');
+    if (log) log.textContent = new Date().toLocaleTimeString('pt-BR') + ' | ' + alert.message;
+    if (alertState.enabled && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      try { new Notification('Crypto Live Desk', { body: alert.message, tag: alert.id }); } catch (error) { /* notificacao opcional */ }
+    }
+  }
+  function processAlerts(analysis, confluence) {
+    if (!analysis || !confluence) return;
+    var current = captureAlertSnapshot(analysis, confluence);
+    var previous = alertState.lastBySymbol[current.symbol];
+    alertState.lastBySymbol[current.symbol] = current;
+    if (!previous) return;
+    var alerts = AnalyticsCore.evaluateAlertTransitions(previous, current, alertRulesConfig());
+    alerts.forEach(function (alert) {
+      var key = alert.id + ':' + current.symbol;
+      var lastFired = alertState.lastFiredAt[key] || 0;
+      if (Date.now() - lastFired < 300000) return;
+      alertState.lastFiredAt[key] = Date.now();
+      notifyAlert(alert);
+    });
+  }
+  function exportSnapshot() {
+    var analysis = state.analysis;
+    if (!analysis || !analysisMatchesSelection(analysis)) { text('analysisQuality', 'Aguarde o snapshot atual carregar antes de exportar.'); return; }
+    var confluence = confluenceFor(analysis);
+    var datasets = {
+      derivativeDetail: analysis.derivativeDetail ? { status: datasetStatus(analysis.derivativeDetail), observedAt: analysis.derivativeDetail.observedAt || null } : null,
+      coinMetrics: analysis.coinMetrics ? { status: datasetStatus(analysis.coinMetrics), observedAt: analysis.coinMetrics.observedAt || null } : null,
+      options: analysis.options ? { status: datasetStatus(analysis.options), observedAt: analysis.options.observedAt || null, isProxy: !!analysis.options.isProxy } : null,
+      institutional: analysis.institutional ? { status: datasetStatus(analysis.institutional), observedAt: analysis.institutional.observedAt || null } : null,
+      external: state.external && state.external.fetchedAt ? { fetchedAt: state.external.fetchedAt, dataStatus: state.external.dataStatus || 'fresh' } : null,
+      news: { fetchedAt: state.newsFetchedAt || null, mode: state.newsMode }
+    };
+    var payload = AnalyticsCore.buildAnalyticsExport({
+      exportedAt: Date.now(),
+      modelVersion: MODEL_VERSION,
+      rulesetHash: RULESET_HASH,
+      snapshot: analysis.snapshot,
+      confluence: confluence,
+      radar: analysis.radar || null,
+      datasets: datasets
+    });
+    var json = JSON.stringify(payload, null, 2);
+    try {
+      var blob = new Blob([json], { type: 'application/json' });
+      var link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'snapshot-' + baseAsset(state.symbol) + '-' + state.interval + '-' + Date.now() + '.json';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(function () { URL.revokeObjectURL(link.href); }, 5000);
+    } catch (error) { /* download opcional */ }
+    var summary = 'Snapshot ' + baseAsset(state.symbol) + ' ' + intervalLabel(state.interval) + ' | Setup ' + signed(confluence.total) + ' (' + confluence.decision + ') | DC ' + confluence.dataConfidence + '% | modelo ' + MODEL_VERSION + ' | ' + (analysis.snapshot ? analysis.snapshot.inputSnapshotId : '--');
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(summary).catch(function () { /* clipboard opcional */ });
+  }
+  function boardClosedCandles(symbol) {
+    var item = state.board.find(function (row) { return row.symbol === symbol; });
+    return item && Array.isArray(item.candles) ? selectClosedCandles(item.candles) : null;
+  }
+  function dailyDateKey(candle) { return new Date(candle.time).toISOString().slice(0, 10); }
+  function renderCorrelation(a) {
+    var ownCandles = selectClosedCandles(state.klines);
+    var formatCorr = function (value) { return Number.isFinite(value) ? num(value, 2) : '--'; };
+    var pairStatus = [];
+    ['BTCUSDT', 'ETHUSDT'].forEach(function (benchmark) {
+      var id = benchmark === 'BTCUSDT' ? 'corrBtcLine' : 'corrEthLine';
+      if (state.symbol === benchmark) { text(id, '1.00 (proprio)'); return; }
+      var benchCandles = boardClosedCandles(benchmark);
+      if (!benchCandles || !ownCandles.length) { text(id, '--'); return; }
+      var aligned = AnalyticsCore.alignedReturns(ownCandles, benchCandles);
+      var correlation = AnalyticsCore.pearsonCorrelation(aligned.returnsA, aligned.returnsB);
+      text(id, Number.isFinite(correlation) ? num(correlation, 2) + ' (' + aligned.samples + ' retornos)' : '--');
+      if (benchmark === 'BTCUSDT') {
+        text('betaBtcLine', formatCorr(AnalyticsCore.betaCoefficient(aligned.returnsA, aligned.returnsB)));
+        var strength = AnalyticsCore.relativeStrength(aligned.returnsA, aligned.returnsB, 20);
+        text('rsBtcLine', Number.isFinite(strength) ? percent(strength, 2) : '--');
+      }
+      pairStatus.push(benchmark);
+    });
+    if (state.symbol === 'BTCUSDT') { text('betaBtcLine', '1.00 (proprio)'); text('rsBtcLine', '0.00%'); }
+    var daily = state.historyCandles[state.symbol];
+    var tradfi = state.external.tradfi;
+    ['QQQ', 'SPY'].forEach(function (benchmark) {
+      var id = benchmark === 'QQQ' ? 'corrQqqLine' : 'corrSpyLine';
+      var series = tradfi && Array.isArray(tradfi.assets) ? (tradfi.assets.find(function (asset) { return asset.symbol === benchmark; }) || {}).series : null;
+      if (!daily || !daily.length || !series || !series.length) { text(id, '--'); return; }
+      var dailyRows = daily.slice(-90).map(function (candle) { return { time: dailyDateKey(candle), close: candle.close }; });
+      var benchRows = series.map(function (row) { return { time: row.date, close: row.close }; });
+      var aligned = AnalyticsCore.alignedReturns(dailyRows, benchRows);
+      var correlation = AnalyticsCore.pearsonCorrelation(aligned.returnsA, aligned.returnsB);
+      text(id, Number.isFinite(correlation) ? num(correlation, 2) + ' (' + aligned.samples + 'd)' : '--');
+    });
+    text('correlationStatus', ownCandles.length ? intervalLabel(state.interval) + ' | ' + ownCandles.length + ' candles fechados' : '--');
   }
   function on(id, eventName, handler) {
     var node = $(id);
@@ -2916,6 +3108,19 @@
       });
     });
     on('candleCountSelect', 'change', function (e) { state.chart.candles = +e.target.value || 120; drawPriceChart(); });
+    on('evaluateSignalsButton', 'click', evaluateSignalOutcomes);
+    on('clearSignalsButton', 'click', function () { saveSignalJournal([]); renderSignals(); });
+    on('exportSnapshotButton', 'click', exportSnapshot);
+    on('alertsEnabled', 'change', function (e) {
+      if (!e.target.checked) { alertState.enabled = false; text('alertsStatus', 'Desativados'); return; }
+      if (typeof Notification === 'undefined') { alertState.enabled = false; e.target.checked = false; text('alertsStatus', 'Navegador sem suporte'); return; }
+      if (Notification.permission === 'granted') { alertState.enabled = true; text('alertsStatus', 'Ativos'); return; }
+      Notification.requestPermission().then(function (permission) {
+        alertState.enabled = permission === 'granted';
+        e.target.checked = alertState.enabled;
+        text('alertsStatus', alertState.enabled ? 'Ativos' : 'Permissao negada');
+      });
+    });
     document.querySelectorAll('.position-calculator input').forEach(function (input) { input.addEventListener('input', calculatePosition); });
     document.querySelectorAll('.position-calculator select').forEach(function (select) { select.addEventListener('change', calculatePosition); });
     applyIndicatorHelp();

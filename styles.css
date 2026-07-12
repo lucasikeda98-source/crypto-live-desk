@@ -28,6 +28,7 @@ body[data-view="asset"][data-asset-tab="history"] [data-asset-panel]:not([data-a
 body[data-view="asset"][data-asset-tab="futures"] [data-asset-panel]:not([data-asset-panel="futures"]),
 body[data-view="asset"][data-asset-tab="institutional"] [data-asset-panel]:not([data-asset-panel="institutional"]),
 body[data-view="asset"][data-asset-tab="macro"] [data-asset-panel]:not([data-asset-panel="macro"]),
+body[data-view="asset"][data-asset-tab="signals"] [data-asset-panel]:not([data-asset-panel="signals"]),
 body[data-view="asset"][data-asset-tab="calculator"] [data-asset-panel]:not([data-asset-panel="calculator"]) { display: none !important; }
 body[data-view="asset"][data-asset-tab]:not([data-asset-tab="summary"]) .intel-grid { display: none; }
 .topbar { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 14px; }
@@ -307,3 +308,7 @@ canvas { width: 100%; height: 100%; display: block; }
 .explanation-table .contrib-pos { color: #22c783; }
 .explanation-table .contrib-neg { color: #ff5c70; }
 .explanation-table .status-missing, .explanation-table .status-stale { color: var(--amber); }
+.alert-toggles { display: grid; gap: 8px; margin: 10px 0; }
+.alert-toggles label { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; cursor: pointer; }
+.alert-toggles input { accent-color: var(--amber); }
+.signals-panel { grid-column: 1 / -1; }
