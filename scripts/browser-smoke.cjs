@@ -342,7 +342,7 @@ async function main() {
       closedCandleExplained: assetResult.structure.includes('fechamento confirmado'),
       setupNamed: assetResult.setup.includes('Setup Score preview') && assetResult.setup.includes('Data Confidence preview'),
       proxyExplained: assetResult.options.includes('proxy informativo'),
-      modelStatus: assetResult.status.includes('Modelo 1.0.0-preview.1'),
+      modelStatus: assetResult.status.includes('Modelo 1.0.0-preview.2'),
       snapshotIdentityChanges: !!snapshotResult.before && !!snapshotResult.after && snapshotResult.before !== snapshotResult.after && /\| r\d+$/.test(snapshotResult.stamp),
       spotShortBlocked: calculatorResult.mode === 'spot' && calculatorResult.side === 'long' && calculatorResult.disabled,
       finalTimeframeWins: timeframeResult.interval === '1h' && timeframeResult.summary.includes('neutros em 1h.') && !timeframeResult.summary.includes('Leitura anterior'),

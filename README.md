@@ -6,7 +6,7 @@ Producao atual: https://crypto-live-desk.vercel.app
 
 ## Estado do modelo
 
-O modelo analitico em estabilizacao usa a versao de migracao `1.0.0-preview.1`. Ela implementa parte do contrato v1, sem declarar conformidade completa, e separa tres conceitos:
+O modelo analitico em estabilizacao usa a versao de migracao `1.0.0-preview.2`. Ela implementa parte do contrato v1, sem declarar conformidade completa, e separa tres conceitos:
 
 - **Radar Score:** ordena os 24 ativos no dashboard.
 - **Setup Score:** explica a confluencia do ativo e timeframe selecionados.

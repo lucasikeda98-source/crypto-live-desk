@@ -1,6 +1,6 @@
 # Crypto Live Desk - cobertura analitica
 
-## Modelo analitico 1.0.0-preview.1
+## Modelo analitico 1.0.0-preview.2
 
 Esta e uma versao de migracao parcial. O contrato normativo completo esta em `ANALYTIC_CONTRACT_V1.md`. A interface distingue:
 
@@ -9,6 +9,20 @@ Esta e uma versao de migracao parcial. O contrato normativo completo esta em `AN
 - Data Confidence para cobertura dos dados, sem interpretar o valor como probabilidade de acerto.
 
 Indicadores e eventos confirmados usam apenas candles fechados. Opcoes e mempool BTC exibidos para altcoins sao proxies informativos e possuem contribuicao zero nos scores especificos e no Data Confidence do ativo.
+
+## Mudancas do 1.0.0-preview.2 (podem alterar resultados vs preview.1)
+
+1. Noticias: palavras-chave agora exigem fronteira de palavra ("ban" nao casa mais "bank", "war" nao casa "warns") e a relevancia de ativo exige ticker maiusculo exato ou nome completo ("sui" nao casa mais "lawsuit"; "near"/"op" em prosa nao contam). Efeito esperado: score de noticias menos negativo em manchetes bancarias comuns e menos falsos positivos por ativo.
+2. Radar Score: sem nenhum bloco disponivel o resultado agora e `null`/`Indisponivel` (antes exibia 0/Neutro). Ativos sem dados vao para o fim da ordenacao.
+3. Data Confidence do Radar: passa a ser graduado por qualidade de cada bloco (cobertura de candles, cobertura de taker, amostras do historico), nao mais a soma binaria dos pesos presentes.
+4. On-chain: os ajustes de Coin Metrics e netflow entram ANTES da agregacao do score central; `score`, `coreScore` e `bias` voltam a reconciliar com os componentes.
+5. Protocolo DeFiLlama: match implicito por nome/ticker exige TVL >= $1M; protocolos homonimos de $0 nao geram mais contexto nem "+0.00%".
+6. Ichimoku: a nuvem atual usa os spans projetados de 26 barras atras (definicao padrao). Leituras de reversao mudam.
+7. Netflow 7d: exige cobertura de pelo menos 5 dos 7 dias; abaixo disso o valor fica indisponivel em vez de subestimado.
+8. Fluxo de candles: o delta taker exige cobertura de pelo menos 50% da janela de 40 candles.
+9. Contexto externo: variacoes ausentes de mercado/chain/protocolo nao contam mais como 0% observado; falha total das 11 fontes preserva a leitura anterior como stale em vez de fabricar um zero fresco.
+10. `observedAt` de opcoes/contexto usa clamp contra o relogio local (skew de relogio nao invalida mais dados ao vivo); ETF usa updatedAt, data da ultima linha ou fetchedAt, nesta ordem.
+11. `inputSnapshotId` passa a ser derivado apenas das entradas (candle fechado + carimbo de cada dataset + modo de noticias); o horario do calculo e a revisao ficam em campos separados.
 
 ## Atualidade e elegibilidade
 
