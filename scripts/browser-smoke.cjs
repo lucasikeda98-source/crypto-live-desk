@@ -244,7 +244,8 @@ async function main() {
       cards: document.querySelectorAll('.asset-card').length,
       radarLabel: document.getElementById('boardSummary').textContent,
       modelLoaded: !!window.CryptoAnalyticsCore,
-      footer: document.querySelector('.status-bar').innerText
+      footer: document.querySelector('.status-bar').innerText,
+      gridLeaks: /\\bnull\\b|\\bNaN\\b|\\bundefined\\b/.test(document.getElementById('assetGrid').innerText)
     })`);
 
     await evaluate(cdp, `(() => {
@@ -267,7 +268,9 @@ async function main() {
       options: document.getElementById('optionsStatus').textContent,
       status: document.getElementById('statusText').textContent,
       snapshotId: document.getElementById('updatedAt').dataset.snapshotId,
-      snapshotStamp: document.getElementById('updatedAt').textContent
+      snapshotStamp: document.getElementById('updatedAt').textContent,
+      explanationRows: document.getElementById('explanationRows') ? document.getElementById('explanationRows').querySelectorAll('tr').length : 0,
+      explanationEnvelope: document.getElementById('explanationEnvelope') ? document.getElementById('explanationEnvelope').textContent : ''
     })`);
 
     const snapshotTransition = await evaluate(cdp, `(() => {
@@ -343,6 +346,8 @@ async function main() {
       setupNamed: assetResult.setup.includes('Setup Score preview') && assetResult.setup.includes('Data Confidence preview'),
       proxyExplained: assetResult.options.includes('proxy informativo'),
       modelStatus: assetResult.status.includes('Modelo 1.0.0-preview.2'),
+      noValueLeaks: dashboardResult.gridLeaks === false,
+      scoreExplained: assetResult.explanationRows >= 8 && assetResult.explanationEnvelope.includes('regras'),
       snapshotIdentityChanges: !!snapshotResult.before && !!snapshotResult.after && snapshotResult.before !== snapshotResult.after && /\| r\d+$/.test(snapshotResult.stamp),
       spotShortBlocked: calculatorResult.mode === 'spot' && calculatorResult.side === 'long' && calculatorResult.disabled,
       finalTimeframeWins: timeframeResult.interval === '1h' && timeframeResult.summary.includes('neutros em 1h.') && !timeframeResult.summary.includes('Leitura anterior'),
