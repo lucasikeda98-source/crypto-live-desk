@@ -41,7 +41,7 @@ function parseRss(xml, source) {
       body: tag(item, 'description'),
       url: tag(item, 'link'),
       source: tag(item, 'source') || source.name,
-      published: Number.isFinite(Date.parse(publishedValue)) ? Date.parse(publishedValue) : Date.now(),
+      published: Number.isFinite(Date.parse(publishedValue)) ? Date.parse(publishedValue) : null,
       type: source.type,
     };
   }).filter((item) => item.title && /^https?:\/\//i.test(item.url));

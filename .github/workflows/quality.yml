@@ -1,0 +1,49 @@
+name: Quality
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deterministic-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run deterministic tests
+        run: npm test
+
+  browser-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run browser smoke (Edge headless, 1 retry)
+        shell: pwsh
+        env:
+          EDGE_PATH: C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe
+        run: |
+          node scripts/browser-smoke.cjs
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host 'Primeira execucao falhou; tentando novamente (fontes externas podem oscilar).'
+            node scripts/browser-smoke.cjs
+          }
+          exit $LASTEXITCODE

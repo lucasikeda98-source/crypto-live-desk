@@ -55,6 +55,8 @@ module.exports = async function handler(request, response) {
   const results = await Promise.allSettled([getText(treasuryUrl), getText(vixUrl)]);
   const treasury = results[0].status === 'fulfilled' ? parseTreasury(results[0].value) : null;
   const vix = results[1].status === 'fulfilled' ? parseVix(results[1].value) : null;
+  if (treasury) treasury.observedAt = Date.parse(treasury.date);
+  if (vix) vix.observedAt = Date.parse(vix.date);
   let score = 0;
   if (vix) score += vix.close >= 35 ? -6 : vix.close >= 25 ? -4 : vix.close <= 17 ? 3 : 0;
   if (treasury && Number.isFinite(treasury.y10Change5d)) score += treasury.y10Change5d >= 0.15 ? -2 : treasury.y10Change5d <= -0.15 ? 2 : 0;
@@ -62,5 +64,7 @@ module.exports = async function handler(request, response) {
 
   response.setHeader('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=21600');
   response.setHeader('Access-Control-Allow-Origin', '*');
-  return response.status(treasury || vix ? 200 : 503).json({ treasury, vix, score, fetchedAt: Date.now() });
+  const observedDates = [treasury && treasury.observedAt, vix && vix.observedAt].filter(Number.isFinite);
+  const observedAt = observedDates.length ? Math.max(...observedDates) : null;
+  return response.status(treasury || vix ? 200 : 503).json({ treasury, vix, score, observedAt, fetchedAt: Date.now() });
 };

@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Crypto Live Market Dashboard Pro</title>
+    <link rel="icon" href="data:," />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body data-view="dashboard">
@@ -58,6 +59,7 @@
         <button type="button" data-asset-tab="futures">Futuros</button>
         <button type="button" data-asset-tab="institutional">Institucional</button>
         <button type="button" data-asset-tab="macro">Macro e fluxo</button>
+        <button type="button" data-asset-tab="signals">Sinais</button>
         <button type="button" data-asset-tab="calculator">Calculadora</button>
       </nav>
 
@@ -70,8 +72,8 @@
           <span id="overviewUpdated">--</span>
         </div>
         <div class="overview-grid">
-          <div class="overview-card primary"><span class="label">Melhor score</span><strong id="overviewBestAsset">--</strong><small id="overviewBestScore">--</small></div>
-          <div class="overview-card"><span class="label">Maior risco</span><strong id="overviewRiskAsset">--</strong><small id="overviewRiskScore">--</small></div>
+          <div class="overview-card primary"><span class="label">Melhor Radar Score</span><strong id="overviewBestAsset">--</strong><small id="overviewBestScore">--</small></div>
+          <div class="overview-card"><span class="label">Menor Radar Score</span><strong id="overviewRiskAsset">--</strong><small id="overviewRiskScore">--</small></div>
           <div class="overview-card"><span class="label">Mercado cripto</span><strong id="overviewMarketCap">--</strong><small id="overviewMarketMove">--</small></div>
           <div class="overview-card"><span class="label">DeFi / DEX</span><strong id="overviewDefiTvl">--</strong><small id="overviewDexVolume">--</small></div>
           <div class="overview-card"><span class="label">Sentimento</span><strong id="overviewFearGreed">--</strong><small id="overviewContextScore">--</small></div>
@@ -100,7 +102,7 @@
       <section class="confluence-panel panel view-asset" data-asset-panel="summary">
         <div class="section-head compact board-head">
           <div>
-            <h2>Confluencia quantitativa</h2>
+            <h2>Setup Score</h2>
             <p id="confluenceSummary">Aguardando mercado e noticias...</p>
           </div>
           <div class="board-actions">
@@ -121,7 +123,7 @@
           <div class="entry-card">
             <span class="label">Decisao de entrada</span>
             <strong id="entryDecision">--</strong>
-            <small id="entryScoreLine">Score --</small>
+            <small id="entryScoreLine">Setup Score --</small>
           </div>
           <div class="score-stack" id="confluenceBars"></div>
           <div class="reason-list" id="confluenceReasons"></div>
@@ -139,7 +141,10 @@
             <h2>Analise escrita do ativo</h2>
             <p id="analysisSubtitle">Leitura automatica conciliando tecnica, fluxo, derivativos, on-chain, noticias e contexto externo.</p>
           </div>
-          <span id="analysisQuality">--</span>
+          <div class="board-actions">
+            <span id="analysisQuality">--</span>
+            <button id="exportSnapshotButton" class="chip-button" type="button">Exportar snapshot</button>
+          </div>
         </div>
         <div class="report-grid">
           <div class="report-main">
@@ -148,6 +153,17 @@
           </div>
           <div id="analysisChecklist" class="report-checklist"></div>
         </div>
+        <details class="score-explanation" id="scoreExplanation">
+          <summary>Como este score foi calculado?</summary>
+          <p id="explanationEnvelope" class="mini-caption">--</p>
+          <div class="explanation-table-wrap">
+            <table class="explanation-table">
+              <thead><tr><th>Componente</th><th>Regra</th><th>Contribuicao</th><th>Limite</th><th>Estado</th><th>Escopo</th><th>Fontes</th><th>Leitura</th></tr></thead>
+              <tbody id="explanationRows"><tr><td colspan="8">Aguardando o primeiro calculo.</td></tr></tbody>
+            </table>
+          </div>
+          <p id="explanationReconciliation" class="mini-caption">--</p>
+        </details>
       </section>
 
       <section class="regime-grid view-asset" data-asset-panel="summary">
@@ -185,7 +201,7 @@
             <p id="boardSummary">Carregando moedas...</p>
           </div>
           <div class="board-actions">
-            <button id="sortScoreButton" class="chip-button active">Score</button>
+            <button id="sortScoreButton" class="chip-button active">Radar Score</button>
             <button id="sortChangeButton" class="chip-button">24h</button>
             <button id="sortVolumeButton" class="chip-button">Volume</button>
           </div>
@@ -239,7 +255,7 @@
             <div><span>Treasury 2Y / 10Y</span><strong id="treasuryYields">--</strong></div>
             <div><span>Curva 10Y-2Y</span><strong id="yieldCurve">--</strong></div>
             <div><span>VIX</span><strong id="vixLevel">--</strong></div>
-            <div><span>Score macro</span><strong id="macroDataScore">--</strong></div>
+            <div><span>Indicador macro</span><strong id="macroDataScore">--</strong></div>
           </div>
           <p id="trendingLine" class="mini-caption">--</p>
         </div>
@@ -295,7 +311,7 @@
         </div>
 
         <aside class="decision-panel">
-          <div class="section-head compact"><h2>Decisao</h2><span id="updatedAt">--</span></div>
+          <div class="section-head compact"><h2>Setup Score</h2><span id="updatedAt">--</span></div>
           <div id="scoreGauge" class="score-gauge neutral"><span id="scoreValue">0</span><small id="scoreBias">Neutro</small></div>
           <div class="decision-list">
             <div class="decision-item"><span>Trend</span><strong id="trendSignal">--</strong></div>
@@ -328,7 +344,7 @@
           <div id="historicalTimeframes" class="timeframe-table"></div>
         </div>
         <div class="panel pattern-lab">
-          <div class="section-head compact"><div><h2>Padroes e eventos tecnicos</h2><p>Eventos confirmados no fechamento do candle.</p></div><span id="patternCount">--</span></div>
+          <div class="section-head compact"><div><h2>Padroes e eventos tecnicos</h2><p>Eventos calculados exclusivamente com candles fechados.</p></div><span id="patternCount">--</span></div>
           <div id="patternList" class="pattern-list"></div>
         </div>
         <div class="panel trade-plan-panel">
@@ -420,6 +436,59 @@
           <div class="section-head compact"><div><h2>Cobertura analitica</h2><p>Dados presentes, ausentes e impacto sobre a confianca.</p></div><span id="coverageSummary">--</span></div>
           <div id="coverageGrid" class="coverage-grid"></div>
         </div>
+        <div class="panel correlation-panel">
+          <div class="section-head compact"><div><h2>Correlacao cross-asset</h2><p>Correlacao e forca relativa dos retornos; separa movimento proprio de beta de mercado.</p></div><span id="correlationStatus">--</span></div>
+          <div class="metric-grid">
+            <div><span>Correl vs BTC</span><strong id="corrBtcLine">--</strong></div>
+            <div><span>Correl vs ETH</span><strong id="corrEthLine">--</strong></div>
+            <div><span>Beta vs BTC</span><strong id="betaBtcLine">--</strong></div>
+            <div><span>Forca relativa 20p vs BTC</span><strong id="rsBtcLine">--</strong></div>
+            <div><span>Correl vs QQQ (diario)</span><strong id="corrQqqLine">--</strong></div>
+            <div><span>Correl vs SPY (diario)</span><strong id="corrSpyLine">--</strong></div>
+          </div>
+          <p id="correlationCaption" class="mini-caption">Cripto usa os candles fechados do timeframe atual; TradFi usa fechamentos diarios alinhados por data.</p>
+        </div>
+      </section>
+
+      <section class="deep-dive-grid view-asset" data-asset-panel="signals">
+        <div class="panel signals-panel">
+          <div class="section-head compact board-head">
+            <div><h2>Registro de sinais</h2><p>Cada Setup Score confirmado por candle fechado e comparado com o preco 1h, 24h e 7d depois.</p></div>
+            <div class="board-actions">
+              <button id="evaluateSignalsButton" class="chip-button" type="button">Avaliar resultados</button>
+              <button id="clearSignalsButton" class="chip-button" type="button">Limpar registro</button>
+            </div>
+          </div>
+          <p id="signalsStatus" class="mini-caption">--</p>
+          <div class="explanation-table-wrap">
+            <table class="explanation-table">
+              <thead><tr><th>Quando</th><th>Par</th><th>TF</th><th>Setup</th><th>DC</th><th>Decisao</th><th>Preco</th><th>1h</th><th>24h</th><th>7d</th></tr></thead>
+              <tbody id="signalRows"><tr><td colspan="10">Nenhum sinal registrado ainda nesta versao do modelo.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel signals-summary-panel">
+          <div class="section-head compact"><h2>Acerto por faixa de score</h2><span id="signalSummaryCount">--</span></div>
+          <div class="explanation-table-wrap">
+            <table class="explanation-table">
+              <thead><tr><th>Faixa</th><th>Sinais</th><th>Avaliados</th><th>Acerto 24h</th><th>Mediana 24h</th></tr></thead>
+              <tbody id="signalSummaryRows"><tr><td colspan="5">--</td></tr></tbody>
+            </table>
+          </div>
+          <p class="mini-caption">Acerto: retorno 24h na direcao do score (>= +20 espera alta; <= -20 espera baixa; neutro espera |retorno| menor que 1,5%). Amostras pequenas nao validam o modelo.</p>
+        </div>
+        <div class="panel alerts-panel">
+          <div class="section-head compact"><h2>Alertas de transicao</h2><span id="alertsStatus">Desativados</span></div>
+          <div class="alert-toggles">
+            <label><input type="checkbox" id="alertsEnabled" /> Ativar notificacoes do navegador</label>
+            <label><input type="checkbox" data-alert-rule="scoreCross" checked /> Setup Score cruza +42 / +60 / -45</label>
+            <label><input type="checkbox" data-alert-rule="biasChange" checked /> Mudanca de vies</label>
+            <label><input type="checkbox" data-alert-rule="regimeChange" checked /> Mudanca de regime</label>
+            <label><input type="checkbox" data-alert-rule="fundingExtreme" checked /> Funding extremo</label>
+            <label><input type="checkbox" data-alert-rule="liquidationSpike" checked /> Pico de liquidacoes 15m</label>
+          </div>
+          <div id="alertLog" class="mini-caption">Alertas disparam apenas em transicoes confirmadas do par selecionado, com intervalo minimo de 5 minutos por regra.</div>
+        </div>
       </section>
 
       <section class="calculator-shell view-asset" data-asset-panel="calculator">
@@ -430,7 +499,7 @@
             <label><span>Direcao</span><select id="calcSide"><option value="long">Long / compra</option><option value="short">Short / venda</option></select></label>
             <label><span>Quantidade atual</span><input id="calcCurrentQty" type="number" min="0" step="any" value="1" /></label>
             <label><span>Preco medio atual</span><input id="calcCurrentPrice" type="number" min="0" step="any" value="98000" /></label>
-            <label><span>Nova compra em x da quantidade inicial</span><input id="calcAddMultiple" type="number" min="0" step="0.1" value="3" /></label>
+            <label><span>Nova entrada em x da quantidade inicial</span><input id="calcAddMultiple" type="number" min="0" step="0.1" value="3" /></label>
             <label><span>Preco da nova entrada</span><input id="calcAddPrice" type="number" min="0" step="any" value="60000" /></label>
             <label><span>Taxa de entrada (%)</span><input id="calcEntryFee" type="number" min="0" step="0.001" value="0.1" /></label>
             <label><span>Taxa de saida (%)</span><input id="calcExitFee" type="number" min="0" step="0.001" value="0.1" /></label>
@@ -443,7 +512,7 @@
             <div><span>Quantidade final</span><strong id="calcFinalQty">--</strong></div>
             <div><span>Preco medio com taxa</span><strong id="calcAveragePrice">--</strong></div>
             <div><span>Notional total</span><strong id="calcNotional">--</strong></div>
-            <div><span>Taxas + funding</span><strong id="calcFees">--</strong></div>
+            <div><span>Custos liquidos</span><strong id="calcFees">--</strong></div>
             <div><span>Margem inicial</span><strong id="calcMargin">--</strong></div>
             <div><span>Break-even estimado</span><strong id="calcBreakEven">--</strong></div>
             <div><span>Liquidacao estimada</span><strong id="calcLiquidation">--</strong></div>
@@ -451,8 +520,9 @@
           <p id="calculatorNote" class="mini-caption">As taxas exatas dependem do VIP, maker/taker, desconto BNB, bracket de manutencao e modo de margem da conta.</p>
         </div>
       </section>
-      <footer class="status-bar"><span id="statusText">Inicializando painel...</span><span>Mercado: 3s | liquidacoes: live | opcoes: 1min | MTF: 1min | on-chain: 15min | sinal analitico, nao recomendacao</span></footer>
+      <footer class="status-bar"><span id="statusText">Inicializando painel...</span><span>Migracao v1 preview | Radar Score e Setup Score nao representam probabilidade nem recomendacao</span></footer>
     </main>
+    <script src="lib/analytics-core.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

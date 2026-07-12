@@ -1,44 +1,17 @@
+const analyticsCore = require('../lib/analytics-core');
+
 const SYMBOLS = [
-  { symbol: 'COIN', query: 'coin.us', name: 'Coinbase', group: 'Crypto equity' },
-  { symbol: 'MSTR', query: 'mstr.us', name: 'Strategy', group: 'BTC treasury' },
-  { symbol: 'MARA', query: 'mara.us', name: 'MARA', group: 'Bitcoin miner' },
-  { symbol: 'RIOT', query: 'riot.us', name: 'Riot Platforms', group: 'Bitcoin miner' },
-  { symbol: 'HOOD', query: 'hood.us', name: 'Robinhood', group: 'Broker / crypto' },
-  { symbol: 'NVDA', query: 'nvda.us', name: 'Nvidia', group: 'Technology' },
-  { symbol: 'QQQ', query: 'qqq.us', name: 'Nasdaq 100 ETF', group: 'Risk proxy' },
-  { symbol: 'SPY', query: 'spy.us', name: 'S&P 500 ETF', group: 'Global risk' },
-  { symbol: 'GLD', query: 'gld.us', name: 'Gold ETF', group: 'Defensive proxy' },
-  { symbol: 'TLT', query: 'tlt.us', name: 'Treasury ETF', group: 'Rates proxy' },
+  { symbol: 'COIN', name: 'Coinbase', group: 'Crypto equity' },
+  { symbol: 'MSTR', name: 'Strategy', group: 'BTC treasury' },
+  { symbol: 'MARA', name: 'MARA', group: 'Bitcoin miner' },
+  { symbol: 'RIOT', name: 'Riot Platforms', group: 'Bitcoin miner' },
+  { symbol: 'HOOD', name: 'Robinhood', group: 'Broker / crypto' },
+  { symbol: 'NVDA', name: 'Nvidia', group: 'Technology' },
+  { symbol: 'QQQ', name: 'Nasdaq 100 ETF', group: 'Risk proxy' },
+  { symbol: 'SPY', name: 'S&P 500 ETF', group: 'Global risk' },
+  { symbol: 'GLD', name: 'Gold ETF', group: 'Defensive proxy' },
+  { symbol: 'TLT', name: 'Treasury ETF', group: 'Rates proxy' },
 ];
-
-function change(latest, prior) {
-  return prior && prior.close ? ((latest.close - prior.close) / prior.close) * 100 : null;
-}
-
-function parseChart(payload, meta) {
-  const chart = payload && payload.chart && payload.chart.result && payload.chart.result[0];
-  const timestamps = chart && chart.timestamp || [];
-  const quote = chart && chart.indicators && chart.indicators.quote && chart.indicators.quote[0] || {};
-  const rows = timestamps.map((timestamp, index) => ({
-    date: new Date(timestamp * 1000).toISOString().slice(0, 10),
-    open: Number(quote.open && quote.open[index]),
-    high: Number(quote.high && quote.high[index]),
-    low: Number(quote.low && quote.low[index]),
-    close: Number(quote.close && quote.close[index]),
-    volume: Number(quote.volume && quote.volume[index]),
-  })).filter((row) => row.date && Number.isFinite(row.close));
-  const latest = rows.at(-1);
-  if (!latest) throw new Error(`Sem cotacao para ${meta.symbol}`);
-  return {
-    ...meta,
-    date: latest.date,
-    close: latest.close,
-    volume: latest.volume,
-    change1d: change(latest, rows.at(-2)),
-    change5d: change(latest, rows.at(-6)),
-    change20d: change(latest, rows.at(-21)),
-  };
-}
 
 async function loadSymbol(meta) {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(meta.symbol)}?range=3mo&interval=1d`;
@@ -47,7 +20,10 @@ async function loadSymbol(meta) {
     signal: AbortSignal.timeout(9000),
   });
   if (!response.ok) throw new Error(`${meta.symbol}: HTTP ${response.status}`);
-  return parseChart(await response.json(), meta);
+  const payload = await response.json();
+  const asset = analyticsCore.normalizeTradFiChart(payload, meta);
+  asset.series = analyticsCore.normalizeTradFiRows(payload).slice(-60).map((row) => ({ date: row.date, close: row.close }));
+  return asset;
 }
 
 module.exports = async function handler(request, response) {
@@ -66,5 +42,6 @@ module.exports = async function handler(request, response) {
   });
   response.setHeader('Cache-Control', 'public, s-maxage=900, stale-while-revalidate=3600');
   response.setHeader('Access-Control-Allow-Origin', '*');
-  return response.status(assets.length ? 200 : 503).json({ assets, errors, score, source: 'Yahoo Finance public chart', fetchedAt: Date.now() });
+  const observedAt = assets.reduce((latest, asset) => Math.max(latest, Number(asset.observedAt) || 0), 0) || null;
+  return response.status(assets.length ? 200 : 503).json({ assets, errors, score, source: 'Yahoo Finance public chart', observedAt, fetchedAt: Date.now() });
 };

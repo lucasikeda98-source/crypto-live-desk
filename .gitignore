@@ -1,6 +1,7 @@
 .env
 .env.*
 .vercel/
+.claude/
 .gitdir/
 .git.invalid-onedrive-backup*/
 .git.onedrive-blocked-*/

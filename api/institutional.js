@@ -43,7 +43,7 @@ module.exports = async function handler(request, response) {
   }
 
   const parsedUrl = new URL(request.url || '/', 'http://localhost');
-  const base = String(request.query && request.query.asset || parsedUrl.searchParams.get('asset') || 'BTC').toUpperCase();
+  const base = String(parsedUrl.searchParams.get('asset') || 'BTC').toUpperCase();
   const mapping = ASSET_MAP[base] || null;
   const configured = { etf: !!mapping };
   const jobs = [];

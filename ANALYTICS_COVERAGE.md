@@ -1,5 +1,45 @@
 # Crypto Live Desk - cobertura analitica
 
+## Modelo analitico 1.0.0-preview.2
+
+Esta e uma versao de migracao parcial. O contrato normativo completo esta em `ANALYTIC_CONTRACT_V1.md`. A interface distingue:
+
+- Radar Score para comparacao e ordenacao dos ativos.
+- Setup Score para a confluencia do ativo selecionado.
+- Data Confidence para cobertura dos dados, sem interpretar o valor como probabilidade de acerto.
+
+Indicadores e eventos confirmados usam apenas candles fechados. Opcoes e mempool BTC exibidos para altcoins sao proxies informativos e possuem contribuicao zero nos scores especificos e no Data Confidence do ativo.
+
+## Mudancas do 1.0.0-preview.2 (podem alterar resultados vs preview.1)
+
+1. Noticias: palavras-chave agora exigem fronteira de palavra ("ban" nao casa mais "bank", "war" nao casa "warns") e a relevancia de ativo exige ticker maiusculo exato ou nome completo ("sui" nao casa mais "lawsuit"; "near"/"op" em prosa nao contam). Efeito esperado: score de noticias menos negativo em manchetes bancarias comuns e menos falsos positivos por ativo.
+2. Radar Score: sem nenhum bloco disponivel o resultado agora e `null`/`Indisponivel` (antes exibia 0/Neutro). Ativos sem dados vao para o fim da ordenacao.
+3. Data Confidence do Radar: passa a ser graduado por qualidade de cada bloco (cobertura de candles, cobertura de taker, amostras do historico), nao mais a soma binaria dos pesos presentes.
+4. On-chain: os ajustes de Coin Metrics e netflow entram ANTES da agregacao do score central; `score`, `coreScore` e `bias` voltam a reconciliar com os componentes.
+5. Protocolo DeFiLlama: match implicito por nome/ticker exige TVL >= $1M; protocolos homonimos de $0 nao geram mais contexto nem "+0.00%".
+6. Ichimoku: a nuvem atual usa os spans projetados de 26 barras atras (definicao padrao). Leituras de reversao mudam.
+7. Netflow 7d: exige cobertura de pelo menos 5 dos 7 dias; abaixo disso o valor fica indisponivel em vez de subestimado.
+8. Fluxo de candles: o delta taker exige cobertura de pelo menos 50% da janela de 40 candles.
+9. Contexto externo: variacoes ausentes de mercado/chain/protocolo nao contam mais como 0% observado; falha total das 11 fontes preserva a leitura anterior como stale em vez de fabricar um zero fresco.
+10. `observedAt` de opcoes/contexto usa clamp contra o relogio local (skew de relogio nao invalida mais dados ao vivo); ETF usa updatedAt, data da ultima linha ou fetchedAt, nesta ordem.
+11. `inputSnapshotId` passa a ser derivado apenas das entradas (candle fechado + carimbo de cada dataset + modo de noticias); o horario do calculo e a revisao ficam em campos separados.
+
+## Atualidade e elegibilidade
+
+O horario em que a fonte observou o dado (`observedAt`) e separado do horario em que o painel o recuperou (`retrievedAt`) e o guardou em cache (`cacheStoredAt`). Somente a idade da observacao decide se o dado pode alterar o score. A elegibilidade e reavaliada a cada calculo, inclusive com o modo ao vivo desligado.
+
+| Dataset | Atualizacao de rede | Limite de observacao para score |
+| --- | ---: | ---: |
+| Derivativos historicos | 15 s | 2x o timeframe, minimo 45 s |
+| Opcoes Deribit | 60 s | 5 min |
+| Coin Metrics diario | 15 min | 48 h |
+| ETF / institucional | 5 min | 36 h |
+| Noticias RSS | 5 min | 36 h por noticia |
+| Contexto externo agregado | 2 min | 10 min |
+| Perfil historico | 6 h | 48 h apos o ultimo candle diario fechado |
+
+Estados `stale`, `missing`, `invalid`, `error` e `informational` tem contribuicao zero. Respostas em cache nao renovam artificialmente o horario observado.
+
 ## Principios
 
 - O score mede confluencia, nao probabilidade garantida de lucro.
@@ -66,6 +106,7 @@ Os thresholds atuais sao:
 - Max pain aproximado por open interest.
 - Expected move ate o vencimento.
 - Delta, gamma, vega e theta das opcoes ATM.
+- Cobertura nativa de score apenas para BTC, ETH e SOL. Para os demais ativos, BTC pode aparecer somente como proxy visual explicitamente excluido do Setup Score.
 
 ### Coin Metrics Community
 
