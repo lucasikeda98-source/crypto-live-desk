@@ -13,7 +13,7 @@
           <div class="mark">B</div>
           <div>
             <h1>Crypto Live Desk Pro</h1>
-            <p id="sourceLine">Binance + DeFiLlama + CoinGecko + CoinPaprika + sentimento + noticias/macro</p>
+            <p id="sourceLine">Binance + Coin Metrics + DeFiLlama + CoinGecko + Treasury/Cboe + TradFi + noticias</p>
           </div>
         </div>
         <div class="controls">
@@ -28,6 +28,7 @@
           <label class="field select-field">
             <span>Tempo</span>
             <select id="intervalSelect">
+              <option value="1s">1s</option>
               <option value="1m">1m</option>
               <option value="3m">3m</option>
               <option value="5m" selected>5m</option>
@@ -40,12 +41,25 @@
               <option value="8h">8h</option>
               <option value="12h">12h</option>
               <option value="1d">1d</option>
+              <option value="3d">3d</option>
+              <option value="1w">1w</option>
+              <option value="1M">1M</option>
             </select>
           </label>
           <button id="refreshButton" class="icon-button" aria-label="Atualizar agora" title="Atualizar agora"><span aria-hidden="true">R</span></button>
           <button id="liveButton" class="live-button is-on" aria-pressed="true"><span class="pulse"></span>Live</button>
         </div>
       </header>
+
+      <nav class="asset-subnav view-asset" id="assetTabs" aria-label="Areas da analise do ativo">
+        <button type="button" class="active" data-asset-tab="summary">Resumo</button>
+        <button type="button" data-asset-tab="chart">Grafico</button>
+        <button type="button" data-asset-tab="history">Historico e padroes</button>
+        <button type="button" data-asset-tab="futures">Futuros</button>
+        <button type="button" data-asset-tab="institutional">Institucional</button>
+        <button type="button" data-asset-tab="macro">Macro e fluxo</button>
+        <button type="button" data-asset-tab="calculator">Calculadora</button>
+      </nav>
 
       <section class="overview-hero panel view-dashboard">
         <div class="section-head compact board-head">
@@ -79,11 +93,11 @@
         <div class="quote-panel"><span class="label">Range 24h</span><strong id="dayRange">--</strong><small id="weightedAvg">--</small></div>
         <div class="quote-panel"><span class="label">Funding</span><strong id="fundingRate">--</strong><small id="nextFunding">--</small></div>
         <div class="quote-panel"><span class="label">Open Interest</span><strong id="openInterest">--</strong><small id="basisLine">--</small></div>
-        <div class="quote-panel"><span class="label">On-chain BTC</span><strong id="mempoolLine">--</strong><small id="feeLine">--</small></div>
+        <div class="quote-panel"><span class="label">On-chain / rede</span><strong id="mempoolLine">--</strong><small id="feeLine">--</small></div>
         <div class="quote-panel"><span class="label">Sentimento</span><strong id="fearGreedLine">--</strong><small id="globalRiskLine">--</small></div>
       </section>
 
-      <section class="confluence-panel panel view-asset">
+      <section class="confluence-panel panel view-asset" data-asset-panel="summary">
         <div class="section-head compact board-head">
           <div>
             <h2>Confluencia quantitativa</h2>
@@ -119,7 +133,7 @@
         </div>
       </section>
 
-      <section class="analysis-report panel view-asset">
+      <section class="analysis-report panel view-asset" data-asset-panel="summary">
         <div class="section-head compact board-head">
           <div>
             <h2>Analise escrita do ativo</h2>
@@ -133,6 +147,34 @@
             <p id="analysisBody">Assim que os dados carregarem, a analise aparece aqui.</p>
           </div>
           <div id="analysisChecklist" class="report-checklist"></div>
+        </div>
+      </section>
+
+      <section class="regime-grid view-asset" data-asset-panel="summary">
+        <div class="panel regime-panel">
+          <div class="section-head compact"><h2>Confluencia multi-timeframe</h2><span id="mtfAlignment">--</span></div>
+          <div id="mtfMatrix" class="mtf-matrix"></div>
+          <p id="mtfCaption" class="mini-caption">Carregando confirmacoes de tendencia.</p>
+        </div>
+        <div class="panel regime-panel">
+          <div class="section-head compact"><h2>Padroes historicos</h2><span id="historyCoverage">--</span></div>
+          <div class="metric-grid history-metrics">
+            <div><span>Amostras similares</span><strong id="historySamples">--</strong></div>
+            <div><span>Acerto 7d</span><strong id="historyWinRate">--</strong></div>
+            <div><span>Mediana 7d</span><strong id="historyMedian7">--</strong></div>
+            <div><span>Max drawdown</span><strong id="historyDrawdown">--</strong></div>
+          </div>
+          <p id="historyCaption" class="mini-caption">Varrendo o historico diario da Binance.</p>
+        </div>
+        <div class="panel regime-panel">
+          <div class="section-head compact"><h2>Smart money</h2><span id="smartMoneyScore">--</span></div>
+          <div class="metric-grid">
+            <div><span>Estrutura</span><strong id="smartStructure">--</strong></div>
+            <div><span>Liquidez</span><strong id="smartLiquidity">--</strong></div>
+            <div><span>OI + preco</span><strong id="smartOiPhase">--</strong></div>
+            <div><span>FVG / deslocamento</span><strong id="smartImbalance">--</strong></div>
+          </div>
+          <p id="smartMoneyCaption" class="mini-caption">Leitura de estrutura, sweeps, agressao e derivativos.</p>
         </div>
       </section>
 
@@ -194,6 +236,10 @@
             <div><span>DEX 24h</span><strong id="dexVolume">--</strong></div>
             <div><span>Fees 24h</span><strong id="fees24h">--</strong></div>
             <div><span>Perps OI DeFi</span><strong id="defiPerpsOi">--</strong></div>
+            <div><span>Treasury 2Y / 10Y</span><strong id="treasuryYields">--</strong></div>
+            <div><span>Curva 10Y-2Y</span><strong id="yieldCurve">--</strong></div>
+            <div><span>VIX</span><strong id="vixLevel">--</strong></div>
+            <div><span>Score macro</span><strong id="macroDataScore">--</strong></div>
           </div>
           <p id="trendingLine" class="mini-caption">--</p>
         </div>
@@ -207,18 +253,31 @@
         </div>
       </section>
 
-      <section class="workspace view-asset">
+      <section class="workspace view-asset" data-asset-panel="chart">
         <div class="chart-zone">
           <div class="section-head chart-head">
             <div><h2 id="chartTitle">Price Action BTCUSDT</h2><p id="structureLine">Aguardando candles...</p></div>
             <div class="chart-controls">
-              <div class="time-tabs" id="timeTabs"><button data-interval="1m">1m</button><button data-interval="3m">3m</button><button data-interval="5m" class="active">5m</button><button data-interval="15m">15m</button><button data-interval="30m">30m</button><button data-interval="1h">1h</button><button data-interval="2h">2h</button><button data-interval="4h">4h</button><button data-interval="6h">6h</button><button data-interval="12h">12h</button><button data-interval="1d">1d</button></div>
+              <div class="time-tabs" id="timeTabs"><button data-interval="1s">1s</button><button data-interval="1m">1m</button><button data-interval="3m">3m</button><button data-interval="5m" class="active">5m</button><button data-interval="15m">15m</button><button data-interval="30m">30m</button><button data-interval="1h">1h</button><button data-interval="2h">2h</button><button data-interval="4h">4h</button><button data-interval="6h">6h</button><button data-interval="8h">8h</button><button data-interval="12h">12h</button><button data-interval="1d">1d</button><button data-interval="3d">3d</button><button data-interval="1w">1w</button><button data-interval="1M">1M</button></div>
               <div class="overlay-toggles" aria-label="Camadas do grafico">
                 <label><input type="checkbox" data-overlay="ema9" checked /> EMA 9</label>
                 <label><input type="checkbox" data-overlay="ema21" checked /> EMA 21</label>
                 <label><input type="checkbox" data-overlay="ema50" checked /> EMA 50</label>
+                <label><input type="checkbox" data-overlay="ema200" /> EMA 200</label>
                 <label><input type="checkbox" data-overlay="bb" /> Bollinger</label>
+                <label><input type="checkbox" data-overlay="vwap" /> VWAP</label>
+                <label><input type="checkbox" data-overlay="supertrend" /> Supertrend</label>
                 <label><input type="checkbox" data-overlay="levels" checked /> Niveis</label>
+                <label><input type="checkbox" data-overlay="fib" /> Fibonacci</label>
+                <label><input type="checkbox" data-overlay="patterns" checked /> Padroes</label>
+                <label class="candle-count-label">Candles
+                  <select id="candleCountSelect" aria-label="Quantidade de candles visiveis">
+                    <option value="60">60</option>
+                    <option value="120" selected>120</option>
+                    <option value="240">240</option>
+                    <option value="500">500</option>
+                  </select>
+                </label>
               </div>
             </div>
           </div>
@@ -252,17 +311,147 @@
         </aside>
       </section>
 
-      <section class="analytics-grid view-asset">
+      <section class="analytics-grid view-asset" data-asset-panel="chart">
         <div class="panel"><div class="section-head compact"><h2>Indicadores</h2></div><div class="metric-grid"><div><span>EMA 9</span><strong id="ema9">--</strong></div><div><span>EMA 21</span><strong id="ema21">--</strong></div><div><span>EMA 50</span><strong id="ema50">--</strong></div><div><span>EMA 200</span><strong id="ema200">--</strong></div><div><span>RSI 14</span><strong id="rsi14">--</strong></div><div><span>Stoch RSI</span><strong id="stochRsi">--</strong></div><div><span>MACD</span><strong id="macdLine">--</strong></div><div><span>MFI</span><strong id="mfi14">--</strong></div><div><span>ATR 14</span><strong id="atr14">--</strong></div><div><span>Bandas BB</span><strong id="bbLine">--</strong></div><div><span>VWAP</span><strong id="vwapLine">--</strong></div><div><span>Vol/Media</span><strong id="volumeRatio">--</strong></div></div></div>
-        <div class="panel advanced-indicators"><div class="section-head compact"><h2>Indicadores avancados</h2></div><div class="metric-grid"><div><span>ADX / DI</span><strong id="adxLine">--</strong></div><div><span>Supertrend</span><strong id="supertrendLine">--</strong></div><div><span>Keltner</span><strong id="keltnerLine">--</strong></div><div><span>Donchian</span><strong id="donchianLine">--</strong></div><div><span>BB %B / Width</span><strong id="bbStatsLine">--</strong></div><div><span>ROC 12</span><strong id="rocLine">--</strong></div><div><span>OBV</span><strong id="obvLine">--</strong></div><div><span>CMF 20</span><strong id="cmfLine">--</strong></div></div></div>
+        <div class="panel advanced-indicators"><div class="section-head compact"><h2>Indicadores avancados</h2></div><div class="metric-grid"><div><span>ADX / DI</span><strong id="adxLine">--</strong></div><div><span>Supertrend</span><strong id="supertrendLine">--</strong></div><div><span>Keltner</span><strong id="keltnerLine">--</strong></div><div><span>Donchian</span><strong id="donchianLine">--</strong></div><div><span>BB %B / Width</span><strong id="bbStatsLine">--</strong></div><div><span>ROC 12</span><strong id="rocLine">--</strong></div><div><span>OBV</span><strong id="obvLine">--</strong></div><div><span>CMF 20</span><strong id="cmfLine">--</strong></div><div><span>Vol realizada</span><strong id="realizedVolLine">--</strong></div><div><span>Z-score 20</span><strong id="zScoreLine">--</strong></div><div><span>Williams %R</span><strong id="williamsLine">--</strong></div><div><span>CCI 20</span><strong id="cciLine">--</strong></div><div><span>Ichimoku</span><strong id="ichimokuLine">--</strong></div><div><span>Regime</span><strong id="regimeLine">--</strong></div></div></div>
         <div class="panel setup-quality"><div class="section-head compact"><h2>Qualidade do setup</h2><span id="setupScoreLine">--</span></div><div id="setupChecklist" class="setup-checklist"></div><p class="mini-caption" id="setupCaption">--</p></div>
         <div class="panel liquidity-panel"><div class="section-head compact"><h2>Liquidez e execucao</h2></div><div class="metric-grid"><div><span>Spread bps</span><strong id="spreadBpsLine">--</strong></div><div><span>Microprice</span><strong id="micropriceLine">--</strong></div><div><span>Book 0.1%</span><strong id="book01Line">--</strong></div><div><span>Book 0.5%</span><strong id="book05Line">--</strong></div><div><span>Slippage compra</span><strong id="buySlipLine">--</strong></div><div><span>Slippage venda</span><strong id="sellSlipLine">--</strong></div></div></div>
         <div class="panel"><div class="section-head compact"><h2>Fluxo</h2></div><div class="chart-mini"><canvas id="flowCanvas" width="640" height="230"></canvas></div><div class="mini-caption" id="flowCaption">--</div></div>
         <div class="panel"><div class="section-head compact"><h2>Livro</h2></div><div class="book-stack"><div class="book-bar"><span id="bidBar"></span><span id="askBar"></span></div><div class="book-numbers"><strong id="bidDepth">--</strong><strong id="askDepth">--</strong></div></div><p class="mini-caption" id="spreadLine">--</p></div>
-        <div class="panel"><div class="section-head compact"><h2>On-chain BTC</h2></div><div class="metric-grid"><div><span>Bloco</span><strong id="blockHeight">--</strong></div><div><span>Mempool</span><strong id="mempoolTx">--</strong></div><div><span>Fee rapida</span><strong id="fastFee">--</strong></div><div><span>Fee baixa</span><strong id="lowFee">--</strong></div></div></div>
+        <div class="panel"><div class="section-head compact"><h2>On-chain / rede</h2><span id="coinMetricsStatus">--</span></div><div class="metric-grid"><div><span>Enderecos ativos</span><strong id="activeAddresses">--</strong></div><div><span>Transacoes</span><strong id="networkTransactions">--</strong></div><div><span>Fees USD</span><strong id="networkFees">--</strong></div><div><span>MVRV / NVT</span><strong id="valuationMetrics">--</strong></div><div><span>Bloco BTC</span><strong id="blockHeight">--</strong></div><div><span>Mempool BTC</span><strong id="mempoolTx">--</strong></div><div><span>Fee rapida BTC</span><strong id="fastFee">--</strong></div><div><span>Fee baixa BTC</span><strong id="lowFee">--</strong></div></div></div>
         <div class="panel derivatives-detail"><div class="section-head compact"><h2>Derivativos Binance</h2></div><div class="metric-grid"><div><span>OI historico</span><strong id="oiChangeLine">--</strong></div><div><span>Funding medio</span><strong id="fundingAvgLine">--</strong></div><div><span>Long/Short</span><strong id="longShortLine">--</strong></div><div><span>Taker L/S</span><strong id="takerRatioLine">--</strong></div></div><p class="mini-caption" id="derivativesCaption">--</p></div>
       </section>
-      <footer class="status-bar"><span id="statusText">Inicializando painel...</span><span>Ativo: 3s | radar: 15s | contexto externo: 2min | noticias/macro: 5min | sinal analitico, nao recomendacao</span></footer>
+
+      <section class="deep-dive-grid view-asset" data-asset-panel="history">
+        <div class="panel historical-lab">
+          <div class="section-head compact"><div><h2>Historico multi-timeframe</h2><p>Estrutura, momentum e regime por horizonte.</p></div><span id="historicalLabStatus">--</span></div>
+          <div id="historicalTimeframes" class="timeframe-table"></div>
+        </div>
+        <div class="panel pattern-lab">
+          <div class="section-head compact"><div><h2>Padroes e eventos tecnicos</h2><p>Eventos confirmados no fechamento do candle.</p></div><span id="patternCount">--</span></div>
+          <div id="patternList" class="pattern-list"></div>
+        </div>
+        <div class="panel trade-plan-panel">
+          <div class="section-head compact"><div><h2>Plano operacional</h2><p>Faixas calculadas por ATR, estrutura e invalidacao.</p></div><span id="tradePlanSide">--</span></div>
+          <div id="tradePlanGrid" class="trade-plan-grid"></div>
+          <p id="tradePlanRationale" class="mini-caption">--</p>
+        </div>
+      </section>
+
+      <section class="deep-dive-grid view-asset" data-asset-panel="futures">
+        <div class="panel futures-console">
+          <div class="section-head compact"><div><h2>Futuros perpetuos</h2><p>Posicionamento, custo de carregamento e agressao.</p></div><span id="futuresRegime">--</span></div>
+          <div class="metric-grid futures-metrics">
+            <div><span>Open interest</span><strong id="futuresOi">--</strong></div>
+            <div><span>Funding atual / medio</span><strong id="futuresFunding">--</strong></div>
+            <div><span>Basis</span><strong id="futuresBasis">--</strong></div>
+            <div><span>Long / short</span><strong id="futuresLongShort">--</strong></div>
+            <div><span>Taker buy / sell</span><strong id="futuresTaker">--</strong></div>
+            <div><span>Fase preco + OI</span><strong id="futuresPhase">--</strong></div>
+          </div>
+        </div>
+        <div class="panel futures-risk-panel">
+          <div class="section-head compact"><h2>Risco de derivativos</h2><span id="futuresRiskScore">--</span></div>
+          <div id="futuresRiskList" class="reason-list"></div>
+          <p class="mini-caption">Liquidacoes reais, heatmaps e dados de opcoes exigem uma fonte especializada; o painel nao fabrica esses dados.</p>
+        </div>
+      </section>
+
+      <section class="deep-dive-grid view-asset institutional-grid" data-asset-panel="institutional">
+        <div class="panel liquidation-panel">
+          <div class="section-head compact"><div><h2>Liquidacoes reais Binance</h2><p>Ordens de liquidacao observadas no stream USD-M do par.</p></div><span id="liquidationStreamStatus">--</span></div>
+          <div class="metric-grid liquidation-metrics">
+            <div><span>Longs liquidados 15m</span><strong id="longLiquidations15m">--</strong></div>
+            <div><span>Shorts liquidados 15m</span><strong id="shortLiquidations15m">--</strong></div>
+            <div><span>Imbalance 15m</span><strong id="liquidationImbalance">--</strong></div>
+            <div><span>Maior evento</span><strong id="largestLiquidation">--</strong></div>
+          </div>
+          <div id="liquidationTape" class="liquidation-tape"></div>
+          <p id="liquidationCaption" class="mini-caption">Conectando ao stream...</p>
+        </div>
+        <div class="panel options-panel">
+          <div class="section-head compact"><div><h2>Opcoes e volatilidade Deribit</h2><p>Mercado agregado e vencimento mais proximo com liquidez.</p></div><span id="optionsStatus">--</span></div>
+          <div class="metric-grid options-metrics">
+            <div><span>DVOL / 7d</span><strong id="dvolLine">--</strong></div>
+            <div><span>IV ATM</span><strong id="atmIvLine">--</strong></div>
+            <div><span>Put/Call OI</span><strong id="putCallOiLine">--</strong></div>
+            <div><span>Put/Call volume</span><strong id="putCallVolumeLine">--</strong></div>
+            <div><span>Max pain</span><strong id="maxPainLine">--</strong></div>
+            <div><span>Expected move</span><strong id="expectedMoveLine">--</strong></div>
+            <div><span>Greeks ATM call</span><strong id="callGreeksLine">--</strong></div>
+            <div><span>Greeks ATM put</span><strong id="putGreeksLine">--</strong></div>
+          </div>
+          <p id="optionsCaption" class="mini-caption">--</p>
+        </div>
+        <div class="panel exchange-flow-panel">
+          <div class="section-head compact"><div><h2>Exchange flows on-chain</h2><p>Depositos e saques agregados de enderecos de exchanges.</p></div><span id="exchangeFlowStatus">--</span></div>
+          <div class="metric-grid exchange-flow-metrics">
+            <div><span>Inflows 1d</span><strong id="exchangeInflow1d">--</strong></div>
+            <div><span>Outflows 1d</span><strong id="exchangeOutflow1d">--</strong></div>
+            <div><span>Netflow 1d</span><strong id="exchangeNetflow1d">--</strong></div>
+            <div><span>Netflow 7d</span><strong id="exchangeNetflow7d">--</strong></div>
+            <div><span>Supply em exchanges</span><strong id="exchangeSupply">--</strong></div>
+            <div><span>Leitura</span><strong id="exchangeFlowSignal">--</strong></div>
+          </div>
+          <p class="mini-caption">Net inflow pode elevar oferta potencial, mas nao prova venda; net outflow pode sugerir custodia, sem garantir acumulacao.</p>
+        </div>
+        <div class="panel authenticated-data-panel">
+          <div class="section-head compact"><div><h2>ETF flows institucionais</h2><p>Fluxos publicos de ETFs, sem chave de API ou assinatura paga.</p></div><span id="institutionalStatus">--</span></div>
+          <div class="connector-grid">
+            <div class="connector-block">
+              <div class="mini-head"><span>Crypto ETF flows</span><strong id="etfStatus">--</strong></div>
+              <div id="etfFlowList" class="institutional-list"></div>
+            </div>
+          </div>
+          <p id="institutionalCaption" class="mini-caption">--</p>
+        </div>
+      </section>
+
+      <section class="deep-dive-grid view-asset" data-asset-panel="macro">
+        <div class="panel money-flow-panel">
+          <div class="section-head compact"><div><h2>Mapa de fluxo de capital</h2><p>Rotacao relativa; variacao de market cap nao equivale a fluxo financeiro literal.</p></div><span id="moneyFlowRegime">--</span></div>
+          <div id="moneyFlowGrid" class="flow-map"></div>
+        </div>
+        <div class="panel tradfi-panel">
+          <div class="section-head compact"><div><h2>Acoes e mercados correlatos</h2><p>Proxies de empresas cripto, tecnologia e liquidez global.</p></div><span id="tradfiStatus">--</span></div>
+          <div id="tradfiGrid" class="tradfi-grid"></div>
+        </div>
+        <div class="panel coverage-panel">
+          <div class="section-head compact"><div><h2>Cobertura analitica</h2><p>Dados presentes, ausentes e impacto sobre a confianca.</p></div><span id="coverageSummary">--</span></div>
+          <div id="coverageGrid" class="coverage-grid"></div>
+        </div>
+      </section>
+
+      <section class="calculator-shell view-asset" data-asset-panel="calculator">
+        <div class="panel position-calculator">
+          <div class="section-head compact"><div><h2>Calculadora de preco medio e risco</h2><p>Spot e futuros com taxas, funding, margem e manutencao configuraveis.</p></div><span id="calculatorModeLabel">Spot</span></div>
+          <div class="calculator-grid">
+            <label><span>Modalidade</span><select id="calcMode"><option value="spot">Spot</option><option value="futures">Futuros</option></select></label>
+            <label><span>Direcao</span><select id="calcSide"><option value="long">Long / compra</option><option value="short">Short / venda</option></select></label>
+            <label><span>Quantidade atual</span><input id="calcCurrentQty" type="number" min="0" step="any" value="1" /></label>
+            <label><span>Preco medio atual</span><input id="calcCurrentPrice" type="number" min="0" step="any" value="98000" /></label>
+            <label><span>Nova compra em x da quantidade inicial</span><input id="calcAddMultiple" type="number" min="0" step="0.1" value="3" /></label>
+            <label><span>Preco da nova entrada</span><input id="calcAddPrice" type="number" min="0" step="any" value="60000" /></label>
+            <label><span>Taxa de entrada (%)</span><input id="calcEntryFee" type="number" min="0" step="0.001" value="0.1" /></label>
+            <label><span>Taxa de saida (%)</span><input id="calcExitFee" type="number" min="0" step="0.001" value="0.1" /></label>
+            <label><span>Alavancagem</span><input id="calcLeverage" type="number" min="1" max="125" step="1" value="1" /></label>
+            <label><span>Funding por periodo (%)</span><input id="calcFunding" type="number" step="0.0001" value="0" /></label>
+            <label><span>Periodos de funding</span><input id="calcFundingPeriods" type="number" min="0" step="1" value="0" /></label>
+            <label><span>Margem de manutencao (%)</span><input id="calcMaintenance" type="number" min="0" step="0.01" value="0.4" /></label>
+          </div>
+          <div class="calculator-results">
+            <div><span>Quantidade final</span><strong id="calcFinalQty">--</strong></div>
+            <div><span>Preco medio com taxa</span><strong id="calcAveragePrice">--</strong></div>
+            <div><span>Notional total</span><strong id="calcNotional">--</strong></div>
+            <div><span>Taxas + funding</span><strong id="calcFees">--</strong></div>
+            <div><span>Margem inicial</span><strong id="calcMargin">--</strong></div>
+            <div><span>Break-even estimado</span><strong id="calcBreakEven">--</strong></div>
+            <div><span>Liquidacao estimada</span><strong id="calcLiquidation">--</strong></div>
+          </div>
+          <p id="calculatorNote" class="mini-caption">As taxas exatas dependem do VIP, maker/taker, desconto BNB, bracket de manutencao e modo de margem da conta.</p>
+        </div>
+      </section>
+      <footer class="status-bar"><span id="statusText">Inicializando painel...</span><span>Mercado: 3s | liquidacoes: live | opcoes: 1min | MTF: 1min | on-chain: 15min | sinal analitico, nao recomendacao</span></footer>
     </main>
     <script src="app.js"></script>
   </body>

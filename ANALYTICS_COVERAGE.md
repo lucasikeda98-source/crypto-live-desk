@@ -1,0 +1,242 @@
+# Crypto Live Desk - cobertura analitica
+
+## Principios
+
+- O score mede confluencia, nao probabilidade garantida de lucro.
+- Dados ausentes sao neutros e reduzem a confianca; nao recebem nota negativa.
+- Market cap perdido nao representa, por si so, dinheiro que saiu do ativo.
+- Padroes graficos sao hipoteses. Um padrao so e operacional depois de confirmacao no fechamento, volume e invalidacao objetiva.
+- Liquidacoes, fluxo de exchanges e opcoes nao devem ser estimados sem uma fonte propria.
+
+## Score do radar multiativos
+
+O radar usa o mesmo conjunto de pesos para todos os ativos e renormaliza apenas pelos blocos presentes.
+
+| Bloco | Peso | Dados |
+| --- | ---: | --- |
+| Tecnica do timeframe | 30% | EMAs, RSI, MACD, ADX e estrutura |
+| Fluxo | 15% | Delta taker aproximado, volume e CMF |
+| Derivativos | 10% | Funding e basis Binance |
+| Fundamental/contexto | 15% | CoinGecko e DeFiLlama por ativo/rede |
+| Macro e noticias | 10% | Sentimento, Treasury, VIX, TradFi e RSS |
+| Historico | 15% | Regimes semelhantes no historico diario completo |
+| Momentum de 24h | 5% | Ticker Binance |
+
+Formula:
+
+score = soma(score_normalizado_do_bloco * peso_disponivel) / soma(pesos_disponiveis)
+
+confianca = soma(pesos_disponiveis)
+
+Os thresholds atuais sao:
+
+- >= +35: vies comprador.
+- <= -35: vies vendedor.
+- Entre os dois: neutro.
+
+## Dados conectados e utilizados
+
+### Binance Spot
+
+- Candles OHLCV e quote volume.
+- Numero de trades.
+- Taker buy base volume.
+- Ticker 24h, range, VWAP e volume.
+- Livro de ofertas com profundidade de 0,1% e 0,5%.
+- Spread, microprice e slippage aproximado.
+- Historico diario completo por ativo.
+- Todos os timeframes publicos: 1s a 1M.
+
+### Binance Futures
+
+- Open interest atual e historico.
+- Funding atual e historico.
+- Premium, mark price, index price e basis.
+- Long/short global.
+- Long/short de contas de top traders.
+- Long/short das posicoes de top traders.
+- Taker buy/sell ratio.
+- Liquidacoes reais observadas pelo stream forceOrder do par.
+
+### Deribit
+
+- DVOL e variacao de sete dias.
+- Open interest e volume put/call.
+- IV ATM e IV ponderada.
+- Max pain aproximado por open interest.
+- Expected move ate o vencimento.
+- Delta, gamma, vega e theta das opcoes ATM.
+
+### Coin Metrics Community
+
+- Enderecos ativos.
+- Transacoes.
+- Valor transferido ajustado.
+- Fees em USD.
+- MVRV e NVT quando cobertos pelo ativo.
+- Exchange inflows, outflows, netflow e supply em exchanges quando cobertos.
+
+### DeFiLlama
+
+- TVL por rede e protocolo.
+- Stablecoin supply e variacoes.
+- Volume DEX e variacao.
+- Fees e open interest de perps DeFi.
+
+### Macro, noticias e mercados correlatos
+
+- US Treasury 2Y, 10Y e 30Y.
+- Curva 10Y-2Y.
+- VIX e variacao de cinco dias.
+- Fear & Greed.
+- Mercado global CoinGecko/CoinPaprika.
+- RSS cripto e macro.
+- COIN, MSTR, MARA, RIOT, HOOD, NVDA, QQQ, SPY, GLD e TLT em fechamento diario.
+
+## Indicadores calculados atualmente
+
+### Tendencia e estrutura
+
+- EMA 9, 20, 21, 50 e 200.
+- Golden cross e death cross.
+- ADX, DI+ e DI-.
+- Supertrend.
+- Ichimoku.
+- Donchian e Keltner.
+- HH/HL, LH/LL e range.
+- Suportes, resistencias e pivots.
+- Fibonacci no grafico.
+- Regime estrutural, forca e volatilidade.
+
+### Momentum
+
+- RSI de Wilder.
+- Stochastic RSI.
+- MACD e histograma.
+- MFI.
+- ROC.
+- Williams %R.
+- CCI.
+- Z-score.
+
+### Volume, fluxo e execucao
+
+- Volume relativo.
+- OBV.
+- CMF.
+- Delta taker aproximado.
+- VWAP movel.
+- Volume profile POC aproximado.
+- Imbalance do livro.
+- Microprice, spread e slippage.
+
+### Volatilidade
+
+- ATR de Wilder.
+- Bollinger Bands, %B e bandwidth.
+- Volatilidade realizada anualizada.
+- Squeeze por Bollinger/Keltner.
+
+### Smart money e padroes
+
+- Sweeps de maxima/minima.
+- Fair value gaps.
+- Deslocamento por corpo, ATR e volume.
+- Fases de preco + OI.
+- Topo/fundo duplo.
+- OCO/OCO invertido potencial.
+- Cunhas.
+- Bull trap e bear trap.
+- Doji, martelo e estrela cadente.
+
+## Indicadores adicionais calculaveis com a base atual
+
+### Preco e tendencia
+
+- SMA, WMA, HMA, DEMA e TEMA.
+- Parabolic SAR.
+- Aroon e Vortex.
+- Choppiness Index.
+- TRIX, TSI e KST.
+- Elder Ray e Fisher Transform.
+- Pivot points classicos, Camarilla e Woodie.
+- Canais de regressao e slope normalizado por ATR.
+
+### Volume e microestrutura
+
+- Accumulation/Distribution Line.
+- Chaikin Oscillator.
+- Force Index e Ease of Movement.
+- Volume Price Trend.
+- Negative/Positive Volume Index.
+- Klinger Volume Oscillator.
+- Anchored VWAP por pivot, rompimento ou evento.
+- Value Area High/Low e volume profile por sessao.
+- CVD aproximado por candles.
+- Book imbalance por multiplas bandas e resiliencia do book.
+
+### Volatilidade e risco
+
+- Parkinson, Garman-Klass, Rogers-Satchell e Yang-Zhang.
+- Percentil de volatilidade.
+- Volatility cone por timeframe.
+- Ulcer Index.
+- Calmar, Sortino e Sharpe historicos.
+- Expected shortfall e Value at Risk.
+- Maximum adverse/favorable excursion por setup.
+
+### Cross-asset
+
+- Correlacao e beta rolantes contra BTC, ETH, QQQ, SPY, GLD e TLT.
+- Forca relativa contra BTC e ETH.
+- Breadth de altcoins.
+- Dispersao de retornos.
+- Regimes de dominancia e rotacao.
+- Lead/lag entre cripto, mineradoras e Nasdaq.
+
+### Derivativos
+
+- Funding anualizado e percentil historico.
+- Z-score do open interest.
+- Divergencias preco/OI.
+- Basis anualizada.
+- Crowding entre global e top traders.
+- Alavancagem implicita por OI/volume.
+- Probabilidade historica de squeeze, validada por eventos observados.
+
+## Gaps que exigem outra fonte
+
+### Dados que nao devem ser fabricados
+
+- Liquidation heatmap historico e liquidacoes por nivel futuro.
+- Carteiras rotuladas de baleias e entidades, mantidas fora do produto enquanto nao houver uma fonte gratuita auditavel.
+- Fluxos por exchange individual alem da cobertura agregada da Coin Metrics.
+- Detalhamento por ticker de ETF quando a fonte publica nao fornecer a abertura.
+- Skew 25-delta e term structure completos sem consolidacao adicional.
+- Livro consolidado de varias exchanges.
+- Taxa exata da conta Binance.
+- Brackets exatos de manutencao e preco oficial de liquidacao da posicao.
+
+### Fontes gratuitas candidatas
+
+- FRED, BLS, ECB e bancos centrais: calendario e series macro publicas.
+- CFTC e SEC: posicionamento, filings e eventos regulatorios publicos.
+- APIs publicas de exchanges: livro, trades, derivativos e liquidacoes observadas em tempo real.
+- DeFiLlama e protocolos: TVL, stablecoins, bridges, DEX e fees publicos.
+- Binance autenticada, somente leitura e no backend: comissoes, VIP e brackets da propria conta.
+
+## Conector institucional gratuito
+
+- CryptoETF public MCP: fluxos diarios de ETFs de BTC, ETH, SOL, XRP e HYPE sem chave.
+- Nao ha dependencia de API paga nesse bloco.
+
+## Roadmap recomendado
+
+1. Backtesting walk-forward por ativo, timeframe e regime.
+2. Registro de cada sinal, versao do modelo e resultado posterior.
+3. Calibracao de probabilidade, nao apenas score.
+4. Alertas por mudanca de regime e nao por oscilacao de um unico indicador.
+5. Portfolio risk: correlacao, exposicao agregada, drawdown e risco por setor.
+6. Calendario de eventos: macro, unlocks, upgrades, julgamentos e earnings.
+7. Manter liquidation heatmap, skew completo e whales rotuladas fora do score ate existir uma fonte gratuita auditavel.
+8. Integracao autenticada isolada no servidor para taxas reais da conta, sem expor chaves no navegador.
