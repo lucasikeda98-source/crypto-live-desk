@@ -23,8 +23,15 @@ const apiHandlers = {
 };
 
 const server = http.createServer((request, response) => {
-  const requestUrl = new URL(request.url || '/', `http://${host}:${port}`);
-  const pathname = decodeURIComponent(requestUrl.pathname);
+  let requestUrl;
+  let pathname;
+  try {
+    requestUrl = new URL(request.url || '/', `http://${host}:${port}`);
+    pathname = decodeURIComponent(requestUrl.pathname);
+  } catch (error) {
+    response.writeHead(400).end('Bad request');
+    return;
+  }
   if (apiHandlers[pathname]) {
     const handler = require(apiHandlers[pathname]);
     request.query = Object.fromEntries(requestUrl.searchParams.entries());
@@ -45,6 +52,11 @@ const server = http.createServer((request, response) => {
   const relative = path.relative(root, filename);
   if (relative.startsWith('..') || path.isAbsolute(relative)) {
     response.writeHead(403).end('Forbidden');
+    return;
+  }
+  const hasHiddenSegment = relative.split(path.sep).some((segment) => segment.startsWith('.'));
+  if (hasHiddenSegment) {
+    response.writeHead(404).end('Not found');
     return;
   }
   fs.readFile(filename, (error, data) => {

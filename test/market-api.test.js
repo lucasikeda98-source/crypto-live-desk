@@ -27,9 +27,9 @@ test('rota de mercado preserva observedAt e declara fallback stale', async () =>
     throw new Error('URL inesperada');
   };
 
-  delete require.cache[require.resolve('../api/market')];
-  const handler = require('../api/market');
   try {
+    delete require.cache[require.resolve('../api/market')];
+    const handler = require('../api/market');
     const first = responseMock();
     await handler({ method: 'GET' }, first);
     assert.equal(first.statusCode, 200);
