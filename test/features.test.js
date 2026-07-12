@@ -79,6 +79,30 @@ test('journal: resumo por faixa separa avaliados e acertos', () => {
   assert.equal(bear.hits, 1, 'score negativo acerta quando o retorno e negativo');
 });
 
+test('journal: avaliacao precoce nao congela horizontes futuros', () => {
+  const hour = 3600000;
+  const record = { signalCloseTime: 0, price: 100 };
+  // 2h depois do sinal: so r1h decorrido
+  assert.equal(core.signalOutcomePending({ ...record, outcome: null }, 2 * hour), true);
+  const early = { r1h: 2, r24h: null, r7d: null };
+  assert.equal(core.signalOutcomePending({ ...record, outcome: early }, 2 * hour), false, 'r1h avaliado e r24h/r7d ainda nao venceram');
+  assert.equal(core.signalOutcomePending({ ...record, outcome: early }, 25 * hour), true, 'r24h venceu e continua null -> volta a ser pendente');
+  const merged = core.mergeSignalOutcome(early, { r1h: null, r24h: -3, r7d: null });
+  assert.deepEqual(merged, { r1h: 2, r24h: -3, r7d: null }, 'merge preserva horizontes ja preenchidos');
+  assert.equal(core.signalOutcomePending({ ...record, outcome: { r1h: 1, r24h: 2, r7d: 3 } }, 999 * hour), false);
+});
+
+test('alertas: troca de timeframe nunca gera transicao', () => {
+  const previous = { symbol: 'BTCUSDT', interval: '15m', setupScore: 30, bias: 'Neutro', regime: 'Range' };
+  const current = { symbol: 'BTCUSDT', interval: '1d', setupScore: 65, bias: 'Comprador', regime: 'Tendencia' };
+  assert.equal(core.evaluateAlertTransitions(previous, current, {}).length, 0);
+});
+
+test('protocolo: entrada null na lista nao derruba o match explicito', () => {
+  const result = core.findProtocolMatch([null, { name: 'AAVE', tvl: 2e10 }], ['aave'], []);
+  assert.equal(result.name, 'AAVE');
+});
+
 test('alertas: disparam somente em transicao, nunca por nivel persistente', () => {
   const previous = { symbol: 'BTCUSDT', setupScore: 40, bias: 'Neutro', regime: 'Range', funding: 0.0001, liquidation15m: 0 };
   const crossed = { ...previous, setupScore: 45 };

@@ -112,11 +112,19 @@
     var fetched = timestampMs(dataset.fetchedAt);
     return Number.isFinite(fetched) ? 'f' + fetched : 'na';
   }
+  function mtfInputStamp() {
+    var multi = state.mtf;
+    if (!multi || !multi.rows || !multi.rows.length) return 'na';
+    return multi.rows.map(function (row) { return row.interval + '@' + (Number.isFinite(row.closeTime) ? row.closeTime : 'x'); }).join(',');
+  }
   /**
-   * The snapshot id is derived only from the identity of the INPUTS
-   * (symbol, interval, closed candle and each dataset's observation stamp),
-   * never from the calculation time: the same inputs always produce the
-   * same id, and any input change produces a new one.
+   * The snapshot id is derived only from the identity of the discrete INPUTS
+   * (symbol, interval, closed candle, each dataset's observation stamp and
+   * the multi-timeframe closed candles), never from the calculation time:
+   * the same inputs always produce the same id. Continuous real-time blocks
+   * (order book depth, liquidation stream) are intentionally excluded per
+   * contract section 5 — they carry their own observation times and would
+   * make every 3s cycle a "new" snapshot.
    */
   function buildInputSnapshotId(analysis, snapshot) {
     return [
@@ -132,6 +140,7 @@
       'ext' + (state.external && state.external.fetchedAt ? state.external.fetchedAt : 'na'),
       'news' + (state.newsFetchedAt || 'na'),
       'mode' + state.newsMode,
+      'mtf' + mtfInputStamp(),
       'hist' + (analysis.history && Number.isFinite(timestampMs(analysis.history.observedAt)) ? timestampMs(analysis.history.observedAt) : 'na')
     ].join(':');
   }
@@ -1155,7 +1164,7 @@
     score += a.structure === 'HH/HL' ? 5 : a.structure === 'LH/LL' ? -5 : 0;
     score = clamp(Math.round(score), -50, 50);
     var cross = (a.patterns || []).find(function (pattern) { return pattern.name === 'Golden cross' || pattern.name === 'Death cross'; });
-    return { interval: interval, score: score, bias: score >= 12 ? 'Alta' : score <= -12 ? 'Baixa' : 'Neutro', close: a.close, rsi: a.rsi14, adx: a.adx.adx, macd: a.macd.hist, structure: a.structure, regime: a.regime, cross: cross ? cross.name : (Number.isFinite(a.ema200) ? (a.ema50 >= a.ema200 ? 'EMA50 > EMA200' : 'EMA50 < EMA200') : 'sem EMA200'), patterns: (a.patterns || []).slice(0, 3) };
+    return { interval: interval, score: score, bias: score >= 12 ? 'Alta' : score <= -12 ? 'Baixa' : 'Neutro', close: a.close, closeTime: candles.length ? last(candles).closeTime : NaN, rsi: a.rsi14, adx: a.adx.adx, macd: a.macd.hist, structure: a.structure, regime: a.regime, cross: cross ? cross.name : (Number.isFinite(a.ema200) ? (a.ema50 >= a.ema200 ? 'EMA50 > EMA200' : 'EMA50 < EMA200') : 'sem EMA200'), patterns: (a.patterns || []).slice(0, 3) };
   }
   function summarizeMultiTimeframe(rows) {
     var weights = { '1s': 0.02, '1m': 0.04, '3m': 0.05, '5m': 0.06, '15m': 0.10, '30m': 0.12, '1h': 0.16, '2h': 0.18, '4h': 0.22, '6h': 0.23, '8h': 0.24, '12h': 0.25, '1d': 0.28, '3d': 0.30, '1w': 0.34, '1M': 0.36 };
@@ -1931,7 +1940,6 @@
     var mtf = await loadMultiTimeframe(symbol, interval, false, closedCandles);
     if (!refreshGate.isCurrent(requestId)) return false;
     attachHistory(analysis, state.historyProfiles[symbol]);
-    stampAnalysisSnapshot(analysis, 'selected-refresh', { symbol: symbol, interval: interval, requestId: requestId, signalCloseTime: analysis.signalCandle.closeTime });
     state.klines = candles;
     state.analysis = analysis;
     state.coinMetrics = coinMetrics;
@@ -1940,6 +1948,7 @@
     state.institutional = institutional;
     state.institutionalFetchedAt = institutional ? Date.now() : state.institutionalFetchedAt;
     state.mtf = mtf;
+    stampAnalysisSnapshot(analysis, 'selected-refresh', { symbol: symbol, interval: interval, requestId: requestId, signalCloseTime: analysis.signalCandle.closeTime });
     render(value(results[3]), value(results[4]), value(results[2]), chain || {}, value(results[1]));
     maybeRecordSignal(analysis, confluenceFor(analysis));
     processAlerts(analysis, confluenceFor(analysis));
@@ -2861,9 +2870,16 @@
   }
   var SIGNAL_JOURNAL_KEY = 'cld-signal-journal:' + MODEL_VERSION;
   var SIGNAL_JOURNAL_CAP = 500;
+  function validSignalRecord(record) {
+    return !!(record && typeof record === 'object'
+      && typeof record.symbol === 'string' && record.symbol
+      && typeof record.interval === 'string' && record.interval
+      && Number.isFinite(+record.signalCloseTime)
+      && Number.isFinite(+record.price));
+  }
   function loadSignalJournal() {
     var records = safeStorageGet(SIGNAL_JOURNAL_KEY);
-    return Array.isArray(records) ? records : [];
+    return Array.isArray(records) ? records.filter(validSignalRecord) : [];
   }
   function saveSignalJournal(records) {
     safeStorageSet(SIGNAL_JOURNAL_KEY, records.slice(-SIGNAL_JOURNAL_CAP));
@@ -2902,9 +2918,9 @@
     var visible = records.slice(-40).reverse();
     var pct = function (value) { return value === null || value === undefined ? '--' : percent(+value, 2); };
     rows.innerHTML = visible.length ? visible.map(function (record) {
-      return '<tr><td>' + new Date(record.recordedAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + '</td><td>' + escapeHTML(baseAsset(record.symbol)) + '</td><td>' + escapeHTML(intervalLabel(record.interval)) + '</td><td>' + signed(record.setupScore) + '</td><td>' + record.dataConfidence + '%</td><td>' + escapeHTML(record.decision) + '</td><td>' + money(record.price) + '</td><td>' + pct(record.outcome && record.outcome.r1h) + '</td><td>' + pct(record.outcome && record.outcome.r24h) + '</td><td>' + pct(record.outcome && record.outcome.r7d) + '</td></tr>';
+      return '<tr><td>' + new Date(record.recordedAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + '</td><td>' + escapeHTML(baseAsset(record.symbol)) + '</td><td>' + escapeHTML(intervalLabel(record.interval)) + '</td><td>' + (Number.isFinite(+record.setupScore) ? signed(+record.setupScore) : '--') + '</td><td>' + (Number.isFinite(+record.dataConfidence) ? num(+record.dataConfidence, 0) : '--') + '%</td><td>' + escapeHTML(record.decision) + '</td><td>' + money(record.price) + '</td><td>' + pct(record.outcome && record.outcome.r1h) + '</td><td>' + pct(record.outcome && record.outcome.r24h) + '</td><td>' + pct(record.outcome && record.outcome.r7d) + '</td></tr>';
     }).join('') : '<tr><td colspan="10">Nenhum sinal registrado ainda nesta versao do modelo.</td></tr>';
-    var pending = records.filter(function (record) { return !record.outcome && Date.now() - record.signalCloseTime > 3600000; }).length;
+    var pending = records.filter(function (record) { return AnalyticsCore.signalOutcomePending(record, Date.now()); }).length;
     text('signalsStatus', records.length + ' sinais registrados (' + MODEL_VERSION + ') | ' + pending + ' aguardando avaliacao | avaliacao busca candles 1h da Binance sob demanda.');
     var summaryRows = $('signalSummaryRows');
     if (summaryRows) {
@@ -2917,8 +2933,8 @@
   }
   async function evaluateSignalOutcomes() {
     var records = loadSignalJournal();
-    var pending = records.filter(function (record) { return !record.outcome && Date.now() - record.signalCloseTime > 3600000; }).slice(0, 10);
-    if (!pending.length) { text('signalsStatus', 'Nenhum sinal pendente com pelo menos 1h decorrida.'); return; }
+    var pending = records.filter(function (record) { return AnalyticsCore.signalOutcomePending(record, Date.now()); }).slice(0, 10);
+    if (!pending.length) { text('signalsStatus', 'Nenhum sinal pendente: todos os horizontes ja decorridos foram avaliados.'); return; }
     text('signalsStatus', 'Avaliando ' + pending.length + ' sinais...');
     for (var index = 0; index < pending.length; index += 1) {
       var record = pending[index];
@@ -2929,7 +2945,11 @@
         if (outcome) {
           var stored = loadSignalJournal();
           var match = stored.find(function (row) { return row.inputSnapshotId === record.inputSnapshotId && row.signalCloseTime === record.signalCloseTime; });
-          if (match) { match.outcome = outcome; match.evaluatedAt = Date.now(); saveSignalJournal(stored); }
+          if (match) {
+            match.outcome = AnalyticsCore.mergeSignalOutcome(match.outcome, outcome);
+            match.evaluatedAt = Date.now();
+            saveSignalJournal(stored);
+          }
         }
       } catch (error) { /* fonte indisponivel; tenta na proxima avaliacao */ }
     }
@@ -2945,6 +2965,7 @@
     var liq = liquidationSummary();
     return {
       symbol: analysis.snapshot ? analysis.snapshot.symbol : state.symbol,
+      interval: analysis.snapshot ? analysis.snapshot.interval : state.interval,
       setupScore: confluence.total,
       bias: analysis.bias,
       regime: analysis.regime,
@@ -2962,12 +2983,13 @@
   function processAlerts(analysis, confluence) {
     if (!analysis || !confluence) return;
     var current = captureAlertSnapshot(analysis, confluence);
-    var previous = alertState.lastBySymbol[current.symbol];
-    alertState.lastBySymbol[current.symbol] = current;
+    var stateKey = current.symbol + ':' + current.interval;
+    var previous = alertState.lastBySymbol[stateKey];
+    alertState.lastBySymbol[stateKey] = current;
     if (!previous) return;
     var alerts = AnalyticsCore.evaluateAlertTransitions(previous, current, alertRulesConfig());
     alerts.forEach(function (alert) {
-      var key = alert.id + ':' + current.symbol;
+      var key = alert.id + ':' + stateKey;
       var lastFired = alertState.lastFiredAt[key] || 0;
       if (Date.now() - lastFired < 300000) return;
       alertState.lastFiredAt[key] = Date.now();
@@ -3022,7 +3044,11 @@
       var id = benchmark === 'BTCUSDT' ? 'corrBtcLine' : 'corrEthLine';
       if (state.symbol === benchmark) { text(id, '1.00 (proprio)'); return; }
       var benchCandles = boardClosedCandles(benchmark);
-      if (!benchCandles || !ownCandles.length) { text(id, '--'); return; }
+      if (!benchCandles || !ownCandles.length) {
+        text(id, '--');
+        if (benchmark === 'BTCUSDT') { text('betaBtcLine', '--'); text('rsBtcLine', '--'); }
+        return;
+      }
       var aligned = AnalyticsCore.alignedReturns(ownCandles, benchCandles);
       var correlation = AnalyticsCore.pearsonCorrelation(aligned.returnsA, aligned.returnsB);
       text(id, Number.isFinite(correlation) ? num(correlation, 2) + ' (' + aligned.samples + ' retornos)' : '--');
