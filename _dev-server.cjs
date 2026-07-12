@@ -11,8 +11,16 @@ const contentTypes = {
 
 http.createServer((request, response) => {
   const pathname = decodeURIComponent(request.url.split('?')[0]);
-  if (pathname === '/api/news' || pathname === '/api/macro' || pathname === '/api/tradfi' || pathname === '/api/options' || pathname === '/api/institutional') {
-    const handler = require(pathname === '/api/news' ? './api/news' : pathname === '/api/macro' ? './api/macro' : pathname === '/api/tradfi' ? './api/tradfi' : pathname === '/api/options' ? './api/options' : './api/institutional');
+  const apiHandlers = {
+    '/api/news': './api/news',
+    '/api/macro': './api/macro',
+    '/api/tradfi': './api/tradfi',
+    '/api/options': './api/options',
+    '/api/institutional': './api/institutional',
+    '/api/market': './api/market',
+  };
+  if (apiHandlers[pathname]) {
+    const handler = require(apiHandlers[pathname]);
     request.query = Object.fromEntries(new URL(request.url, 'http://127.0.0.1').searchParams.entries());
     response.status = (statusCode) => { response.statusCode = statusCode; return response; };
     response.json = (payload) => {

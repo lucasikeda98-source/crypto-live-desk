@@ -101,6 +101,7 @@
   function biasFromScore(score) { return score >= 35 ? 'Comprador' : score <= -35 ? 'Vendedor' : 'Neutro'; }
   function compactNumber(n) { return Number.isFinite(n) ? new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 2 }).format(n) : '--'; }
   function compactUsd(n) { return Number.isFinite(n) ? '$' + compactNumber(n) : '--'; }
+  function intervalLabel(interval) { return interval === '1m' ? '1 min' : interval === '1M' ? '1 mes' : interval; }
   function normKey(value) { return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
   function sourceRow(name, ok, detail) { return { name: name, ok: !!ok, detail: detail || (ok ? 'online' : 'sem leitura') }; }
   function health(name, ok, detail) {
@@ -782,22 +783,11 @@
       }
     };
   }
-  function geckoIds() {
-    var seen = {};
-    return ASSETS.map(function (symbol) { return contextFor(symbol).gecko; }).filter(function (id) {
-      if (!id || seen[id]) return false;
-      seen[id] = true;
-      return true;
-    }).join(',');
-  }
   async function loadExternalContext(force) {
     if (!force && Date.now() - state.externalFetchedAt < EXTERNAL_REFRESH_MS && state.external && state.external.fetchedAt) return state.external;
-    var ids = geckoIds();
     var rows = await Promise.allSettled([
       fetchJSON('https://api.alternative.me/fng/?limit=1', 9000, 'Alternative.me'),
-      fetchJSON('https://api.coingecko.com/api/v3/global', 9000, 'CoinGecko'),
-      fetchJSON('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=' + encodeURIComponent(ids) + '&order=market_cap_desc&per_page=100&page=1&sparkline=false&price_change_percentage=1h,24h,7d,30d', 11000, 'CoinGecko'),
-      fetchJSON('https://api.coingecko.com/api/v3/search/trending', 9000, 'CoinGecko'),
+      fetchJSON('/api/market', 22000, 'Market data'),
       fetchJSON('https://api.llama.fi/v2/chains', 11000, 'DefiLlama'),
       fetchJSON('https://api.llama.fi/protocols', 12000, 'DefiLlama'),
       fetchJSON('https://stablecoins.llama.fi/stablecoins?includePrices=true', 14000, 'DefiLlama stablecoins'),
@@ -819,20 +809,20 @@
     if (fng && fng.data && fng.data[0]) {
       external.fearGreed = { value: +fng.data[0].value, label: fng.data[0].value_classification || '--', timestamp: +fng.data[0].timestamp * 1000, next: +fng.data[0].time_until_update || NaN };
     }
-    var global = value(rows[1]);
-    if (global && global.data) external.global = global.data;
-    (value(rows[2]) || []).forEach(function (coin) { if (coin && coin.id) external.coinMarkets[coin.id] = coin; });
-    var trending = value(rows[3]);
+    var marketBundle = value(rows[1]) || {};
+    if (marketBundle.global && marketBundle.global.data) external.global = marketBundle.global.data;
+    (marketBundle.markets || []).forEach(function (coin) { if (coin && coin.id) external.coinMarkets[coin.id] = coin; });
+    var trending = marketBundle.trending;
     if (trending && trending.coins) external.trending = trending.coins.map(function (row) { return row.item || row; }).filter(Boolean).slice(0, 8);
-    external.chains = Array.isArray(value(rows[4])) ? value(rows[4]) : [];
-    external.protocols = Array.isArray(value(rows[5])) ? value(rows[5]) : [];
-    external.stablecoins = value(rows[6]);
-    external.dex = value(rows[7]);
-    external.paprikaGlobal = value(rows[8]);
-    external.fees = value(rows[9]);
-    external.perpsOi = value(rows[10]);
-    external.macro = value(rows[11]);
-    external.tradfi = value(rows[12]);
+    external.chains = Array.isArray(value(rows[2])) ? value(rows[2]) : [];
+    external.protocols = Array.isArray(value(rows[3])) ? value(rows[3]) : [];
+    external.stablecoins = value(rows[4]);
+    external.dex = value(rows[5]);
+    external.paprikaGlobal = value(rows[6]);
+    external.fees = value(rows[7]);
+    external.perpsOi = value(rows[8]);
+    external.macro = value(rows[9]);
+    external.tradfi = value(rows[10]);
     external.defiTvl = external.chains.reduce(function (sum, chain) { return sum + (+chain.tvl || 0); }, 0);
     external.stablecoinCap = stablecoinCap(external.stablecoins);
     external.stablecoinChanges = stablecoinChanges(external.stablecoins);
@@ -842,7 +832,7 @@
     external.perpsOpenInterest = overviewTotal(external.perpsOi);
     external.sources = [
       sourceRow('Alternative.me', !!external.fearGreed, external.fearGreed ? external.fearGreed.label + ' ' + external.fearGreed.value : 'falhou'),
-      sourceRow('CoinGecko', !!(external.global || Object.keys(external.coinMarkets).length), Object.keys(external.coinMarkets).length + ' ativos'),
+      sourceRow('Market data', !!(external.global || Object.keys(external.coinMarkets).length), (marketBundle.source || 'fonte publica') + ' | ' + Object.keys(external.coinMarkets).length + ' ativos'),
       sourceRow('DefiLlama', !!(external.chains.length || external.protocols.length), external.chains.length + ' chains'),
       sourceRow('DefiLlama stablecoins', Number.isFinite(external.stablecoinCap) && external.stablecoinCap > 0, compactUsd(+external.stablecoinCap)),
       sourceRow('DefiLlama DEX', Number.isFinite(external.dexVolume) && external.dexVolume > 0, compactUsd(+external.dexVolume) + ' 24h'),
@@ -1320,7 +1310,7 @@
       var card = entry.closest('.entry-card');
       if (card) card.className = 'entry-card ' + c.tone;
     }
-    text('confluenceSummary', 'Score composto para ' + state.symbol + ': ' + state.interval + ' com confirmacao 15m/1h/4h/1d/1w, historico, smart money e contexto atual.');
+    text('confluenceSummary', 'Score composto para ' + state.symbol + ': ' + intervalLabel(state.interval) + ' com confirmacao 15m/1h/4h/1d/1w, historico, smart money e contexto atual.');
     text('entryDecision', c.decision);
     text('entryScoreLine', 'Score ' + signed(c.total) + ' / 100 | confiabilidade dos dados ' + c.quality + '%');
     var bars = $('confluenceBars');
@@ -1348,7 +1338,11 @@
         return '<div class="news-item"><a href="' + escapeHTML(safeURL(item.url)) + '" target="_blank" rel="noreferrer">' + escapeHTML(item.title || 'Sem titulo') + '</a><small>' + escapeHTML(item.source || 'Fonte') + (time ? ' | ' + escapeHTML(time) : '') + '</small></div>';
       }).join('') : '<div class="news-item"><small>Sem noticias carregadas agora. Use o botao para tentar atualizar.</small></div>';
     }
-    var status = state.newsFetchedAt ? 'Noticias/macro: auto a cada 5 min. Ultima leitura ' + new Date(state.newsFetchedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + '.' : 'Noticias/macro: tentando carregar fontes externas.';
+    var status = state.newsMode !== 'auto'
+      ? 'Noticias/macro: modo ' + c.news.label.replace(/^manual /, '') + '.'
+      : state.newsFetchedAt
+        ? 'Noticias/macro: auto a cada 5 min. Ultima leitura ' + new Date(state.newsFetchedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + '.'
+        : 'Noticias/macro: tentando carregar fontes externas.';
     text('newsStatus', status);
   }
   function renderWrittenAnalysis(a) {
@@ -1368,7 +1362,7 @@
     var exchangeFlow = a.coinMetrics && a.coinMetrics.exchangeFlow, exchangeSentence = exchangeFlow && Number.isFinite(exchangeFlow.netflow7d) ? 'O netflow agregado de exchanges em 7 dias e ' + compactMoney(exchangeFlow.netflow7d) + ' (positivo significa entrada liquida em exchanges). ' : '';
     var liqSummary = liquidationSummary(), liquidationSentence = liqSummary.total ? 'Nos ultimos 15 minutos, o stream observou ' + compactMoney(liqSummary.longValue) + ' em longs e ' + compactMoney(liqSummary.shortValue) + ' em shorts liquidados. ' : '';
     var etfValue = latestEtfFlow(a.institutional || state.institutional), etfSentence = Number.isFinite(etfValue) ? 'O ultimo ETF net flow disponivel e ' + compactMoney(etfValue) + '. ' : '';
-    var body = 'No timeframe ' + state.interval + ', a leitura tecnica esta ' + technicalTone + ': estrutura ' + a.structure + ', preco ' + (a.close > a.vwap ? 'acima' : 'abaixo') + ' do VWAP, RSI em ' + num(a.rsi14, 1) + ', MACD ' + (a.macd.hist >= 0 ? 'positivo' : 'negativo') + ', ADX ' + num(a.adx.adx, 1) + ' e Supertrend em ' + a.supertrend.trend + '. ' +
+    var body = 'No timeframe ' + intervalLabel(state.interval) + ', a leitura tecnica esta ' + technicalTone + ': estrutura ' + a.structure + ', preco ' + (a.close > a.vwap ? 'acima' : 'abaixo') + ' do VWAP, RSI em ' + num(a.rsi14, 1) + ', MACD ' + (a.macd.hist >= 0 ? 'positivo' : 'negativo') + ', ADX ' + num(a.adx.adx, 1) + ' e Supertrend em ' + a.supertrend.trend + '. ' +
       'A confirmacao multi-timeframe esta em ' + c.multi.bias + ', com alinhamento de ' + Math.round(c.multi.alignment * 100) + '% e score ' + signed(c.multi.score) + '. ' +
       'O fluxo esta ' + flowTone + ', com delta taker de ' + num(a.deltaSum, 3) + ' ' + baseAsset(state.symbol) + ', CMF ' + num(a.cmf20, 2) + (Number.isFinite(volumeRatio) ? ' e volume em ' + num(volumeRatio, 2) + 'x a media recente. ' : '. ') +
       'Na leitura smart money, ' + c.smart.liquidity.toLowerCase() + ', fase de OI ' + c.smart.oiPhase + ' e ' + c.smart.imbalance.toLowerCase() + '. ' +
@@ -1421,9 +1415,11 @@
       renderConfluence(state.analysis);
       renderWrittenAnalysis(state.analysis);
       renderSetupQuality(state.analysis);
+      renderMacroFlow(state.analysis);
       updateScore(state.analysis);
     }
     renderBoard();
+    renderSourceHealth(state.external || {});
   }
   function refreshContextIfNeeded(force) {
     if (state.contextRefreshing) return;
@@ -1649,7 +1645,7 @@
     var rows = sortedBoard();
     var bulls = rows.filter(function (x) { return x.analysis.bias === 'Comprador'; }).length;
     var bears = rows.filter(function (x) { return x.analysis.bias === 'Vendedor'; }).length;
-    text('boardSummary', bulls + ' compradores, ' + bears + ' vendedores, ' + (rows.length - bulls - bears) + ' neutros em ' + state.interval + '. Score normalizado pela cobertura disponivel.');
+    text('boardSummary', bulls + ' compradores, ' + bears + ' vendedores, ' + (rows.length - bulls - bears) + ' neutros em ' + intervalLabel(state.interval) + '. Score normalizado pela cobertura disponivel.');
     rows.forEach(function (item) {
       var a = item.analysis, t = item.ticker || {};
       var market = state.external && state.external.coinMarkets ? state.external.coinMarkets[contextFor(item.symbol).gecko] : null;
@@ -1680,7 +1676,7 @@
   function render(ticker, premium, oi, chain, depth) {
     var a = state.analysis;
     var change = ticker ? +ticker.priceChangePercent : NaN;
-    text('chartTitle', 'Price Action ' + state.symbol);
+    text('chartTitle', 'Price Action ' + state.symbol + ' | ' + intervalLabel(state.interval));
     text('lastPrice', money(a.close));
     text('priceChange', percent(change) + ' 24h');
     $('priceChange').className = change >= 0 ? 'up' : 'down';
@@ -1777,7 +1773,7 @@
     var node = $('mtfMatrix');
     if (node) node.innerHTML = mtf && mtf.rows.length ? mtf.rows.map(function (row) {
       var cls = row.score >= 12 ? 'good' : row.score <= -12 ? 'bad' : '';
-      return '<div class="mtf-cell ' + cls + '"><span>' + escapeHTML(row.interval) + '</span><strong>' + escapeHTML(row.bias) + ' ' + signed(row.score) + '</strong><small>RSI ' + num(row.rsi, 0) + ' | ADX ' + num(row.adx, 0) + '</small></div>';
+      return '<div class="mtf-cell ' + cls + '"><span>' + escapeHTML(intervalLabel(row.interval)) + '</span><strong>' + escapeHTML(row.bias) + ' ' + signed(row.score) + '</strong><small>RSI ' + num(row.rsi, 0) + ' | ADX ' + num(row.adx, 0) + '</small></div>';
     }).join('') : '<div class="mtf-cell"><span>Aguardando</span><strong>--</strong></div>';
     text('mtfCaption', mtf ? mtf.positive + ' altas, ' + mtf.negative + ' baixas; peso maior para 4h, 1d e 1w.' : 'Carregando confirmacoes de tendencia.');
   }
@@ -1941,7 +1937,7 @@
       var header = '<div class="timeframe-row header"><span>TF</span><span>Bias</span><span>Score</span><span>RSI</span><span>ADX</span><span>Evento</span></div>';
       table.innerHTML = header + (mtf && mtf.rows.length ? mtf.rows.map(function (row) {
         var cls = row.score >= 12 ? 'good' : row.score <= -12 ? 'bad' : '';
-        return '<div class="timeframe-row"><strong>' + escapeHTML(row.interval) + '</strong><span class="' + cls + '">' + escapeHTML(row.bias) + '</span><span>' + signed(row.score) + '</span><span>' + num(row.rsi, 0) + '</span><span>' + num(row.adx, 0) + '</span><span>' + escapeHTML(row.cross || row.structure || '--') + '</span></div>';
+        return '<div class="timeframe-row"><strong>' + escapeHTML(intervalLabel(row.interval)) + '</strong><span class="' + cls + '">' + escapeHTML(row.bias) + '</span><span>' + signed(row.score) + '</span><span>' + num(row.rsi, 0) + '</span><span>' + num(row.adx, 0) + '</span><span>' + escapeHTML(row.cross || row.structure || '--') + '</span></div>';
       }).join('') : '<div class="timeframe-row"><span>--</span><span>Aguardando dados</span></div>');
     }
     var patterns = a.patterns || [];
@@ -2252,7 +2248,7 @@
     var institution = state.institutional || { configured: {} }, configured = institution.configured || {};
     var exchangeFlow = state.coinMetrics && state.coinMetrics.exchangeFlow;
     var sources = [
-      tracked('Binance spot', !!state.klines.length, state.interval + ' / ' + state.klines.length + ' candles'),
+      tracked('Binance spot', !!state.klines.length, intervalLabel(state.interval) + ' / ' + state.klines.length + ' candles'),
       tracked('Binance MTF', !!(state.mtf && state.mtf.rows.length), state.mtf ? state.mtf.rows.length + ' timeframes' : 'aguardando'),
       tracked('Binance futuros', hasDerivativeData(state.analysis && state.analysis.derivativeDetail), 'OI/funding/long-short'),
       tracked('Binance liquidations', state.liquidationConnected, state.liquidationConnected ? 'forceOrder live' : 'reconectando'),
