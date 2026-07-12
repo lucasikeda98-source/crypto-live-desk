@@ -46,7 +46,7 @@ node scripts/browser-smoke.cjs
 
 Os mesmos comandos estao disponiveis como `npm test` e `npm run test:browser` quando a politica do PowerShell permite executar `npm.ps1`.
 
-O workflow `.github/workflows/quality.yml` executa a suite deterministica em Node.js 22 a cada push e pull request. O smoke do Edge fica separado como canario local, pois depende de navegador e fontes externas reais.
+O workflow `.github/workflows/quality.yml` executa a suite deterministica em Node.js 22 (ubuntu) e o smoke do Edge headless (windows, com um retry por depender de fontes externas reais) em cada pull request; pushes diretos so disparam o workflow na branch `main`.
 
 ## Estrutura
 
@@ -57,9 +57,17 @@ O workflow `.github/workflows/quality.yml` executa a suite deterministica em Nod
 - `scripts/browser-smoke.cjs`: verificacao funcional no navegador.
 - `ANALYTICS_COVERAGE.md`: fontes e cobertura analitica.
 
+## Funcionalidades analiticas
+
+- Aba **Sinais**: registro local (por versao do modelo) de cada Setup Score confirmado por candle fechado, com avaliacao posterior do retorno em 1h/24h/7d e acerto por faixa de score. E a base de dados para o backtesting walk-forward futuro.
+- **Alertas** opcionais do navegador em transicoes confirmadas: cruzamento de score, mudanca de vies/regime, funding extremo e pico de liquidacoes.
+- **Exportar snapshot**: JSON auditavel com envelope completo (modelo, hash de regras, snapshot de entradas, contribuicoes por componente e frescor dos datasets).
+- **Correlacao cross-asset**: correlacao, beta e forca relativa vs BTC/ETH no timeframe atual e correlacao diaria vs QQQ/SPY.
+- Painel "Como este score foi calculado?": regra, contribuicao, limite, estado, escopo e fontes de cada componente, com reconciliacao da soma.
+
 ## Limites
 
 - Scores sao heuristicas direcionais, nao recomendacoes ou probabilidades calibradas.
 - Preco de liquidacao e aproximado; brackets e taxas reais dependem da conta.
-- Backtesting walk-forward, registro persistente de sinais e calibracao ainda fazem parte das proximas entregas.
-- A metadata Git possui uma copia de seguranca em `.gitdir` por causa de interferencia do OneDrive. Para confiabilidade duradoura, o repositorio deve ser clonado fora de uma pasta sincronizada.
+- Backtesting walk-forward e calibracao de probabilidade exigem meses de sinais acumulados pela aba Sinais; ainda nao ha validacao estatistica.
+- O diretorio Git real do repositorio e `.gitdir` (relocado por causa de interferencia do OneDrive). Para confiabilidade duradoura, o repositorio deve ser clonado fora de uma pasta sincronizada.
