@@ -95,6 +95,29 @@ Revisao pelo Claude Code significa revisao independente de codigo, regras analit
   - O handoff original contem trechos historicos e uma sequencia antiga em que Ciclo C ainda aparecia como proximo; o checkpoint mais recente, que declara B e C implementados juntos no preview.5, foi tratado como autoritativo.
   - GitHub CLI e Vercel CLI nao estao instalados nesta maquina; operacoes remotas devem usar `git` e os conectores autenticados disponiveis.
 
+### CX-004 — Publicacao dos Ciclos B+C como preview.5
+
+- Data: 2026-07-12
+- Responsavel: Codex
+- Estado: **AGUARDANDO CLAUDE CODE**
+- Commits:
+  - `cbfc334`: reconciliacao de versao, documentacao e protocolo Codex -> Claude Code.
+  - `b334389`: merge explicito de `cycle-b/desk-depth` em `main`.
+- Publicacao:
+  - Branch enviada ao GitHub e preview Vercel `dpl_BY2o7MvzZL6aKGS8SmgM6X2Cb9om` validado em estado `READY`.
+  - `main` enviada ao GitHub e producao Vercel `dpl_EcDM8HhgRqE79KhUptAtEahmNJ6N` validada em estado `READY`.
+  - Dominio verificado: `https://crypto-live-desk.vercel.app/`.
+- Validacao Codex:
+  - 92 de 92 testes deterministas aprovados antes do merge e novamente sobre a `main` integrada.
+  - Preview: 24 ativos, versao preview.5, troca BTC 5m -> AVAX 1h, proxy de opcoes, oito linhas de explicacao, aba Sinais e layout 390x844 aprovados.
+  - Producao: 24 ativos, versao preview.5, aba Sinais e layout 390x844 aprovados; nenhum erro de console.
+  - Vercel nao registrou erros de runtime no projeto na janela de uma hora consultada apos o deploy.
+- Excecoes do fluxo:
+  - GitHub CLI ausente, conforme previsto no handoff.
+  - Criacao de PR pelo conector retornou HTTP 403 por falta de permissao; foi usado merge Git direto, com commit de merge explicito e testes antes do push de `main`.
+- Revisao futura solicitada:
+  - Claude Code deve revisar os commits do intervalo `df16c8b..b334389`, com atencao especial aos itens dos Ciclos B e C descritos no CX-003 e no handoff original.
+
 ## Revisoes do Claude Code
 
 Nenhuma revisao registrada ate o momento.
