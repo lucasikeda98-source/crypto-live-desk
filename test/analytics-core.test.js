@@ -239,6 +239,226 @@ test('mempool BTC somente influencia o score nativo de Bitcoin', () => {
   assert.equal(altcoin.eligibleForScore, false);
 });
 
+// ===== Ciclo B: percentis, estrutura, divergencia, climax =====
+
+test('percentileRank: posicao do valor na propria distribuicao, com minimo de amostras', () => {
+  const series = Array.from({ length: 100 }, (_, i) => i + 1); // 1..100
+  assert.equal(core.percentileRank(series, 100), 100);
+  assert.equal(core.percentileRank(series, 50), 50);
+  assert.equal(core.percentileRank(series, 0.5), 0);
+  // Serie insuficiente nao produz percentil (fallback para thresholds fixos).
+  assert.equal(core.percentileRank([1, 2, 3], 2, 30), null);
+  assert.equal(core.percentileRank(null, 2), null);
+  assert.equal(core.percentileRank(series, NaN), null);
+});
+
+test('percentis substituem thresholds fixos nos derivativos quando a serie e suficiente', () => {
+  const asOf = 10_000;
+  const detail = (extra) => Object.assign({ observedAt: 9_000, staleAfterMs: 2_000, dataStatus: 'fresh' }, extra);
+  // Funding no percentil 98 do proprio historico = long lotado extremo -> contrarian negativo escalado por (p-50)/50.
+  const crowded = core.calculateDerivativeDetailContribution({
+    detail: detail({ fundingAvg: 0.0002 }), percentiles: { funding: 98 }, asOf
+  });
+  assert.ok(crowded <= -5, `funding p98 deve pontuar <= -5, veio ${crowded}`);
+  // Mesmo valor absoluto com percentil neutro = 0 (o threshold fixo de 0.0002 tambem daria 0).
+  const typical = core.calculateDerivativeDetailContribution({
+    detail: detail({ fundingAvg: 0.0002 }), percentiles: { funding: 55 }, asOf
+  });
+  assert.equal(typical, 0);
+  // Funding no percentil 3 = shorts lotados vs propria historia -> combustivel positivo.
+  const fuel = core.calculateDerivativeDetailContribution({
+    detail: detail({ fundingAvg: -0.00005 }), percentiles: { funding: 3 }, asOf
+  });
+  assert.ok(fuel >= 5, `funding p3 deve pontuar >= +5, veio ${fuel}`);
+  // Varejo (longShort) e contrarian; top traders (topPosition) sao seguidos.
+  const retailCrowded = core.calculateDerivativeDetailContribution({
+    detail: detail({ longShortRatio: 1.2 }), percentiles: { longShort: 95 }, asOf
+  });
+  assert.ok(retailCrowded < 0);
+  const topCrowded = core.calculateDerivativeDetailContribution({
+    detail: detail({ topPositionRatio: 1.2 }), percentiles: { topPosition: 95 }, asOf
+  });
+  assert.ok(topCrowded > 0);
+  // Taker e fluxo: percentil alto de compra agressiva e seguido.
+  const takerHot = core.calculateDerivativeDetailContribution({
+    detail: detail({ takerRatio: 1.01 }), percentiles: { taker: 96 }, asOf
+  });
+  assert.ok(takerHot > 0);
+  // Sem percentil, o threshold fixo continua valendo (fallback).
+  const fallback = core.calculateDerivativeDetailContribution({
+    detail: detail({ takerRatio: 1.2 }), asOf
+  });
+  assert.equal(fallback, 3);
+});
+
+test('obvSeries acumula volume assinado pelo sentido do fechamento', () => {
+  const candles = [
+    { close: 100, volume: 10 },
+    { close: 101, volume: 20 },
+    { close: 99, volume: 5 },
+    { close: 99, volume: 7 },
+    { close: 102, volume: 3 }
+  ];
+  assert.deepEqual(core.obvSeries(candles), [0, 20, 15, 15, 18]);
+  assert.deepEqual(core.obvSeries([]), []);
+});
+
+function shiftCandles(closes, startTime = 0) {
+  return closes.map((close, i) => ({ time: startTime + i, close, high: close + 1, low: close - 1 }));
+}
+
+test('CHoCH: fechar atraves do ultimo HL confirmado flipa a estrutura de alta', () => {
+  // Uptrend com pivot low confirmado em 100; ultimo close fecha em 97 (abaixo do HL).
+  const pivotLows = [{ price: 95, time: 2 }, { price: 100, time: 8 }];
+  const pivotHighs = [{ price: 105, time: 5 }, { price: 110, time: 11 }];
+  const candles = shiftCandles([96, 98, 95.5, 99, 103, 105, 103, 101, 100.5, 104, 108, 110, 106, 97]);
+  const shift = core.detectStructureShift(candles, pivotHighs, pivotLows);
+  assert.equal(shift.event, 'CHoCH');
+  assert.equal(shift.direction, 'bear');
+  assert.equal(shift.score, -6);
+  assert.equal(shift.brokenLevel, 100);
+});
+
+test('BOS: rompimento a favor da tendencia pontua continuacao, sem evento em range', () => {
+  // Uptrend: close rompe o ultimo pivot high (110) -> BOS bull +4.
+  const pivotHighs = [{ price: 105, time: 5 }, { price: 110, time: 9 }];
+  const pivotLows = [{ price: 95, time: 2 }, { price: 100, time: 7 }];
+  const bos = core.detectStructureShift(shiftCandles([98, 100, 96, 102, 104, 105, 101, 100.2, 107, 110, 108, 112]), pivotHighs, pivotLows);
+  assert.equal(bos.event, 'BOS');
+  assert.equal(bos.direction, 'bull');
+  assert.equal(bos.score, 4);
+  // Sem cruzamento de pivot -> sem evento.
+  const flat = core.detectStructureShift(shiftCandles([100, 101, 100, 101, 100, 101, 100, 101, 100, 101, 100, 101]), pivotHighs, pivotLows);
+  assert.equal(flat.event, null);
+  assert.equal(flat.score, 0);
+});
+
+test('divergencia: preco faz HH com indicador em LH (bearish) e espelho (bullish)', () => {
+  // 14 candles; pivot highs nos indices 4 e 10 (por time).
+  const candles = shiftCandles([100, 102, 104, 106, 108, 105, 103, 104, 106, 109, 111, 108, 107, 106]);
+  const pivotHighs = [{ price: 108, time: 4 }, { price: 111, time: 10 }];
+  const indicator = [50, 55, 60, 65, 70, 66, 60, 58, 61, 64, 66, 60, 55, 52]; // 70 -> 66: LH
+  const div = core.detectDivergence(candles, indicator, pivotHighs, []);
+  assert.equal(div.bearish, true);
+  assert.equal(div.bullish, false);
+  // Espelho: preco LL com indicador HL.
+  const candlesDown = shiftCandles([100, 97, 94, 92, 90, 93, 95, 94, 92, 89, 88, 91, 92, 93]);
+  const pivotLows = [{ price: 90, time: 4 }, { price: 88, time: 10 }];
+  const indicatorUp = [50, 45, 40, 35, 30, 34, 38, 36, 34, 33, 36, 40, 42, 44]; // 30 -> 36: HL
+  const div2 = core.detectDivergence(candlesDown, indicatorUp, [], pivotLows);
+  assert.equal(div2.bullish, true);
+  assert.equal(div2.bearish, false);
+  // Indicador confirmando (HH junto) nao e divergencia.
+  const confirming = core.detectDivergence(candles, [50,55,60,65,70,66,60,58,61,64,75,70,65,60], pivotHighs, []);
+  assert.equal(confirming.bearish, false);
+});
+
+test('climax de volume: 3 sigmas + range 2x ATR + fecho no terco oposto apos perna estendida = exaustao', () => {
+  // 60 candles de base com volume ~100, depois perna de alta estendida e candle climatico:
+  const base = Array.from({ length: 60 }, (_, i) => ({ time: i, open: 100, high: 101, low: 99, close: 100 + (i % 2 ? 0.3 : -0.3), volume: 100 }));
+  const leg = Array.from({ length: 8 }, (_, i) => ({ time: 60 + i, open: 100 + i * 2, high: 102 + i * 2, low: 99.5 + i * 2, close: 102 + i * 2, volume: 110 }));
+  // Candle climatico: volume 600 (>>3 sigma), range 10 (>2x ATR ~2), fecha no terco INFERIOR apos perna de alta.
+  const climax = { time: 68, open: 118, high: 126, low: 116, close: 117, volume: 600 };
+  const result = core.detectVolumeClimax(base.concat(leg, [climax]), 2);
+  assert.equal(result.climax, true);
+  assert.equal(result.direction, 'exhaustion-top');
+  // Mesmo candle fechando forte no terco superior NAO e exaustao (e continuacao).
+  const strong = { time: 68, open: 118, high: 126, low: 117.5, close: 125.5, volume: 600 };
+  const cont = core.detectVolumeClimax(base.concat(leg, [strong]), 2);
+  assert.equal(cont.climax, false);
+});
+
+test('squeeze: BB dentro do Keltner com bandwidth comprimido liga, e liberacao confirmada por delta pontua', () => {
+  // 40 barras dispersas (bandwidth alto) seguidas de 60 comprimidas: squeeze ON no fim.
+  const wide = Array.from({ length: 40 }, (_, i) => {
+    const close = 100 + (i % 2 ? 1.5 : -1.5);
+    return { time: i, open: 100, high: close + 2, low: close - 2, close, volume: 100, takerBuy: 50 };
+  });
+  const tight = Array.from({ length: 60 }, (_, i) => {
+    // Amplitude decrescente: o bandwidth cai ao longo da compressao, entao o ultimo valor esta
+    // no piso do proprio historico (percentil baixo) — como numa compressao real.
+    const amplitude = 0.3 * (1 - i / 60) + 0.02;
+    const close = 100 + (i % 2 ? amplitude : -amplitude);
+    return { time: 40 + i, open: 100, high: close + 1.5, low: close - 1.5, close, volume: 100, takerBuy: 50 };
+  });
+  const compressed = wide.concat(tight);
+  const on = core.detectSqueeze(compressed);
+  assert.equal(on.on, true, 'BB dentro do KC com bandwidth no piso historico deve ligar o squeeze');
+  assert.equal(on.released, null);
+  assert.equal(on.score, 0);
+  // Impulsos de alta com corpo grande expandem a BB para fora do KC -> liberacao bull.
+  const impulses = Array.from({ length: 5 }, (_, i) => {
+    const close = 100 + (i + 1) * 4;
+    return { time: 100 + i, open: close - 4, high: close + 0.6, low: close - 4.6, close, volume: 300, takerBuy: 240 };
+  });
+  const released = core.detectSqueeze(compressed.concat(impulses), { deltaSum: 500 });
+  assert.equal(released.released, 'bull');
+  assert.equal(released.score, 6, 'liberacao bull confirmada por delta positivo = +6');
+  const unconfirmed = core.detectSqueeze(compressed.concat(impulses), { deltaSum: -500 });
+  assert.equal(unconfirmed.released, 'bull');
+  assert.equal(unconfirmed.score, 0, 'delta contra a liberacao nao pontua');
+});
+
+test('carry: funding anualizado ancora euforia/estresse em termos absolutos e detecta regime delta-neutro', () => {
+  // fundingAvg e por periodo de 8h -> x3 x365 x100 = % a.a.
+  const euphoric = core.calculateCarryRegime({ fundingAvg: 0.0003 });
+  closeTo(euphoric.annualizedCarryPct, 32.85, 0.01);
+  assert.equal(euphoric.carryScore, -3, 'carry >30% a.a. e euforia (cash-and-carry lotado)');
+  assert.equal(core.calculateCarryRegime({ fundingAvg: 0.00015 }).carryScore, -2, '15-30% pede cautela');
+  assert.equal(core.calculateCarryRegime({ fundingAvg: -0.0001 }).carryScore, 2, 'backwardation persistente e combustivel');
+  const neutral = core.calculateCarryRegime({ fundingAvg: 0.00003, oiPercentile: 85 });
+  assert.equal(neutral.carryScore, 0);
+  assert.equal(neutral.deltaNeutral, true, 'carry ~0 com OI no p85 = OI hedgeado (basis trade)');
+  assert.equal(neutral.muteBuildup, true);
+  assert.equal(core.calculateCarryRegime({ fundingAvg: 0.00003, oiPercentile: 60 }).deltaNeutral, false);
+  assert.equal(core.calculateCarryRegime({ fundingAvg: null }).carryScore, 0);
+  assert.equal(core.calculateCarryRegime({ fundingAvg: null }).annualizedCarryPct, null);
+});
+
+function trapBars(priorLow) {
+  // Sweep da minima (98.5 < 100) com delta vendedor, depois reclaim com delta comprador.
+  return [
+    { time: 0, open: 101, high: 101.5, low: 100.2, close: 100.8, volume: 100, takerBuy: 50 },
+    { time: 1, open: 100.8, high: 101, low: 100.1, close: 100.4, volume: 100, takerBuy: 48 },
+    { time: 2, open: 100.4, high: 100.6, low: 98.5, close: 99.2, volume: 180, takerBuy: 40 },
+    { time: 3, open: 99.2, high: 100.9, low: 99.0, close: 100.8, volume: 150, takerBuy: 110 },
+    { time: 4, open: 100.8, high: 101.4, low: 100.5, close: 101.2, volume: 120, takerBuy: 85 }
+  ];
+}
+
+test('trap engine: sweep + reclaim + flip de delta com confirmacao de OI vira sinal com veto', () => {
+  const confirmed = core.detectTrap(trapBars(), { atr: 2, priorLow: 100, priorHigh: 106, oiChangePct: -4 });
+  assert.equal(confirmed.trap, 'bull', 'bear trap (sweep de minima revertido) e sinal bullish');
+  assert.equal(confirmed.score, 8, 'com flush de OI confirmando, score maximo');
+  assert.equal(confirmed.vetoDirection, 'short', 'entradas vendidas ficam vetadas');
+  assert.ok(confirmed.vetoBars >= 4);
+  assert.equal(confirmed.level, 100);
+  // Sem confirmacao de OI/liquidacao, ainda e trap (taker flip presente) com score menor.
+  const partial = core.detectTrap(trapBars(), { atr: 2, priorLow: 100, priorHigh: 106, oiChangePct: 0 });
+  assert.equal(partial.trap, 'bull');
+  assert.equal(partial.score, 6);
+});
+
+test('trap engine: sem reclaim nao ha trap, e o espelho bearish veta longs', () => {
+  // Preco varre a minima e FICA embaixo: nao e trap, e rompimento.
+  const noReclaim = trapBars().map((bar) => ({ ...bar }));
+  noReclaim[3] = { time: 3, open: 99.2, high: 99.6, low: 98.8, close: 99.0, volume: 90, takerBuy: 40 };
+  noReclaim[4] = { time: 4, open: 99.0, high: 99.4, low: 98.2, close: 98.6, volume: 95, takerBuy: 42 };
+  assert.equal(core.detectTrap(noReclaim, { atr: 2, priorLow: 100, priorHigh: 106, oiChangePct: -4 }).trap, null);
+  // Espelho: sweep de maxima rejeitado = bull trap = sinal bearish + veto de longs.
+  const bullTrapBars = [
+    { time: 0, open: 105, high: 105.6, low: 104.6, close: 105.2, volume: 100, takerBuy: 52 },
+    { time: 1, open: 105.2, high: 105.8, low: 104.9, close: 105.5, volume: 100, takerBuy: 55 },
+    { time: 2, open: 105.5, high: 107.6, low: 105.3, close: 106.6, volume: 180, takerBuy: 140 },
+    { time: 3, open: 106.6, high: 106.8, low: 105.0, close: 105.2, volume: 150, takerBuy: 40 },
+    { time: 4, open: 105.2, high: 105.4, low: 104.4, close: 104.8, volume: 120, takerBuy: 35 }
+  ];
+  const bullTrap = core.detectTrap(bullTrapBars, { atr: 2, priorLow: 100, priorHigh: 106, liquidationBias: 'buy' });
+  assert.equal(bullTrap.trap, 'bear');
+  assert.equal(bullTrap.score, -8, 'liq spike do lado oposto confirma');
+  assert.equal(bullTrap.vetoDirection, 'long');
+});
+
 function mtfRow(interval, score) { return { interval, score }; }
 
 test('MTF: alignment conta apenas timeframes alinhados COM a direcao do bias', () => {
