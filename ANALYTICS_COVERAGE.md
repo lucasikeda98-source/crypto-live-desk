@@ -1,6 +1,6 @@
 # Crypto Live Desk - cobertura analitica
 
-## Modelo analitico 1.0.0-preview.5
+## Modelo analitico 1.0.0-preview.6
 
 Esta e uma versao de migracao parcial. O contrato normativo completo esta em `ANALYTIC_CONTRACT_V1.md`. A interface distingue:
 
@@ -9,6 +9,17 @@ Esta e uma versao de migracao parcial. O contrato normativo completo esta em `AN
 - Data Confidence para cobertura dos dados, sem interpretar o valor como probabilidade de acerto.
 
 Indicadores e eventos confirmados usam apenas candles fechados. Opcoes e mempool BTC exibidos para altcoins sao proxies informativos e possuem contribuicao zero nos scores especificos e no Data Confidence do ativo.
+
+## Mudancas do 1.0.0-preview.6 (podem alterar resultados vs preview.5)
+
+Correcoes de logica direcional e double-counting apontadas pela revisao cruzada do Claude Code (RC-001) e aplicadas apos verificacao adversarial independente (RC-003). Como mudam a semantica de score, `rulesetHash` e a versao do modelo foram incrementados; o journal de sinais da preview.5 e segmentado por versao (nao agregado ao da preview.6).
+
+1. Risco: sobrevenda (banda inferior + RSI extremo) passa de -6 para +8, espelhando a sobrecompra (-8) — a sobrevenda e risco de repique contra shorts, nao confirmacao de baixa. RSI 32 espelha o gatilho 68 em torno de 50.
+2. Fluxo: sweep de maxima passa a exigir rejeicao abaixo do VWAP para o peso cheio (-8), espelhando o reclaim exigido no sweep de minima; antes o sweep de maxima pontuava -8 incondicional.
+3. Fluxo: delta/CMF deixam de ser recontados no smart money (ja pontuam em flowScore), eliminando double-count dentro do componente de fluxo.
+4. Risco: sweep puro sai do bloco de risco (ja pontua em fluxo via smart money); os termos sweep+liquidacao, que exigem tambem desequilibrio de liquidacoes, permanecem.
+5. Fluxo: volume relativo alto deixa de somar +5 direcionless (um selloff de volume alto nao e altista); o volume ainda marca cobertura e a leitura direcional volume x delta segue no bloco de risco. Normalizacao do Radar Fluxo ajustada de /18 para /13.
+6. Derivativos: carry ganha degrau de capitulacao (backwardation < -30% a.a. -> +3), dando ao lado negativo a mesma estrutura de dois degraus do lado positivo; o piso de +2 permanece em -10% a.a. porque o funding neutro ja anualiza a ~+11%.
 
 ## Mudancas acumuladas do preview.3 ao preview.5
 

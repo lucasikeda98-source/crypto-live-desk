@@ -176,3 +176,46 @@ Revisao pelo Claude Code significa revisao independente de codigo, regras analit
   - `node --test`: 92/92 verdes (os testes de DC do motor sao independentes do `dataQuality` do app; nenhum quebrou).
   - Spot-check em runtime confirmou `RULESET.setupCaps` (soma 112) e a diferenca de DC old(24/10) vs new(16/14).
 - Limitacao conhecida: as correcoes 2 e 3 sao textuais/de contagem (sem impacto em score/DC); a 1 muda o DC conforme declarado acima. Itens recomendados 4-7 da RC-001 permanecem abertos.
+
+### RC-003 — Correcoes recomendadas da RC-001 + double-counts acoplados (preview.6)
+
+- Data: 2026-07-13
+- Responsavel: Claude Code
+- Base: working tree pos-RC-002 (commit `3409028`)
+- Arquivos: `app.js`, `lib/analytics-core.js`, `package.json`, `README.md`, `ANALYTICS_COVERAGE.md`, `ANALYTIC_CONTRACT_V1.md`, `test/analytics-core.test.js`
+- Metodo: cada correcao foi PROPOSTA com codigo exato e submetida a 4 verificadores adversariais independentes (lente de simetria/vies; lente de double-count/matematica-de-borda; lente de derivativos; lente de contrato + completude global) ANTES de aplicar. So foi aplicado o que passou. Os designs originais de dois itens foram corrigidos porque a verificacao mostrou que quebrariam testes e/ou a logica (ver abaixo).
+
+- Correcoes APLICADAS (6):
+  1. Vies direcional no Risco (RC-001 item 4). `buildConfluence`: sobrevenda (banda inferior + RSI extremo) passa de `-6` para `+8`, espelhando a sobrecompra `-8`. RSI `32 = 50-18` espelha o gatilho `68 = 50+18`. E a lente de reversao a media; o momentum de RSI baixo segue em `momScore` (bucket tecnico), lente separada.
+  2. Sweep assimetrico (double-count/vies pre-existente). `smartMoneyAnalysis`: sweep de maxima passa a exigir rejeicao abaixo do VWAP para o peso cheio (`-8`, senao `-3`), espelhando o reclaim ja exigido no sweep de minima.
+  3. Delta/CMF recontados (double-count pre-existente). `smartMoneyAnalysis`: removido o termo de concordancia delta/CMF — ja pontuam em `flowScore` (delta +/-9, cmf +/-4); somavam de novo via `smart.score*0.55` no mesmo componente de fluxo.
+  4. Sweep recontado em Risco (double-count pre-existente). `buildConfluence`: removidos os termos de sweep puro do bloco de risco — sweep pontua uma vez, em fluxo via smart money. Os termos sweep+liquidacao permanecem (exigem tambem desequilibrio de liquidacoes; sinal distinto e simetrico).
+  5. Volume direcionless (vies pre-existente, RC-001 nao listava). `calculateCandleFlow`: removido o `+5` incondicional por volume alto (um selloff de volume alto nao e altista); o volume ainda marca cobertura e a leitura direcional volume x delta segue no bloco de risco. Normalizacao do Radar Fluxo ajustada de `/18` para `/13` (novo max de `flowScore` = 9+4).
+  6. Carry assimetrico (RC-001 item 5). `calculateCarryRegime`: adicionado degrau de capitulacao (`< -30% a.a. -> +3`), dando ao lado negativo a mesma estrutura de dois degraus do positivo. O piso `+2` permanece em `-10% a.a.` (nao no espelho `-30`): o funding neutro anualiza a ~+11%, entao qualquer funding negativo sustentado ja e anomalo — a assimetria de THRESHOLD e deliberada, a assimetria de MAGNITUDE (o degrau +3 ausente) e que era o vies.
+
+- Contrato reconciliado (RC-001 item 7). `ANALYTIC_CONTRACT_V1.md` §7.2 e §8.2 atualizados para Multi-timeframe `+/-16`, Risco `+/-14`, total `112`, denominador do DC `/112`, com nota historica preservando os valores originais `1.0.0` (24/10/116) e a justificativa.
+
+- NAO aplicado — decisao do proprietario:
+  - RC-001 item 6 (funding em lente dupla, P6). A verificacao concluiu que NAO e erro de logica: o percentil de funding e simetrico/nao-enviesado e a sobreposicao com o carry e design intencional documentado (lente relativa vs absoluta). Trimar/limitar re-calibra um valor que nao estava logicamente errado (over-reach). Fica como decisao do dono. Design pronto se desejado: clamp conjunto `clamp(fundingPercentil + carryScore, -7, 7)` DENTRO de `calculateDerivativeDetailContribution` (isolando a sub-contribuicao de funding e passando `carryScore` como input), preservando a autoridade plena de cada lente sozinha e limitando so a cauda correlacionada; mantem os testes `:276`/`:286` verdes (funding sozinho fica dentro de +/-7).
+
+- Correcao dos designs durante a verificacao (registro honesto):
+  - P5 (carry): a proposta inicial espelhava os thresholds em torno de ZERO (`< -15 -> +2`, `< -30 -> +3`). A verificacao mostrou que isso ignora o baseline de funding ~+11%, cria zona morta em -15..-10 e QUEBRA o teste `:422`. Corrigido para manter o piso -10 e so adicionar o degrau -30.
+  - P6 (funding): a proposta inicial (trim do percentil de 6 para 4) enfraquecia o percentil mesmo com carry silencioso e QUEBRAVA `:276`/`:286`. Descartada em favor do clamp conjunto (que nao foi aplicado — ver acima).
+  - P-VOL-DIR: a proposta inicial tornava o volume direcional (`+/-3` por delta), o que double-contava o delta e duplicava a logica ja existente no risco. Corrigido para remocao total do bonus.
+
+- Versao e reprodutibilidade (§11 / §2.10): as 6 correcoes mudam a semantica de score, e as constantes editadas vivem em CORPOS DE FUNCAO (fora do objeto `RULESET`), entao o `rulesetHash` nao mudaria sozinho. Bump manual de `1.0.0-preview.5` para `1.0.0-preview.6` em `MODEL_VERSION`, `rulesetVersion` (muda o `rulesetHash`), `package.json`, `README.md` e `ANALYTICS_COVERAGE.md` (com changelog). O journal de sinais e namespaced por `MODEL_VERSION`; a preview.5 sera podada pela logica de startup existente — comportamento correto por §11 (resultados de versoes diferentes nao se agregam). Cada registro de sinal ja persiste `modelVersion` e `rulesetHash`.
+
+- Impacto DECLARADO (§11): as 6 correcoes alteram o Setup Score exibido; a #5 (volume) tambem altera o Radar Score (via `flowScore`). Data Confidence NAO muda (nenhuma toca elegibilidade de dataset nem os caps usados como peso do DC).
+
+- Residuais CONHECIDOS apos a RC-003 (nao corrigidos; registrados para decisao futura, fora do escopo desta rodada):
+  - Delta (sinal) ainda e usado como confirmacao no termo volume x delta do risco (`buildConfluence`), alem do `flowScore` — segunda leitura direcional do mesmo sinal, em bucket diferente.
+  - Sweep+reclaim pontua tanto em `smart.score` (fluxo) quanto em `trapScore` (detectTrap = sweep + reclaim + flip de delta) — mesmo evento em dois sub-termos de fluxo.
+  - Estrutura HH/HL entra em `technical` (structureShift) e em `smart.score` (rotulo de estrutura) — granularidades diferentes, borderline.
+  - Card `setupQuality` (somente exibicao, fora do `total`) tem Momentum `+16/-14` e Volume `+10/-6` assimetricos; sem impacto em score, mas inconsistente com as correcoes acima.
+
+- Validacao Claude Code:
+  - `node --check app.js` e `node --check lib/analytics-core.js`: OK.
+  - `node --test`: 93/93 verdes (92 anteriores + 1 novo teste de fluxo; o teste de carry ganhou assercoes do degrau de capitulacao). Nenhum teste quebrou.
+  - Testes de regressao adicionados: degrau de capitulacao do carry (`< -30 -> +3`, `-15..-30 -> +2` sem zona morta) e ausencia do bonus de volume direcionless.
+
+- Estado: RC-001 itens 4, 5 e 7 aplicados; itens 1-3 ja em RC-002; item 6 (funding lente dupla) pendente de decisao do dono; double-counts pre-existentes de sweep/delta-CMF/volume endereçados; residuais acima registrados.

@@ -420,6 +420,10 @@ test('carry: funding anualizado ancora euforia/estresse em termos absolutos e de
   assert.equal(euphoric.carryScore, -3, 'carry >30% a.a. e euforia (cash-and-carry lotado)');
   assert.equal(core.calculateCarryRegime({ fundingAvg: 0.00015 }).carryScore, -2, '15-30% pede cautela');
   assert.equal(core.calculateCarryRegime({ fundingAvg: -0.0001 }).carryScore, 2, 'backwardation persistente e combustivel');
+  // preview.6: degrau de capitulacao no lado negativo (simetria de magnitude com euforia -3),
+  // sem elevar o piso (funding neutro ~+11% a.a. -> qualquer negativo ja e anomalo).
+  assert.equal(core.calculateCarryRegime({ fundingAvg: -0.0003 }).carryScore, 3, 'backwardation profunda < -30% a.a. = capitulacao -> +3');
+  assert.equal(core.calculateCarryRegime({ fundingAvg: -0.00025 }).carryScore, 2, 'backwardation em -15..-30% a.a. segue em +2 (sem zona morta)');
   const neutral = core.calculateCarryRegime({ fundingAvg: 0.00003, oiPercentile: 85 });
   assert.equal(neutral.carryScore, 0);
   assert.equal(neutral.deltaNeutral, true, 'carry ~0 com OI no p85 = OI hedgeado (basis trade)');
@@ -427,6 +431,17 @@ test('carry: funding anualizado ancora euforia/estresse em termos absolutos e de
   assert.equal(core.calculateCarryRegime({ fundingAvg: 0.00003, oiPercentile: 60 }).deltaNeutral, false);
   assert.equal(core.calculateCarryRegime({ fundingAvg: null }).carryScore, 0);
   assert.equal(core.calculateCarryRegime({ fundingAvg: null }).annualizedCarryPct, null);
+});
+
+test('fluxo: volume relativo alto sozinho nao adiciona bonus direcional (preview.6)', () => {
+  // Delta neutro em todos os candles (takerBuy = metade do volume -> delta 0) e um ultimo candle
+  // de volume 10x a media. Antes somava +5 direcionless (um selloff de volume alto nao e altista).
+  const rows = Array.from({ length: 25 }, () => ({ volume: 10, takerBuy: 5 }));
+  rows.push({ volume: 100, takerBuy: 50 });
+  const flow = core.calculateCandleFlow(rows, null);
+  assert.equal(flow.deltaSum, 0, 'delta neutro');
+  assert.equal(flow.score, 0, 'volume alto sem direcao nao pontua (antes +5)');
+  assert.equal(flow.available, true, 'volume ainda marca cobertura de dados');
 });
 
 function trapBars(priorLow) {

@@ -180,15 +180,17 @@ O Setup Score NÃO DEVE ser usado para ordenar o radar. Um valor negativo indica
 | Componente | Contribuição permitida |
 | --- | ---: |
 | Técnica local | `-20` a `+20` |
-| Multi-timeframe | `-24` a `+24` |
+| Multi-timeframe | `-16` a `+16` |
 | Smart money e fluxo | `-18` a `+18` |
 | Derivativos | `-12` a `+12` |
 | On-chain e fundamental | `-10` a `+10` |
 | Notícias e macro | `-10` a `+10` |
 | Histórico semelhante | `-12` a `+12` |
-| Ajuste direcional de risco | `-10` a `+10` |
+| Ajuste direcional de risco | `-14` a `+14` |
 
-O limite absoluto total dos componentes é `116`. Cada contribuição `s_i` DEVE ser calculada por uma regra identificada e respeitar seu limite.
+O limite absoluto total dos componentes é `112`. Cada contribuição `s_i` DEVE ser calculada por uma regra identificada e respeitar seu limite.
+
+> **Nota de revisão (preview.6):** os limites originais `1.0.0` eram Multi-timeframe `±24`, Ajuste de risco `±10` e total `116`. A partir do `1.0.0-preview.5` o Multi-timeframe caiu para `±16` (ele virou gate HTF de 1d/1w e o agregado exclui o timeframe do gráfico, então seu peso de score caiu para evitar dupla contagem de tendência) e o Ajuste de risco subiu para `±14` (passou a carregar trap, clímax de volume e liquidações), com total `112`. A soma de `112 > 100` significa que, em setups maximamente alinhados, a soma visível dos componentes pode divergir do score final apenas pelo clamp de `-100` a `+100` — a mesma reconciliação já exposta na interface (§10). Alteração de pesos é mudança minor (§11); o `ruleset_hash` e a versão do modelo foram incrementados.
 
 ```text
 setup_score = round(clamp(Σ(s_i), -100, +100))
@@ -245,7 +247,7 @@ O Data Confidence usa os pesos nominais do Radar Score e, no Setup Score, os lim
 
 ```text
 radar_data_confidence = round(100 × Σ(w_i × component_quality_i) / 100)
-setup_data_confidence = round(100 × Σ(cap_i × component_quality_i) / 116)
+setup_data_confidence = round(100 × Σ(cap_i × component_quality_i) / 112)
 ```
 
 O fator padrão v1 de um fallback equivalente é `0,80`, salvo valor diferente explicitamente registrado e testado. Fallback equivalente significa a mesma métrica, unidade, janela e semântica; não significa proxy de outro ativo.

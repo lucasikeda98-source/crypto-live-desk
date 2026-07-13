@@ -1,5 +1,5 @@
 (function () {
-  var MODEL_VERSION = '1.0.0-preview.5';
+  var MODEL_VERSION = '1.0.0-preview.6';
   var AnalyticsCore = window.CryptoAnalyticsCore;
   if (!AnalyticsCore) throw new Error('CryptoAnalyticsCore nao foi carregado.');
   var RULESET_HASH = AnalyticsCore.rulesetHash();
@@ -1203,7 +1203,7 @@
     var fundamentalChecks = [!!ext.market, !!(ext.chain || ext.protocol)];
     var parts = [
       { name: 'Tecnica', ruleId: 'radar.technical.v2', weight: 30, available: Number.isFinite(analysis.trendScore) && Number.isFinite(analysis.momScore), value: clamp(((analysis.trendScore + analysis.momScore + (analysis.structureShift ? analysis.structureShift.score : 0) + (analysis.divergenceScore || 0) + (analysis.squeeze ? analysis.squeeze.score : 0)) / 60) * 100, -100, 100), quality: Math.min(1, (analysis.candleCount || 0) / 220), raw: analysis.trendScore + analysis.momScore + (analysis.structureShift ? analysis.structureShift.score : 0) + (analysis.divergenceScore || 0) + (analysis.squeeze ? analysis.squeeze.score : 0), scope: 'symbol', reason: 'EMAs, RSI, MACD, ADX, estrutura, CHoCH/BOS, divergencia e squeeze do timeframe' },
-      { name: 'Fluxo', ruleId: 'radar.flow.v1', weight: 15, available: analysis.flowAvailable === true, value: clamp((analysis.flowScore / 18) * 100, -100, 100), quality: Number.isFinite(analysis.flowCoverage) ? analysis.flowCoverage : 0, raw: analysis.flowScore, scope: 'symbol', reason: 'Delta taker, volume relativo e CMF' },
+      { name: 'Fluxo', ruleId: 'radar.flow.v1', weight: 15, available: analysis.flowAvailable === true, value: clamp((analysis.flowScore / 13) * 100, -100, 100), quality: Number.isFinite(analysis.flowCoverage) ? analysis.flowCoverage : 0, raw: analysis.flowScore, scope: 'symbol', reason: 'Delta taker e CMF (volume marca cobertura, sem bonus direcional)' },
       { name: 'Derivativos', ruleId: 'radar.derivatives.v1', weight: 10, available: Number.isFinite(analysis.funding) || Number.isFinite(analysis.basis), value: clamp((analysis.derivScore / 9) * 100, -100, 100), quality: ((Number.isFinite(analysis.funding) ? 1 : 0) + (Number.isFinite(analysis.basis) ? 1 : 0)) / 2, raw: analysis.derivScore, scope: 'symbol', reason: 'Funding e basis dos perpetuos Binance' },
       { name: 'Fundamental', ruleId: 'radar.fundamental.v1', weight: 15, available: extEligible && !!(ext.market || ext.chain || ext.protocol), value: clamp(((ext.asset + ext.defi) / 22) * 100, -100, 100), quality: fundamentalChecks.filter(Boolean).length / fundamentalChecks.length, raw: ext.asset + ext.defi, scope: 'symbol', reason: 'Mercado CoinGecko e TVL DeFiLlama mapeados' },
       { name: 'Macro/noticias', ruleId: 'radar.macro.v1', weight: 10, available: !!(news.items.length || state.newsMode !== 'auto' || externalAvailable), value: clamp(((news.score * 0.45 + ext.sentiment + ext.global) / 30) * 100, -100, 100), quality: macroChecks.filter(Boolean).length / macroChecks.length, raw: news.score * 0.45 + ext.sentiment + ext.global, scope: 'market', reason: 'Noticias RSS, sentimento e macro oficial' },
@@ -1505,12 +1505,13 @@
     var score = 0, liquidity = 'Sem sweep', imbalance = 'Sem deslocamento', oiPhase = 'OI neutro';
     score += a.structure === 'HH/HL' ? 5 : a.structure === 'LH/LL' ? -5 : 0;
     if (a.sweepDown) { score += a.close > a.vwap ? 8 : 3; liquidity = 'Sweep de minima / reclaim'; }
-    if (a.sweepUp) { score -= 8; liquidity = 'Sweep de maxima / rejeicao'; }
+    if (a.sweepUp) { score -= a.close < a.vwap ? 8 : 3; liquidity = 'Sweep de maxima / rejeicao'; }
     if (a.displacement === 'Alta') { score += 4; imbalance = 'Deslocamento comprador'; }
     else if (a.displacement === 'Baixa') { score -= 4; imbalance = 'Deslocamento vendedor'; }
     if (a.fvg) imbalance += ' | FVG ' + (a.fvg.type === 'bullish' ? 'alta' : 'baixa');
-    if (a.deltaSum > 0 && a.cmf20 > 0.05) score += 4;
-    else if (a.deltaSum < 0 && a.cmf20 < -0.05) score -= 4;
+    // Delta/CMF are already scored in flowScore (calculateCandleFlow: delta +/-9, cmf +/-4). Scoring
+    // their agreement again here would double-count the same flow signal inside the flow component,
+    // since smart.score also feeds flow (smart.score*0.55).
     var detail = scoreableDerivativeDetail(a.derivativeDetail);
     if (Number.isFinite(detail.oiChangePct)) {
       // Same signal and fallback as calculateDerivativeDetailContribution so both read the same
@@ -1631,9 +1632,14 @@
     var risk = 0;
     var volumeRatio = Number.isFinite(a.avgVol) && a.avgVol ? a.lastVol / a.avgVol : 1;
     if (Number.isFinite(a.bb.latestUpper) && a.close > a.bb.latestUpper && a.rsi14 >= 68) risk -= 8;
-    if (Number.isFinite(a.bb.latestLower) && a.close < a.bb.latestLower && a.rsi14 <= 35) risk -= 6;
-    if (a.sweepDown && a.close > a.vwap) risk += 5;
-    if (a.sweepUp) risk -= 5;
+    // Mirror of the overbought fade: an oversold stretch (below the lower band, RSI extreme) is
+    // bounce risk to shorts, so it favors the long side (+8). RSI 32 = 50-18 mirrors the 68 = 50+18
+    // overbought trigger; magnitude +8 mirrors the -8 penalty. This is the mean-reversion overlay;
+    // the momentum read of a low RSI stays in momScore (technical bucket), a separate lens.
+    if (Number.isFinite(a.bb.latestLower) && a.close < a.bb.latestLower && a.rsi14 <= 32) risk += 8;
+    // Sweeps score once, in smart money -> flow (a sweep is a liquidity/flow event); the pure sweep
+    // terms here re-counted the same boolean into risk. The sweep+liquidation JOINT terms below stay:
+    // they also require a liquidation skew, a distinct confirmation signal.
     var climax = a.volumeClimax && a.volumeClimax.climax ? a.volumeClimax : null;
     if (climax) {
       // Volume climatico com fecho no terco oposto e exaustao: warning contra a tendencia,
