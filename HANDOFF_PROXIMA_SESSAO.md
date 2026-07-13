@@ -19,9 +19,13 @@ A revisão cruzada obrigatória (CLAUDE.md) dos Ciclos B+C foi concluída e regi
 - **RC-002** (`3409028`): 3 correções exigidas (Data Confidence honra os caps via `RULESET`,
   textos de reconciliação/contagem).
 - **RC-003** (`a3db327`): 6 correções de lógica direcional / double-count + reconciliação do
-  contrato + bump para `1.0.0-preview.6`. Cada uma verificada por 4 revisores adversariais
-  antes de aplicar.
-- Suíte determinística: **93/93 verdes** (`node --test`).
+  contrato + bump para `1.0.0-preview.6`. Cada uma verificada por 4 revisores adversariais.
+- **RC-004** (`2c6495d`): item 6 (funding lente dupla) resolvido com clamp conjunto ±7 +
+  dedup sweep/trap + arquivamento do journal na virada de versão. Verificado por 2 revisores
+  adversariais (ambos CORRETO).
+- Suíte determinística: **94/94 verdes** (`node --test`).
+- **Correções analíticas COMPLETAS.** Todos os itens exigidos e recomendados da RC-001 estão
+  aplicados; residuais restantes são defensáveis e documentados (ver RC-004).
 - **Não deployado.** Tudo está na branch; `main` e produção seguem em preview.5.
 
 ---
@@ -31,7 +35,12 @@ A revisão cruzada obrigatória (CLAUDE.md) dos Ciclos B+C foi concluída e regi
 A melhor forma de conciliar tudo é **um único ciclo de fechamento (RC-004)**, depois
 **release verificado**, depois **roadmap**. Nesta ordem:
 
-### Fase A — Fechar as correções analíticas (RC-004)
+### Fase A — Fechar as correções analíticas (RC-004) — ✅ CONCLUÍDA em `2c6495d`
+
+> A1 (clamp conjunto do funding) e A2 (arquivamento do journal) foram aplicados e verificados
+> (2 revisores adversariais, 94/94). A3 (card `setupQuality`) foi decidido como aceito-por-design
+> (display-only, sem impacto em score). Detalhes na entrada RC-004 do `CODEX_HANDOFF.md`.
+> **A próxima sessão começa na Fase B (release).** O texto abaixo fica como registro do que foi feito.
 
 **A1. Item 6 da RC-001 — funding em lente dupla.** É a única correção recomendada ainda em
 aberto. Não é erro de lógica (o percentil de funding é simétrico; a sobreposição com o carry
@@ -103,6 +112,7 @@ Depois da Fase B, seguir o checklist já apresentado:
 
 ## 4. Uma linha para iniciar a próxima sessão
 
-> "Continue o Crypto Live Desk pela Fase A do `HANDOFF_PROXIMA_SESSAO.md`: aplique o clamp
-> conjunto do funding (A1) e o arquivamento do journal (A2), verifique e registre como RC-004;
-> depois seguimos para o release."
+> "Continue o Crypto Live Desk. As correções analíticas (RC-001..RC-004) estão completas e na
+> branch `claude/crypto-live-desk-checklist-mezzmj` (preview.6, 94/94, não publicada). Siga pela
+> Fase B do `HANDOFF_PROXIMA_SESSAO.md`: release verificado (push → Vercel preview → smoke contra
+> o preview → main → produção); depois os Blocos 1-3."

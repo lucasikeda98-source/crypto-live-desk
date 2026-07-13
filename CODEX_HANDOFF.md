@@ -223,3 +223,31 @@ Revisao pelo Claude Code significa revisao independente de codigo, regras analit
   - Testes de regressao adicionados: degrau de capitulacao do carry (`< -30 -> +3`, `-15..-30 -> +2` sem zona morta) e ausencia do bonus de volume direcionless.
 
 - Estado: RC-001 itens 4, 5 e 7 aplicados; itens 1-3 ja em RC-002; item 6 (funding lente dupla) pendente de decisao do dono; double-counts pre-existentes de sweep/delta-CMF/volume endereçados; residuais acima registrados.
+
+### RC-004 — Item 6 (funding) + residuais acoplados (preview.6, ainda nao publicado)
+
+- Data: 2026-07-13
+- Responsavel: Claude Code
+- Base: working tree pos-RC-003 (commit `7caafca`)
+- Arquivos: `app.js`, `lib/analytics-core.js`, `test/analytics-core.test.js`
+- Metodo: mudancas implementadas e submetidas a 2 verificadores adversariais independentes (matematica/regressao do clamp de funding; mapeamento de direcao do dedup sweep/trap + logica do arquivamento). Ambos retornaram CORRETO em todos os pontos, suite 94/94.
+
+- Mudancas APLICADAS:
+  1. **Funding em lente dupla (RC-001 item 6) — RESOLVIDO com clamp conjunto.** `calculateDerivativeDetailContribution` recebe `carryScore` (default 0), isola a sub-contribuicao de funding e soma `clamp(fundingContribution + carryScore, -7, +7)`. `buildConfluence` passa `carry.carryScore` e nao soma mais o carry solto. Cada lente mantem autoridade plena sozinha (percentil ate +/-6; carry ate +/-3); so a cauda correlacionada (euforia/capitulacao, onde as duas co-disparam) e limitada a +/-7, evitando que um unico sinal domine o bucket de +/-12. Callers so-funding (testes) ficam identicos, pois |funding| <= 6 <= 7. NAO e o "trim" descartado na RC-003 (que enfraquecia o percentil mesmo com carry silencioso e quebrava testes).
+  2. **Sweep+trap (residual da RC-003).** Quando um trap confirmado do mesmo lado dispara, o score do sweep bruto no smart money e suprimido (rotulo mantido): o trap ja pontua o reclaim, com confirmacao extra, em `trapScore`, que tambem alimenta o fluxo — pontuar o sweep de novo contava o mesmo reclaim duas vezes. Mapeamento verificado: `trap.trap==='bull'` vem de um sweep de minima (`sweepDown`), relacao de superconjunto (`bullTrap => sweepDown`), sem perda de sinal e simetrico para o lado bear.
+  3. **Journal preservado na virada de versao (A2 do handoff).** `purgeStaleStorage` passa a ARQUIVAR (`archived:<chave>`) os journals `cld-signal-journal:` e `cld-signal-trades:` de versoes antigas em vez de apaga-los; o estado transitorio do state machine (`cld-signal-machine:`) e os caches de historico continuam sendo descartados. Cada registro ja persiste `modelVersion`+`rulesetHash`, entao os sinais arquivados ficam segmentaveis por versao (§11 proibe agregar entre versoes, nao preservar). Seguro contra quota (o original so e removido apos o `setItem` do arquivo).
+
+- Versao: mantida em `1.0.0-preview.6`. A preview.6 NAO foi publicada (main/producao seguem em preview.5), entao RC-003 e RC-004 definem juntas o que a preview.6 e — sem colisao de hash com nenhuma versao publicada. Ao publicar, a preview.6 ja incorpora ambas.
+
+- Impacto DECLARADO (§11): (1) altera o Setup Score apenas quando funding percentil e carry co-disparam forte (cauda); (2) altera o fluxo apenas quando um trap confirmado coincide com o sweep bruto; (3) sem impacto em score (comportamento de storage). Radar Score inalterado pelos tres (o radar nao usa carry, derivativeDetail, smart.score nem sweep). Data Confidence inalterado.
+
+- Residuais restantes ACEITOS por design (documentados, nao corrigidos — nao sao double-count/vies claro, e altera-los seria re-calibrar design defensavel):
+  - Vol x delta no bloco de risco (`buildConfluence`): usa o SINAL do delta uma segunda vez, mas sob condicao CONJUNTA (`volumeRatio > 1.45` E direcao) — leitura de agressao confirmada por volume, distinta do delta continuo do `flowScore`.
+  - Estrutura: `structureShift` (evento de ROMPIMENTO CHoCH/BOS, no tecnico) vs rotulo de estrutura HH/HL atual no smart money — granularidades diferentes, nao o mesmo sinal.
+  - Card `setupQuality`: somente exibicao (nao entra em nenhum score/decisao); mantem Momentum `+16/-14` e Volume `+10/-6` como gradiente de qualidade, nao como score direcional.
+
+- Validacao Claude Code:
+  - `node --check` OK; `node --test`: 94/94 (novo teste do clamp conjunto de funding: p98+carry-3 = -7, p3+carry+3 = +7, carry sozinho = -3, funding sozinho inalterado).
+  - 2 verificadores adversariais confirmaram: math do clamp sem regressao; mapeamento sweep/trap correto (nao invertido); arquivamento seguro e completo.
+
+- Estado FINAL da revisao cruzada: todos os itens EXIGIDOS (RC-002) e RECOMENDADOS (RC-003 itens 4/5/7 + RC-004 item 6) da RC-001 estao aplicados; double-counts claros (OI ja no ciclo do Codex, delta/CMF, sweep-fluxo/risco, sweep/trap) eliminados; vieses direcionais (risco, sweep, carry, volume) corrigidos; contrato reconciliado; journal preservado. Residuais defensaveis documentados. Pendencias operacionais (nao analiticas): release verificado (Vercel preview -> smoke -> main -> prod) e Blocos 1-3 do checklist — ver `HANDOFF_PROXIMA_SESSAO.md`.
