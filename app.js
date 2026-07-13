@@ -2877,7 +2877,9 @@
     var data = a && a.microstructure || state.microstructure;
     var eligible = eligibleDataset(data);
     var flow = data && data.orderFlow || {};
-    text('microstructureStatus', data ? datasetStatus(data) + ' | informativo' : 'sem leitura');
+    var venueCount = data && Array.isArray(data.venues) ? data.venues.length : 0;
+    var failedSources = data && data.errors ? Object.keys(data.errors) : [];
+    text('microstructureStatus', data ? datasetStatus(data) + ' | ' + venueCount + '/4 venues | informativo' : 'sem leitura');
     text('cvdUsdLine', eligible && Number.isFinite(+flow.cvdUsd) ? compactMoney(+flow.cvdUsd) : '--');
     text('takerImbalanceLine', eligible && Number.isFinite(+flow.imbalancePct) ? percent(+flow.imbalancePct, 1) : '--');
     text('coinbasePremiumLine', eligible && Number.isFinite(+data.coinbasePremiumBps) ? num(+data.coinbasePremiumBps, 2) + ' bps' : '--');
@@ -2886,9 +2888,10 @@
     if (rows) rows.innerHTML = data && Array.isArray(data.venues) && data.venues.length ? data.venues.map(function (venue) {
       return '<div class="institutional-row"><div><strong>' + escapeHTML(venue.name) + '</strong><span>premium vs mediana</span></div><strong>' + money(+venue.price) + ' | ' + (Number.isFinite(+venue.premiumBps) ? num(+venue.premiumBps, 2) + ' bps' : '--') + '</strong></div>';
     }).join('') : '<div class="institutional-row"><div><strong>Sem venues</strong><span>Fonte publica indisponivel agora</span></div></div>';
-    text('microstructureCaption', eligible && Number.isFinite(+flow.firstTradeAt) && Number.isFinite(+flow.lastTradeAt)
+    var failureNote = failedSources.length ? ' Fontes indisponiveis: ' + failedSources.join(', ') + '.' : '';
+    text('microstructureCaption', (eligible && Number.isFinite(+flow.firstTradeAt) && Number.isFinite(+flow.lastTradeAt)
       ? flow.trades + ' aggTrades Binance entre ' + new Date(+flow.firstTradeAt).toLocaleTimeString('pt-BR') + ' e ' + new Date(+flow.lastTradeAt).toLocaleTimeString('pt-BR') + '. CVD e premiums sao informativos e nao alteram o Setup Score.'
-      : 'CVD e premiums sao informativos e nao alteram o Setup Score.');
+      : 'CVD e premiums sao informativos e nao alteram o Setup Score.') + failureNote);
   }
   function renderCoverage(a) {
     var freshNewsCount = freshNewsItems().length;

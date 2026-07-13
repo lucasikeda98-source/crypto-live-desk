@@ -143,6 +143,7 @@ Revisao pelo Claude Code significa revisao independente de codigo, regras analit
   - 98 de 98 testes deterministas aprovados.
   - Consulta real BTC retornou quatro venues, 1.000 aggTrades e nenhuma falha de fonte.
   - Painel local exibiu CVD, imbalance, Coinbase premium, dispersao e quatro venues sem erros de console.
+  - Preview Vercel confirmou degradacao parcial: Binance, Coinbase e OKX responderam; Bybit ficou indisponivel na regiao do deploy e foi excluida sem fabricar preco.
   - CFTC real exibiu relatorio de 07/07/2026: non-commercial net +3.500, variacao -270, commercial net -3.217 e OI 18.832 contratos.
 - Limitacoes conhecidas:
   - CVD cobre somente os ultimos 1.000 aggTrades, nao uma serie acumulada de longo prazo.
