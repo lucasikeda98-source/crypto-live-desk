@@ -6,6 +6,14 @@ Este arquivo evidencia as mudancas realizadas pelo Codex a partir do marco abaix
 
 Revisao pelo Claude Code significa revisao independente de codigo, regras analiticas, testes, documentacao e impactos no modelo. A aprovacao nao deve ser presumida apenas porque os testes passaram.
 
+## Estado atual (2026-07-13) — leia antes de continuar
+
+- Checkpoint: commit `887ec57` (branch `codex/cycle-d-sources`) commitado e pushado ao GitHub; working tree limpo. **Nao deployado** — nao existe preview nem producao para este commit.
+- Revisao: **REV-CC-01** (secao "Revisoes do Claude Code", ao final) — revisao cruzada parcial e independente do Claude Code. Disposicao: 41 `REVISADO PELO CLAUDE CODE`, 24 `AGUARDANDO CLAUDE CODE` com correcao exigida, 7 `CONFIRMADO`.
+- **Nao promover a producao.** Defeitos reais abertos: P1 merge Lua/ANL-027 e OPS-003 (regressao de CI); P2/P3 UX-001, API-004, UX-005, `priceChangeOverWindow`, DEV-dotfile-via-symlink; alem de infra (Redis/`CRON_SECRET`, cron, sair do OneDrive). Ordem de correcao em REV-CC-01 secoes A/B/F.
+- Verificacoes independentes: 250/250 testes, cobertura 97,96/80,03/96,42 (exit 0), `node --check` e `git diff --check` limpos, navegador local com 24 cards e zero erro de console.
+- Proximo passo sugerido: corrigir os P1 (merge Lua e OPS-003) com testes de regressao reais, depois os guardas fracos da secao B, entao provisionar Redis e exercitar os scripts Lua contra Redis real antes de qualquer preview/promocao.
+
 ## Marco inicial
 
 - Data local: 2026-07-12 (America/Cuiaba)

@@ -1,52 +1,52 @@
 {
   "schemaVersion": 1,
   "branch": "codex/cycle-d-sources",
-  "head": "b124fcb68ef06e93f04fcbdc7bbeaa1b329d0324",
+  "head": "887ec57bccbd176d8052a38b471d21b9c1dfa0c2",
   "totals": {
-    "files": 59,
-    "lines": 16762,
-    "bytes": 983002
+    "files": 61,
+    "lines": 18274,
+    "bytes": 1068161
   },
   "byCategory": {
     "repository": {
       "files": 4,
-      "lines": 38,
-      "bytes": 657
+      "lines": 41,
+      "bytes": 694
     },
     "ci": {
       "files": 1,
-      "lines": 59,
-      "bytes": 1658
+      "lines": 63,
+      "bytes": 1788
     },
     "documentation": {
       "files": 10,
-      "lines": 1721,
-      "bytes": 120510
+      "lines": 1811,
+      "bytes": 136736
     },
     "api": {
       "files": 10,
-      "lines": 1401,
-      "bytes": 65887
+      "lines": 1581,
+      "bytes": 74521
     },
     "application": {
       "files": 1,
-      "lines": 4264,
-      "bytes": 311537
+      "lines": 4338,
+      "bytes": 316001
     },
     "ui": {
       "files": 2,
-      "lines": 930,
-      "bytes": 79277
+      "lines": 931,
+      "bytes": 79327
     },
     "analytics-core": {
       "files": 1,
-      "lines": 2561,
-      "bytes": 135719
+      "lines": 2618,
+      "bytes": 139124
     },
     "library": {
-      "files": 5,
-      "lines": 967,
-      "bytes": 41769
+      "files": 6,
+      "lines": 1313,
+      "bytes": 59631
     },
     "configuration": {
       "files": 3,
@@ -55,13 +55,13 @@
     },
     "tooling": {
       "files": 3,
-      "lines": 609,
-      "bytes": 25321
+      "lines": 631,
+      "bytes": 26139
     },
     "test": {
-      "files": 19,
-      "lines": 4061,
-      "bytes": 196107
+      "files": 20,
+      "lines": 4796,
+      "bytes": 229640
     }
   },
   "files": [
@@ -90,9 +90,9 @@
     {
       "path": ".github/workflows/quality.yml",
       "category": "ci",
-      "lines": 59,
-      "bytes": 1658,
-      "sha256": "1db0eb37c327406d38fa349a557a816251b7bb016fe0212b46c6847a7009d1fa",
+      "lines": 63,
+      "bytes": 1788,
+      "sha256": "d1a1dff588bb4c53bedb7bfdfc01bcb7e43d60e813d380e5199701b458ce711b",
       "requiredPasses": [
         "static",
         "consistency",
@@ -113,9 +113,9 @@
     {
       "path": ".vercelignore",
       "category": "repository",
-      "lines": 15,
-      "bytes": 223,
-      "sha256": "83042d6fbfb1f985d6f1f6e084f7dabbc72aea0677326b3fabd044b95e031ad2",
+      "lines": 18,
+      "bytes": 260,
+      "sha256": "10fc22825ee7fde1c94df64b63da1af7b05cbb21cd21887a0bd4ae131990617d",
       "requiredPasses": [
         "static",
         "consistency"
@@ -149,8 +149,8 @@
       "path": "ANALYTICS_COVERAGE.md",
       "category": "documentation",
       "lines": 324,
-      "bytes": 16852,
-      "sha256": "73cd949f0f5e727246426ac13797138668b5026de21d79acc43cfd16cb8846fb",
+      "bytes": 17607,
+      "sha256": "b3ad66095538671543b97031699e70b94ca53b1d5f6fcb84a1dd3b555c39ed44",
       "requiredPasses": [
         "static",
         "consistency",
@@ -160,9 +160,9 @@
     {
       "path": "api/defillama.js",
       "category": "api",
-      "lines": 99,
-      "bytes": 3831,
-      "sha256": "93a5005265bd15ca2d5d006ca111157ba3539c730b68bfc4ef9044e7f2916dba",
+      "lines": 124,
+      "bytes": 4945,
+      "sha256": "25c2443021b78870fe8aec713e593decff9eb40d33537b65c6c25be29b3c799b",
       "requiredPasses": [
         "static",
         "consistency",
@@ -176,9 +176,9 @@
     {
       "path": "api/institutional.js",
       "category": "api",
-      "lines": 178,
-      "bytes": 8228,
-      "sha256": "13b3b8d27b2d39400373af5c4b8c223412db2bf4795e220fee10dbfaf55cafab",
+      "lines": 188,
+      "bytes": 8400,
+      "sha256": "55f7b30dbc7b7a2f598056d93ed3e88c31edddbc0967a28f6a7a74f92b32fc02",
       "requiredPasses": [
         "static",
         "consistency",
@@ -192,9 +192,9 @@
     {
       "path": "api/macro.js",
       "category": "api",
-      "lines": 90,
-      "bytes": 4774,
-      "sha256": "151bc2e29b67c3b8415e58db5a4cac67bbdf5a7dbeac6b206697d1b956b3b377",
+      "lines": 102,
+      "bytes": 5273,
+      "sha256": "7c1e7004e042f8d93faab07544954431174321e83cfed46b4ef1f15b39e3a1a1",
       "requiredPasses": [
         "static",
         "consistency",
@@ -208,9 +208,9 @@
     {
       "path": "api/market-microstructure.js",
       "category": "api",
-      "lines": 193,
-      "bytes": 9971,
-      "sha256": "2b216d76df219b080e8eda9da8f855cc7d2e263b6a176a1bea009436057ca7ba",
+      "lines": 226,
+      "bytes": 11468,
+      "sha256": "4e1c3ad0d2864963b0b138b1d904c528fed13bcaf05b286bd4e1366dd645e5be",
       "requiredPasses": [
         "static",
         "consistency",
@@ -224,9 +224,9 @@
     {
       "path": "api/market.js",
       "category": "api",
-      "lines": 170,
-      "bytes": 7444,
-      "sha256": "73a12261ac688b7b569b7b3bbd09f348ebd4f43ad10421077a3adb6443222fb4",
+      "lines": 185,
+      "bytes": 8395,
+      "sha256": "4038fbac3d18b73116ade83a7f284d49739df78412c84105cda6225abb162f1d",
       "requiredPasses": [
         "static",
         "consistency",
@@ -240,9 +240,9 @@
     {
       "path": "api/news.js",
       "category": "api",
-      "lines": 82,
-      "bytes": 3254,
-      "sha256": "297e8fb514fcf3650f33cf84e53848de14dec6114266b1e88e3f252a9e1d29a9",
+      "lines": 91,
+      "bytes": 3612,
+      "sha256": "95a7670d875beaaa99466b49307913b837db3d2d2ca79de3bc07c9c0a7618be2",
       "requiredPasses": [
         "static",
         "consistency",
@@ -256,9 +256,9 @@
     {
       "path": "api/options.js",
       "category": "api",
-      "lines": 215,
-      "bytes": 11477,
-      "sha256": "05aa94a76f6f7edc0a00ee014be0c51261c4546f826f5dd95c00218e007a261a",
+      "lines": 271,
+      "bytes": 14162,
+      "sha256": "1f8bec848b62be3f9ea99ebf7913c87236c246b1e1d4e717286bec8304547735",
       "requiredPasses": [
         "static",
         "consistency",
@@ -272,9 +272,9 @@
     {
       "path": "api/signal-worker.js",
       "category": "api",
-      "lines": 209,
-      "bytes": 9197,
-      "sha256": "48fd4bb0ac069a0872401abd9ea3e931b068950df605a6b746564e609a93cc13",
+      "lines": 229,
+      "bytes": 10555,
+      "sha256": "37155f864306ef3d3b01b1f958414fc1e8512e5caeb50fc006c58cf0c7328abe",
       "requiredPasses": [
         "static",
         "consistency",
@@ -320,9 +320,9 @@
     {
       "path": "app.js",
       "category": "application",
-      "lines": 4264,
-      "bytes": 311537,
-      "sha256": "278cf7812de3cb3ac64816450b8478dcb7cff58f4d27c6026e5d233bce7fcc94",
+      "lines": 4338,
+      "bytes": 316001,
+      "sha256": "26cd7163a0abfe1dbf51c393103b4239d6937d494cf8aab721e96dc9f9cd2cc1",
       "requiredPasses": [
         "static",
         "consistency",
@@ -337,9 +337,9 @@
     {
       "path": "AUDIT_LEDGER.md",
       "category": "documentation",
-      "lines": 157,
-      "bytes": 24075,
-      "sha256": "71faf3a1668a236d0e22c6bf6ee061469016f106f8018ff3bd87ad9858c0c053",
+      "lines": 169,
+      "bytes": 26122,
+      "sha256": "0b6abc7e7c74881e0409f0d4a54f72654d04e4ce7f6c6762fdf8971f7c3df7e9",
       "requiredPasses": [
         "static",
         "consistency",
@@ -350,8 +350,8 @@
       "path": "AUDIT_LOOP.md",
       "category": "documentation",
       "lines": 128,
-      "bytes": 5407,
-      "sha256": "a8188cf87c167a04448a004727d9f8923ce3869349961a26cab22d8e06c576d1",
+      "bytes": 5469,
+      "sha256": "e2d43ae09b1c9e6759d44a3c12254b2b6fb9cbe09a0f544ca04ab42c14dc053c",
       "requiredPasses": [
         "static",
         "consistency",
@@ -373,9 +373,9 @@
     {
       "path": "CODEX_HANDOFF.md",
       "category": "documentation",
-      "lines": 354,
-      "bytes": 28053,
-      "sha256": "066ac4e367c8aeb3d5364f84e9f7c7af7da7443259275c626b7e4b0e2c23a2e7",
+      "lines": 431,
+      "bytes": 40468,
+      "sha256": "17eab4b3917f2304dddac5c2ac876e75c3b71a8b40040ad39d2b843c4435e804",
       "requiredPasses": [
         "static",
         "consistency",
@@ -385,9 +385,9 @@
     {
       "path": "index.html",
       "category": "ui",
-      "lines": 592,
-      "bytes": 45566,
-      "sha256": "56fa50e78ff1fb044caf5b026c485376ff6d366dc1b5ceedb3060a0da5c77f65",
+      "lines": 593,
+      "bytes": 45616,
+      "sha256": "b05f4bf397a8f0ae388a149051f3104e84b7734ddb3e82b3ca5db1042298c7ee",
       "requiredPasses": [
         "static",
         "consistency",
@@ -399,9 +399,9 @@
     {
       "path": "lib/analytics-core.js",
       "category": "analytics-core",
-      "lines": 2561,
-      "bytes": 135719,
-      "sha256": "644d0e2617c47d48cc818484a23bf12570c11f94d6d4034961a8024c873d0701",
+      "lines": 2618,
+      "bytes": 139124,
+      "sha256": "fbdcb231a970feb748348ac29d969205a031cc951e05b79eef25205cd71dca07",
       "requiredPasses": [
         "static",
         "consistency",
@@ -415,9 +415,23 @@
     {
       "path": "lib/api-guard.js",
       "category": "library",
-      "lines": 189,
-      "bytes": 8726,
-      "sha256": "4a38ac36003980a744baa5066058ed670f775eacf234bc6aa9d4d05fa68209a5",
+      "lines": 192,
+      "bytes": 8951,
+      "sha256": "7a6fda228ee2e1eca2875d0997dd79557889c6dc69aad18ecc59015086476cf5",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance"
+      ]
+    },
+    {
+      "path": "lib/cross-tab-lock.js",
+      "category": "library",
+      "lines": 150,
+      "bytes": 6327,
+      "sha256": "b4a45869962da8bbc958700ffbcb6f3e82c43466fd8b72a7b20978b182390c74",
       "requiredPasses": [
         "static",
         "consistency",
@@ -429,9 +443,9 @@
     {
       "path": "lib/durable-signals.js",
       "category": "library",
-      "lines": 376,
-      "bytes": 16109,
-      "sha256": "5fd9ef08370e1cbdef328eb248c5862327d72ab61e94a5c2b93b269d02110605",
+      "lines": 535,
+      "bytes": 24986,
+      "sha256": "139badb77c6aded3a7999c46e27a9f140a12d4bcf116fd8dca5ad3eae78aeb89",
       "requiredPasses": [
         "static",
         "consistency",
@@ -471,9 +485,9 @@
     {
       "path": "lib/signal-sync-client.js",
       "category": "library",
-      "lines": 280,
-      "bytes": 11395,
-      "sha256": "14f8379f0747da501a9c0364e6bbab54b3b1f450e9ad782ec8294252faff6856",
+      "lines": 314,
+      "bytes": 13828,
+      "sha256": "f4a7b82875266ceb6ced5dcd6a468a5904db235a5756698d40bd4bae7fe9c217",
       "requiredPasses": [
         "static",
         "consistency",
@@ -485,9 +499,9 @@
     {
       "path": "OPERATIONS_RUNBOOK.md",
       "category": "documentation",
-      "lines": 134,
-      "bytes": 7431,
-      "sha256": "76de79630f06a1c8201a6787a4c85dabab99f2b977064c07c7f819df1b570624",
+      "lines": 135,
+      "bytes": 7772,
+      "sha256": "c47d93b499a0818ff76064789f6b2f3f507fa96309f5a2e3b0bdeaef37b07bd6",
       "requiredPasses": [
         "static",
         "consistency",
@@ -522,8 +536,8 @@
       "path": "README.md",
       "category": "documentation",
       "lines": 92,
-      "bytes": 7726,
-      "sha256": "4396261affb4328c0c62e7931b2ff739277bcc8091f7df3569984a6a2689a177",
+      "bytes": 8332,
+      "sha256": "df6788a4a548d191b9b8f8f2448345de91615abf427cb2c288eac547cd7ad29e",
       "requiredPasses": [
         "static",
         "consistency",
@@ -561,9 +575,9 @@
     {
       "path": "scripts/dev-server.cjs",
       "category": "tooling",
-      "lines": 101,
-      "bytes": 3656,
-      "sha256": "7cd309de07a7b7e8bbcb534ff186ab40b382bf6b56d82fc52712ef4ee10a1327",
+      "lines": 123,
+      "bytes": 4474,
+      "sha256": "a33254e6f86cc92fdd8faab46f2e9013e5a5d2ce7bd00bf18e6979bae5ecf064",
       "requiredPasses": [
         "static",
         "consistency",
@@ -601,9 +615,9 @@
     {
       "path": "test/analytics-core.test.js",
       "category": "test",
-      "lines": 1371,
-      "bytes": 70546,
-      "sha256": "757b80f731b896b88bbf9d1027c4f0f2f27043c7e8c9c747926078289da5ed30",
+      "lines": 1372,
+      "bytes": 70655,
+      "sha256": "d963d3f376ba3c9b87f0d051d2d7e7c3cce4730fce0facbef6ae6afd2961c04c",
       "requiredPasses": [
         "static",
         "consistency",
@@ -615,9 +629,9 @@
     {
       "path": "test/api-guard.test.js",
       "category": "test",
-      "lines": 165,
-      "bytes": 8261,
-      "sha256": "f2027937374a4b9e6583288a88a7676c33197f3d41a877dd4c657d4f762f7cbb",
+      "lines": 175,
+      "bytes": 8892,
+      "sha256": "020223ce2c132c000725642fffde6d5ff582eaba2ed601e7abb755847f55f22b",
       "requiredPasses": [
         "static",
         "consistency",
@@ -641,11 +655,25 @@
       ]
     },
     {
+      "path": "test/cross-tab-lock.test.js",
+      "category": "test",
+      "lines": 113,
+      "bytes": 5301,
+      "sha256": "ea4a423ecad125a37974c7cbcb53a31e79f4c15620fa919ef8e1f501e42c70f2",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance"
+      ]
+    },
+    {
       "path": "test/defillama-api.test.js",
       "category": "test",
-      "lines": 94,
-      "bytes": 3802,
-      "sha256": "94ce4c0c4d0b7d6147e52c3c585644eae815b393f9a61d3e7eb1fef1be877e11",
+      "lines": 124,
+      "bytes": 5104,
+      "sha256": "6728afca05e96df7b698cd7a1e6a9b2e0ba2d978267f38bfb9661700b4ae8acd",
       "requiredPasses": [
         "static",
         "consistency",
@@ -657,9 +685,9 @@
     {
       "path": "test/dev-server.test.js",
       "category": "test",
-      "lines": 79,
-      "bytes": 3413,
-      "sha256": "da52c523834c00b0b697c3045a3b97707cd51c9e27511f2a3cf99180fd0e5da0",
+      "lines": 88,
+      "bytes": 3890,
+      "sha256": "83ab1742650a830f27fe84bd886cec57937a10863a64ceae7a5bb5511e932773",
       "requiredPasses": [
         "static",
         "consistency",
@@ -671,9 +699,9 @@
     {
       "path": "test/durable-signals.test.js",
       "category": "test",
-      "lines": 220,
-      "bytes": 9475,
-      "sha256": "82e901a2ae6179c919f4570e60a7b40baf021218b6b3049e00fffb744cdfc6ae",
+      "lines": 303,
+      "bytes": 13199,
+      "sha256": "2fc86503391caa28e56a9f671801aa4c3e9e375afd02bd11f9d1fbb7a516d74a",
       "requiredPasses": [
         "static",
         "consistency",
@@ -685,9 +713,9 @@
     {
       "path": "test/features.test.js",
       "category": "test",
-      "lines": 290,
-      "bytes": 18407,
-      "sha256": "de053b1a0818a89041e092b175ebbe0c8ed9c3ce5c8825f740a6f08b307507ba",
+      "lines": 318,
+      "bytes": 20573,
+      "sha256": "92f79fc5dab8dae301a10f6a87e938d7349f4af61410da6fb77b36b9fdd6ba00",
       "requiredPasses": [
         "static",
         "consistency",
@@ -713,9 +741,9 @@
     {
       "path": "test/institutional-api.test.js",
       "category": "test",
-      "lines": 149,
-      "bytes": 6910,
-      "sha256": "ff9be2e24d12d4836ea985f5a5d51a201df99da92c3aeeb43c58a4cec279896a",
+      "lines": 155,
+      "bytes": 7422,
+      "sha256": "888a46240f6cb5be845970b6f8fe4f6c733c0bd92c6a23ac1460f63e42d7f23b",
       "requiredPasses": [
         "static",
         "consistency",
@@ -727,9 +755,9 @@
     {
       "path": "test/macro-api.test.js",
       "category": "test",
-      "lines": 103,
-      "bytes": 4046,
-      "sha256": "bdddad31429895d76029054cbf7adaf3633bcc830ec7b7b6eee7d4c3aa349013",
+      "lines": 120,
+      "bytes": 4726,
+      "sha256": "6518e4ea172542085ad3263fdb9a933e2d4a07b1421bf514f6373b793c392e68",
       "requiredPasses": [
         "static",
         "consistency",
@@ -741,9 +769,9 @@
     {
       "path": "test/market-api.test.js",
       "category": "test",
-      "lines": 153,
-      "bytes": 6821,
-      "sha256": "69c6bfdd7c376917d72302ce79b01e7c9e38ebdd5c24aedcd9c77da9bc170eb2",
+      "lines": 170,
+      "bytes": 7713,
+      "sha256": "a655480acebb02675e1ee755c49ecd4498ebd81703534cf6ecbc11e78850b600",
       "requiredPasses": [
         "static",
         "consistency",
@@ -755,9 +783,9 @@
     {
       "path": "test/market-microstructure-api.test.js",
       "category": "test",
-      "lines": 162,
-      "bytes": 7866,
-      "sha256": "5492a2ff0d1d296f0ff7cd4fb70618e0038f811537e885950dc6b517787e54f5",
+      "lines": 176,
+      "bytes": 8506,
+      "sha256": "98f3acbf0a83fd445ab10ac6420c569fe9f7e4bc40d366d8595ab706307b44ad",
       "requiredPasses": [
         "static",
         "consistency",
@@ -769,9 +797,9 @@
     {
       "path": "test/news-api.test.js",
       "category": "test",
-      "lines": 54,
-      "bytes": 2073,
-      "sha256": "70175ac09368bbb21963a4bc5f6e981f80c3c9f118bb51bba081a60754c9d6a1",
+      "lines": 69,
+      "bytes": 2742,
+      "sha256": "3cceca40d339f09fac894e344edbe53399a6f190c41fc37f545f0808ccba75a8",
       "requiredPasses": [
         "static",
         "consistency",
@@ -783,9 +811,9 @@
     {
       "path": "test/options-api.test.js",
       "category": "test",
-      "lines": 123,
-      "bytes": 6084,
-      "sha256": "c182b82b11bd116d2234a9358e2c74471e76c09a369ccfde2690a6d242553546",
+      "lines": 146,
+      "bytes": 7136,
+      "sha256": "78a890982da12d75b8fe9ded06d4a48674b1519926c1d0ce3424ffd74e1ceb40",
       "requiredPasses": [
         "static",
         "consistency",
@@ -797,9 +825,9 @@
     {
       "path": "test/request-client.test.js",
       "category": "test",
-      "lines": 91,
-      "bytes": 3794,
-      "sha256": "58d4982e4862216c81bc418390018939b2bb5f2c46c1d85a04023e4f9c81a4fe",
+      "lines": 100,
+      "bytes": 4285,
+      "sha256": "166677bb5940508251e803597236904b328b83aec6b9100d1a7faea725107867",
       "requiredPasses": [
         "static",
         "consistency",
@@ -811,9 +839,9 @@
     {
       "path": "test/signal-sync-client.test.js",
       "category": "test",
-      "lines": 255,
-      "bytes": 10480,
-      "sha256": "031316b355abaff9bc7b5f918ae0c4b15a3228804c964f7b5fe9c02e78985fdd",
+      "lines": 513,
+      "bytes": 20702,
+      "sha256": "949095ee33646e15f8271af917f8ab233bea7e4940d65744c810848afc35a63e",
       "requiredPasses": [
         "static",
         "consistency",
@@ -825,9 +853,9 @@
     {
       "path": "test/signal-worker-api.test.js",
       "category": "test",
-      "lines": 227,
-      "bytes": 9924,
-      "sha256": "d0dbe2e0151c4daa69b97c2ebd5ab12198a0c614eca802eb83669bc80ea0cb08",
+      "lines": 297,
+      "bytes": 12920,
+      "sha256": "5806c7c717ff1d454aa5694f10a0618e9ded108aa1efb7a2023a5acfebf2ecaa",
       "requiredPasses": [
         "static",
         "consistency",
@@ -839,9 +867,9 @@
     {
       "path": "test/signals-api.test.js",
       "category": "test",
-      "lines": 140,
-      "bytes": 6323,
-      "sha256": "e22c66c7f131fd88a8b4eda47f162c7797e903d889863d3b70a0e85c560e0dfd",
+      "lines": 158,
+      "bytes": 7238,
+      "sha256": "98dcd6bb44337683f6848211a573409d696bcd358936c61efeea21b9197bc55c",
       "requiredPasses": [
         "static",
         "consistency",
@@ -853,9 +881,9 @@
     {
       "path": "test/tradfi-api.test.js",
       "category": "test",
-      "lines": 108,
-      "bytes": 3386,
-      "sha256": "214fcf1a3e2ebba5fdd72b4dba33b221089b8a553b9416e49c0348a77d2dc295",
+      "lines": 122,
+      "bytes": 4140,
+      "sha256": "77b3618c9fc8be8ac0c464ebf45c92383fef5aa8073d5475365abbbf5411f842",
       "requiredPasses": [
         "static",
         "consistency",

@@ -1,6 +1,6 @@
 # Loop exaustivo de auditoria
 
-Estado: **EM EXECUCAO VIA CODEX — AGUARDANDO CLAUDE CODE**
+Estado: **REVISADO PARCIALMENTE PELO CLAUDE CODE (2026-07-13, checkpoint `887ec57`)** — ver `CODEX_HANDOFF.md` REV-CC-01
 
 ## Objetivo
 

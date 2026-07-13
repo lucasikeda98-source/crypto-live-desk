@@ -1,6 +1,6 @@
 # Runbook operacional — Crypto Live Desk
 
-Estado: **CRIADO VIA CODEX — AGUARDANDO CLAUDE CODE**
+Estado: **REVISADO PARCIALMENTE PELO CLAUDE CODE (2026-07-13, checkpoint `887ec57`)** — ver `CODEX_HANDOFF.md` REV-CC-01
 
 Este documento define o caminho reproduzivel de desenvolvimento, verificacao, deploy e recuperacao. Ele nao autoriza publicar, mover o repositorio, criar segredos ou alterar recursos externos sem aprovacao do proprietario.
 
@@ -12,8 +12,9 @@ Este documento define o caminho reproduzivel de desenvolvimento, verificacao, de
 - Producao: `https://crypto-live-desk.vercel.app`.
 - Runtime verificado no projeto: Node.js 24.x; o codigo declara Node.js 22 ou superior.
 - Branch de trabalho desta rodada: `codex/cycle-d-sources`.
-- Baseline remoto atualmente inspecionado: commit `b124fcb68ef06e93f04fcbdc7bbeaa1b329d0324`.
-- Mudancas posteriores ao marco `803eb67` permanecem `AGUARDANDO CLAUDE CODE`.
+- Baseline remoto anterior: commit `b124fcb68ef06e93f04fcbdc7bbeaa1b329d0324` (preview `READY`).
+- Checkpoint atual: commit `887ec57` commitado e pushado para `origin/codex/cycle-d-sources` em 2026-07-13; **ainda nao deployado** (sem preview/producao para este commit).
+- Mudancas posteriores ao marco `803eb67` receberam revisao cruzada parcial do Claude Code (REV-CC-01); 24 seguem `AGUARDANDO CLAUDE CODE` com correcao exigida, 7 `CONFIRMADO`.
 
 Nunca concluir que o working tree, um preview e a producao sao equivalentes apenas porque o deploy esta `READY`. Compare commit, branch, URL e contrato exposto.
 

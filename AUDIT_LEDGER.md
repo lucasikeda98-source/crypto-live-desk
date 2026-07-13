@@ -8,10 +8,11 @@ Este arquivo e o indice operacional dos achados. Detalhes, provas e decisoes dev
 
 - Branch: `codex/cycle-d-sources`
 - Baseline inicial desta rodada: `b124fcb`
+- Checkpoint commitado: `887ec57` (pushado para `origin/codex/cycle-d-sources` em 2026-07-13; nao deployado)
 - Producao conhecida: responde, mas ainda expoe contrato anterior (CORS `*`, options/institutional sem os campos novos); nao equivale ao working tree Codex
 - Preview remoto conhecido: deployment `dpl_Hc3z4X4RJWd85y5adooo7oji749E`, commit `b124fcb`, `READY`, target nao-producao
 - Suite baseline: 98 testes deterministas aprovados na auditoria anterior
-- Checkpoint Codex atual: 215 testes deterministas aprovados; cobertura com pisos bloqueantes, rodada estatica/adversarial, auditoria de dependencias e navegador integrado reexecutados
+- Checkpoint Codex atual: 215 testes (contagem Codex). Reexecucao independente do Claude Code: 250/250 testes, cobertura 97,96/80,03/96,42 (exit 0), `node --check` e `git diff --check` limpos, navegador local com 24 cards e zero erro de console
 - Universo: consultar `AUDIT_INVENTORY.json`
 - Inventario final desta entrada: 59 arquivos, 16.762 linhas e 983.002 bytes auditaveis
 - Protocolo: consultar `AUDIT_LOOP.md`

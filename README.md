@@ -4,13 +4,13 @@ Dashboard de acompanhamento de mercado cripto com radar multiativos, leitura tec
 
 Producao atual: https://crypto-live-desk.vercel.app
 
-> **Divergencia operacional conhecida:** a producao ainda responde com um contrato anterior e nao contem a arvore Codex descrita abaixo. O checkpoint remoto mais novo inspecionado e um preview `READY` do commit `b124fcb`; nenhuma mudanca desta rodada foi publicada ou promovida.
+> **Divergencia operacional conhecida:** a producao ainda responde com um contrato anterior e nao contem a arvore Codex descrita abaixo. O checkpoint remoto mais novo inspecionado e um preview `READY` do commit `b124fcb`; nenhuma mudanca desta rodada foi publicada ou promovida. A arvore desta rodada foi commitada e pushada como `887ec57` (branch `codex/cycle-d-sources`), mas **nao deployada**: nao existe preview nem producao para esse commit.
 
 > **Transicao de desenvolvimento:** mudancas posteriores ao commit `803eb67` estao sendo realizadas pelo Codex e permanecem sujeitas a revisao independente no Claude Code. O marco, a autoria, os testes e o estado de cada conjunto de mudancas estao em [`CODEX_HANDOFF.md`](CODEX_HANDOFF.md).
 
 ## Estado do modelo
 
-O modelo analitico em estabilizacao usa a versao de auditoria `1.0.0-preview.7-codex.2`. O sufixo explicita que as mudancas desta rodada foram feitas via Codex e permanecem **AGUARDANDO CLAUDE CODE**. Ela implementa parte do contrato v1, sem declarar conformidade completa, e separa tres conceitos:
+O modelo analitico em estabilizacao usa a versao de auditoria `1.0.0-preview.7-codex.2`. O sufixo explicita que as mudancas desta rodada foram feitas via Codex e receberam revisao cruzada parcial do Claude Code (REV-CC-01, checkpoint `887ec57`): 41 achados `REVISADO PELO CLAUDE CODE`, 24 ainda `AGUARDANDO CLAUDE CODE` com correcao exigida e 7 `CONFIRMADO`. O codigo **nao esta pronto para producao** (2 defeitos P1 abertos; ver [`CODEX_HANDOFF.md`](CODEX_HANDOFF.md) REV-CC-01). Ela implementa parte do contrato v1, sem declarar conformidade completa, e separa tres conceitos:
 
 - **Radar Score:** ordena os 24 ativos no dashboard.
 - **Setup Score:** explica a confluencia do ativo e timeframe selecionados.
@@ -37,7 +37,7 @@ Abra `http://127.0.0.1:5173`.
 
 ## Testes
 
-O checkpoint Codex atual possui 215 testes unitarios/de integracao deterministas, com fontes remotas substituidas por fixtures/mocks. O CI tambem bloqueia cobertura abaixo de 95% linhas, 75% branches e 90% funcoes e audita dependencias:
+O checkpoint atual possui 250 testes unitarios/de integracao deterministas (reexecutados de forma independente pelo Claude Code em Node 24), com fontes remotas substituidas por fixtures/mocks. O CI tambem bloqueia cobertura abaixo de 95% linhas, 75% branches e 90% funcoes e audita dependencias (nota: o denominador de cobertura nao inclui `app.js`, que roda so no navegador — ver `OPS-014`):
 
 ```powershell
 npm.cmd test
