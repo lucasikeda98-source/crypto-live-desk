@@ -344,3 +344,80 @@ test('freshness por metrica impede serie nova de rejuvenescer serie antiga', () 
   assert.equal(core.isDatasetMetricEligible(detail, 'takerRatio', 10_000), true);
   assert.equal(core.calculateDerivativeDetailContribution({ detail, close: 105, vwap: 100, asOf: 10_000 }), 3);
 });
+
+test('funding contribution segue a mecanica da Binance: banda neutra assimetrica e extremos contrarian', () => {
+  // Baseline Binance ~ +0,01%/8h. Levemente positivo (0,01-0,03%) e ~zero sao normais -> 0.
+  assert.equal(core.calculateFundingContribution(0.0001), 0, 'baseline +0,01% e neutro');
+  assert.equal(core.calculateFundingContribution(0.0003), 0, 'ate +0,03% ainda normal em bull');
+  assert.equal(core.calculateFundingContribution(0), 0, 'equilibrio');
+  assert.equal(core.calculateFundingContribution(-0.0001), 0, 'topo da banda neutra no lado negativo');
+  // Extremo positivo = longs sobrecomprados -> contrarian bearish.
+  assert.equal(core.calculateFundingContribution(0.0006), -6, 'acima de 0,05% e long lotado extremo');
+  assert.equal(core.calculateFundingContribution(0.0004), -2, 'entre 0,03% e 0,05% pede cautela');
+  // Negativo = shorts dominantes -> combustivel de short squeeze.
+  assert.equal(core.calculateFundingContribution(-0.0003), 2, 'shorts dominantes (-0,01 a -0,05%)');
+  assert.equal(core.calculateFundingContribution(-0.0006), 4, 'shorts lotados abaixo de -0,05%');
+  // A curva e monotonica nao-crescente no funding (mais positivo nunca pontua melhor).
+  assert.ok(core.calculateFundingContribution(-0.0006) >= core.calculateFundingContribution(-0.0002));
+  assert.ok(core.calculateFundingContribution(-0.0002) >= core.calculateFundingContribution(0.0001));
+  assert.ok(core.calculateFundingContribution(0.0001) >= core.calculateFundingContribution(0.0004));
+  assert.ok(core.calculateFundingContribution(0.0004) >= core.calculateFundingContribution(0.0006));
+  // Dado ausente nao vira vies.
+  assert.equal(core.calculateFundingContribution(NaN), 0);
+  assert.equal(core.calculateFundingContribution(null), 0);
+});
+
+function freshDerivative(overrides) {
+  return Object.assign({ observedAt: 9_000, staleAfterMs: 2_000, dataStatus: 'fresh' }, overrides);
+}
+
+test('long/short: varejo e contrarian (leve) e top traders sao seguidos', () => {
+  const asOf = 10_000;
+  // globalLongShortAccountRatio = varejo. Lotado em long = topo (contrarian bearish leve).
+  assert.equal(core.calculateDerivativeDetailContribution({ detail: freshDerivative({ longShortRatio: 2.0 }), asOf }), -1);
+  // Varejo lotado em short = combustivel de short squeeze (contrarian bullish leve).
+  assert.equal(core.calculateDerivativeDetailContribution({ detail: freshDerivative({ longShortRatio: 0.5 }), asOf }), 1);
+  // topLongShortPositionRatio = smart money. Long dos top traders = seguir (bullish).
+  assert.equal(core.calculateDerivativeDetailContribution({ detail: freshDerivative({ topPositionRatio: 2.0 }), asOf }), 2);
+  // Short dos top traders = seguir (bearish).
+  assert.equal(core.calculateDerivativeDetailContribution({ detail: freshDerivative({ topPositionRatio: 0.5 }), asOf }), -2);
+});
+
+test('quadrante OIxpreco: tabela unica de 4 estados, sem penalizar contracao incondicional', () => {
+  // OI sobe + preco sobe = dinheiro novo comprando (tendencia saudavel).
+  assert.deepEqual(core.calculateOiPriceQuadrant(5, 2), { score: 3, phase: 'Long buildup' });
+  // OI sobe + preco cai = shorts novos (queda saudavel).
+  assert.deepEqual(core.calculateOiPriceQuadrant(5, -2), { score: -3, phase: 'Short buildup' });
+  // OI cai + preco sobe = short covering (subida fragil, mas nao bearish).
+  assert.deepEqual(core.calculateOiPriceQuadrant(-5, 2), { score: 2, phase: 'Short covering' });
+  // OI cai + preco cai = longs liquidados (capitulacao).
+  assert.deepEqual(core.calculateOiPriceQuadrant(-5, -2), { score: -4, phase: 'Long liquidation' });
+  // Contracao de OI NAO e mais penalizada de forma incondicional: com preco subindo e positivo.
+  assert.ok(core.calculateOiPriceQuadrant(-8, 1).score > 0);
+  // Dentro do limiar de OI = neutro.
+  assert.deepEqual(core.calculateOiPriceQuadrant(1, 5), { score: 0, phase: 'OI neutro' });
+  assert.deepEqual(core.calculateOiPriceQuadrant(-1, -5), { score: 0, phase: 'OI neutro' });
+  // Sem direcao de preco ou dado ausente = neutro.
+  assert.equal(core.calculateOiPriceQuadrant(5, 0).score, 0);
+  assert.equal(core.calculateOiPriceQuadrant(NaN, 2).score, 0);
+  assert.equal(core.calculateOiPriceQuadrant(5, NaN).score, 0);
+});
+
+test('quadrante OIxpreco: limiar de OI configuravel', () => {
+  assert.equal(core.calculateOiPriceQuadrant(4, 2, 6).score, 0, 'abaixo do limiar 6 e neutro');
+  assert.equal(core.calculateOiPriceQuadrant(7, 2, 6).score, 3, 'acima do limiar 6 pontua');
+});
+
+test('long/short: divergencia varejo x top traders soma a favor do smart money', () => {
+  const asOf = 10_000;
+  // Classico: varejo vendido (0.5 -> +1) enquanto top traders comprados (2.0 -> +2) = +3 bullish.
+  const bullishDivergence = core.calculateDerivativeDetailContribution({
+    detail: freshDerivative({ longShortRatio: 0.5, topPositionRatio: 2.0 }), asOf
+  });
+  assert.equal(bullishDivergence, 3);
+  // Espelho bearish: varejo comprado (2.0 -> -1) e top vendidos (0.5 -> -2) = -3.
+  const bearishDivergence = core.calculateDerivativeDetailContribution({
+    detail: freshDerivative({ longShortRatio: 2.0, topPositionRatio: 0.5 }), asOf
+  });
+  assert.equal(bearishDivergence, -3);
+});

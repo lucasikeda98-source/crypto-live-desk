@@ -1,5 +1,5 @@
 (function () {
-  var MODEL_VERSION = '1.0.0-preview.2';
+  var MODEL_VERSION = '1.0.0-preview.3';
   var AnalyticsCore = window.CryptoAnalyticsCore;
   if (!AnalyticsCore) throw new Error('CryptoAnalyticsCore nao foi carregado.');
   var RULESET_HASH = AnalyticsCore.rulesetHash();
@@ -650,7 +650,7 @@
     var momScore = (Number.isFinite(rsi14) ? (rsi14 > 52 && rsi14 < 70 ? 12 : rsi14 >= 78 ? -8 : rsi14 >= 70 ? 3 : rsi14 < 35 ? -10 : 0) : 0) + (Number.isFinite(macdNow.hist) ? (macdNow.hist > 0 ? 8 : -8) : 0) + (Number.isFinite(stochRsi14) ? (stochRsi14 > 80 ? -3 : stochRsi14 < 20 ? 3 : 0) : 0);
     var flowScore = candleFlow.score;
     var derivScore = 0;
-    if (Number.isFinite(funding)) derivScore += funding > 0.0003 ? -6 : funding > 0 ? 3 : funding < -0.0001 ? 1 : -2;
+    derivScore += AnalyticsCore.calculateFundingContribution(funding);
     if (Number.isFinite(basis)) derivScore += basis > 0 ? 3 : -3;
     var chainScore = options.chainScore || 0;
     var bookScore = options.bookScore || 0;
@@ -1386,10 +1386,11 @@
     else if (a.deltaSum < 0 && a.cmf20 < -0.05) score -= 4;
     var detail = scoreableDerivativeDetail(a.derivativeDetail);
     if (Number.isFinite(detail.oiChangePct)) {
-      if (detail.oiChangePct > 3 && a.roc12 > 0) { oiPhase = 'Long buildup'; score += 3; }
-      else if (detail.oiChangePct > 3 && a.roc12 < 0) { oiPhase = 'Short buildup'; score -= 3; }
-      else if (detail.oiChangePct < -3 && a.roc12 > 0) { oiPhase = 'Short covering'; score += 2; }
-      else if (detail.oiChangePct < -3 && a.roc12 < 0) { oiPhase = 'Long liquidation'; score -= 4; }
+      // Price matched to the OI window (falls back to roc12 when the window can't be resolved).
+      var oiPriceSignal = Number.isFinite(a.oiPriceChangePct) ? a.oiPriceChangePct : a.roc12;
+      var quadrant = AnalyticsCore.calculateOiPriceQuadrant(detail.oiChangePct, oiPriceSignal);
+      oiPhase = quadrant.phase;
+      score += quadrant.score;
     }
     return { score: clamp(Math.round(score), -18, 18), structure: a.structure, liquidity: liquidity, imbalance: imbalance, oiPhase: oiPhase };
   }
@@ -1441,7 +1442,7 @@
     var smart = smartMoneyAnalysis(a);
     var flow = clamp(Math.round(a.flowScore * 0.48 + a.bookScore * 0.35 + smart.score * 0.55), -18, 18);
     var optionsData = a.options || state.options;
-    var derivativeDetail = AnalyticsCore.calculateDerivativeDetailContribution({ detail: a.derivativeDetail, options: optionsData, close: a.close, vwap: a.vwap, asOf: Date.now() });
+    var derivativeDetail = AnalyticsCore.calculateDerivativeDetailContribution({ detail: a.derivativeDetail, options: optionsData, close: a.close, vwap: a.vwap, oiPriceChangePct: a.oiPriceChangePct, asOf: Date.now() });
     var derivatives = clamp(Math.round(a.derivScore * 1.25 + derivativeDetail), -12, 12);
     var scoreChain = eligibleDataset(a.coinMetrics) ? a.chainScore : (Number.isFinite(a.nativeChainScore) ? a.nativeChainScore : 0);
     var chain = clamp(Math.round(scoreChain + external.defi * 0.45 + external.asset * 0.2), -10, 10);
@@ -1805,11 +1806,13 @@
     return Math.max(DERIVATIVES_REFRESH_MS * 3, unit * 2 * 60 * 1000);
   }
   function normalizeDerivativeDetail(oiHist, fundingRows, longShortRows, takerRows, topAccountRows, topPositionRows, basisRows) {
-    var oiChangePct = NaN;
+    var oiChangePct = NaN, oiWindowStart = NaN, oiWindowEnd = NaN;
     if (Array.isArray(oiHist) && oiHist.length > 1) {
       var firstOi = +oiHist[0].sumOpenInterestValue || +oiHist[0].sumOpenInterest || 0;
       var lastOi = +oiHist[oiHist.length - 1].sumOpenInterestValue || +oiHist[oiHist.length - 1].sumOpenInterest || 0;
       oiChangePct = firstOi ? ((lastOi - firstOi) / firstOi) * 100 : NaN;
+      oiWindowStart = +oiHist[0].timestamp;
+      oiWindowEnd = +oiHist[oiHist.length - 1].timestamp;
     }
     var fundingAvg = NaN;
     if (Array.isArray(fundingRows) && fundingRows.length) fundingAvg = avg(fundingRows.map(function (row) { return +row.fundingRate; }).filter(Number.isFinite));
@@ -1830,6 +1833,8 @@
     var observedTimes = Object.keys(metricObservedAt).map(function (key) { return metricObservedAt[key]; }).filter(Number.isFinite);
     return {
       oiChangePct: oiChangePct,
+      oiWindowStart: Number.isFinite(oiWindowStart) ? oiWindowStart : NaN,
+      oiWindowEnd: Number.isFinite(oiWindowEnd) ? oiWindowEnd : NaN,
       fundingAvg: fundingAvg,
       longShortRatio: latestLongShort ? +latestLongShort.longShortRatio : NaN,
       longAccount: latestLongShort ? +latestLongShort.longAccount : NaN,
@@ -1897,6 +1902,23 @@
     state.derivativeCache[key] = { value: detail, fetchedAt: detail.fetchedAt };
     return markedDetail;
   }
+  // Price change over the OI history window, so OIxprice quadrants read both in the same window.
+  function priceChangeOverWindow(candles, startTs, endTs) {
+    if (!Array.isArray(candles) || candles.length < 2) return NaN;
+    var start = Number(startTs), end = Number(endTs);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return NaN;
+    var startCandle = null, endCandle = null;
+    for (var i = 0; i < candles.length; i++) {
+      var t = Number.isFinite(candles[i].closeTime) ? candles[i].closeTime : candles[i].time;
+      if (!Number.isFinite(t)) continue;
+      if (t <= start) startCandle = candles[i];
+      if (t <= end) endCandle = candles[i];
+    }
+    if (!startCandle) startCandle = candles[0];
+    if (!endCandle || endCandle === startCandle) return NaN;
+    if (!Number.isFinite(startCandle.close) || !startCandle.close) return NaN;
+    return (endCandle.close - startCandle.close) / startCandle.close * 100;
+  }
   async function refreshSelected(ticker, premium, chain, force, symbol, interval, requestId) {
     var s = encodeURIComponent(symbol);
     var p = futuresPeriod(interval);
@@ -1928,6 +1950,7 @@
     }
     var analysis = mergeSelected(symbol, closedCandles, value(results[3]), value(results[1]), value(results[4]), value(results[2]), chain || {}, chainAdjustment);
     analysis.derivativeDetail = value(results[5]) || {};
+    analysis.oiPriceChangePct = priceChangeOverWindow(closedCandles, analysis.derivativeDetail.oiWindowStart, analysis.derivativeDetail.oiWindowEnd);
     analysis.coinMetrics = coinMetrics;
     analysis.options = options;
     analysis.institutional = institutional;
