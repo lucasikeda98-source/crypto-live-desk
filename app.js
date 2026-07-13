@@ -3492,6 +3492,10 @@
           group.forEach(function (record) {
             var outcome = AnalyticsCore.evaluateSignalOutcome(record, candles);
             if (!outcome) return;
+            // Um fetch vazio/insuficiente devolve um outcome todo-null (truthy): sem este guard o
+            // status contaria o sinal como "avaliado" sem nenhum horizonte preenchido.
+            var filledAny = Object.keys(outcome).some(function (name) { return AnalyticsCore.toFiniteNumber(outcome[name]) !== null; });
+            if (!filledAny) return;
             var match = stored.find(function (row) { return row.inputSnapshotId === record.inputSnapshotId && row.signalCloseTime === record.signalCloseTime; });
             if (!match) return;
             match.outcome = AnalyticsCore.mergeSignalOutcome(match.outcome, outcome);
