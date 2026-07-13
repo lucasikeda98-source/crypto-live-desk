@@ -239,6 +239,51 @@ test('mempool BTC somente influencia o score nativo de Bitcoin', () => {
   assert.equal(altcoin.eligibleForScore, false);
 });
 
+test('classifyHttpError separa rate limit (429/418) de servidor e cliente', () => {
+  assert.equal(core.classifyHttpError(429), 'rateLimit');
+  assert.equal(core.classifyHttpError(418), 'rateLimit');
+  assert.equal(core.classifyHttpError(500), 'server');
+  assert.equal(core.classifyHttpError(503), 'server');
+  assert.equal(core.classifyHttpError(404), 'client');
+  assert.equal(core.classifyHttpError(400), 'client');
+  assert.equal(core.classifyHttpError(200), 'ok');
+});
+
+test('parseRetryAfter aceita segundos e data HTTP, nunca negativo', () => {
+  assert.equal(core.parseRetryAfter('30', 0), 30_000);
+  assert.equal(core.parseRetryAfter('0', 0), 0);
+  assert.equal(core.parseRetryAfter(null, 0), 0);
+  assert.equal(core.parseRetryAfter('lixo', 0), 0);
+  const future = new Date(60_000).toUTCString();
+  assert.equal(core.parseRetryAfter(future, 0), 60_000);
+  assert.equal(core.parseRetryAfter(new Date(1_000).toUTCString(), 60_000), 0, 'data no passado nao vira negativo');
+});
+
+test('source throttle bloqueia fonte apos 429/418 e faz backoff exponencial ate desbloquear', () => {
+  const throttle = core.createSourceThrottle({ baseCooldownMs: 1_000, maxCooldownMs: 60_000 });
+  assert.equal(throttle.isBlocked('Binance', 0), false, 'fonte nova nao esta bloqueada');
+
+  const wait1 = throttle.penalize('Binance', 0, 0);
+  assert.equal(wait1, 1_000, 'primeiro strike = cooldown base');
+  assert.equal(throttle.isBlocked('Binance', 500), true, 'bloqueada durante o cooldown');
+  assert.equal(throttle.isBlocked('Binance', 1_000), false, 'liberada apos o cooldown');
+
+  const wait2 = throttle.penalize('Binance', 0, 1_000);
+  assert.equal(wait2, 2_000, 'segundo strike dobra o cooldown');
+
+  // Retry-After maior que o backoff prevalece.
+  const wait3 = throttle.penalize('Binance', 30_000, 3_000);
+  assert.equal(wait3, 30_000);
+
+  // Outra fonte e independente.
+  assert.equal(throttle.isBlocked('Deribit', 3_000), false);
+
+  // Sucesso zera os strikes e desbloqueia.
+  throttle.succeed('Binance');
+  assert.equal(throttle.isBlocked('Binance', 3_001), false);
+  assert.equal(throttle.penalize('Binance', 0, 10_000), 1_000, 'apos sucesso o backoff reinicia da base');
+});
+
 test('request gate invalida respostas obsoletas', () => {
   const gate = core.createRequestGate();
   const first = gate.begin();

@@ -4,6 +4,7 @@
   if (!AnalyticsCore) throw new Error('CryptoAnalyticsCore nao foi carregado.');
   var RULESET_HASH = AnalyticsCore.rulesetHash();
   var refreshGate = AnalyticsCore.createRequestGate();
+  var sourceThrottle = AnalyticsCore.createSourceThrottle({ baseCooldownMs: 5000, maxCooldownMs: 300000 });
   var REFRESH_MS = 3000;
   var BOARD_REFRESH_MS = 15000;
   var DERIVATIVES_REFRESH_MS = 15000;
@@ -201,16 +202,37 @@
     };
   }
   async function fetchJSON(url, timeout, source) {
+    // Circuit breaker: while a source is in rate-limit cooldown, fail fast without hitting the API.
+    if (source && sourceThrottle.isBlocked(source, Date.now())) {
+      var cooldownError = new Error('rate-limit cooldown');
+      cooldownError.category = 'rateLimit';
+      cooldownError.throttled = true;
+      health(source, false, 'cooldown de rate limit ate ' + new Date(sourceThrottle.retryAt(source)).toLocaleTimeString('pt-BR'));
+      throw cooldownError;
+    }
     var controller = new AbortController();
     var id = setTimeout(function () { controller.abort(); }, timeout || 9000);
     try {
       var res = await fetch(url, { signal: controller.signal, cache: 'no-store' });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
+      if (!res.ok) {
+        var httpError = new Error('HTTP ' + res.status);
+        httpError.status = res.status;
+        httpError.category = AnalyticsCore.classifyHttpError(res.status);
+        if (httpError.category === 'rateLimit') {
+          var retryAfterMs = AnalyticsCore.parseRetryAfter(res.headers.get('Retry-After'), Date.now());
+          var wait = sourceThrottle.penalize(source, retryAfterMs, Date.now());
+          health(source, false, 'rate limit ' + res.status + ' | cooldown ' + Math.round(wait / 1000) + 's');
+        } else {
+          health(source, false, 'HTTP ' + res.status);
+        }
+        throw httpError;
+      }
       var data = await res.json();
+      if (source) sourceThrottle.succeed(source);
       health(source, true, 'online');
       return data;
     } catch (error) {
-      health(source, false, error && error.name === 'AbortError' ? 'timeout' : (error.message || 'falhou'));
+      if (!error || !error.category) health(source, false, error && error.name === 'AbortError' ? 'timeout' : (error && error.message) || 'falhou');
       throw error;
     } finally { clearTimeout(id); }
   }
@@ -219,9 +241,13 @@
     for (var i = 0; i < BINANCE_SPOT_BASES.length; i++) {
       try {
         var data = await fetchJSON(BINANCE_SPOT_BASES[i] + path, timeout, source);
-        if (i > 0) health(source, true, 'fallback api.binance.com');
+        if (i > 0) health(source, true, 'fallback ' + BINANCE_SPOT_BASES[i]);
         return data;
-      } catch (error) { lastError = error; }
+      } catch (error) {
+        lastError = error;
+        // Rate limit / cooldown: never try another Binance host (spreads the IP ban further).
+        if (error && (error.category === 'rateLimit' || error.throttled)) break;
+      }
     }
     throw lastError || new Error('Binance spot indisponivel');
   }
