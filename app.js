@@ -680,6 +680,20 @@
     var deltaSum = candleFlow.deltaSum;
     var avgVol = candleFlow.averageVolume;
     var lastVol = candleFlow.lastVolume;
+    // Ciclo B: deteccao rapida de virada — estrutura (CHoCH/BOS), divergencia RSI/OBV nos dois
+    // ultimos pivots, exaustao por climax de volume e squeeze BB/Keltner com liberacao.
+    var obvValues = AnalyticsCore.obvSeries(candles);
+    var structureShift = AnalyticsCore.detectStructureShift(candles, pv.highs, pv.lows);
+    var rsiDivergence = AnalyticsCore.detectDivergence(candles, rsiValues, pv.highs, pv.lows);
+    var obvDivergence = AnalyticsCore.detectDivergence(candles, obvValues, pv.highs, pv.lows);
+    var divergence = {
+      bearish: rsiDivergence.bearish || obvDivergence.bearish,
+      bullish: rsiDivergence.bullish || obvDivergence.bullish,
+      double: (rsiDivergence.bearish && obvDivergence.bearish) || (rsiDivergence.bullish && obvDivergence.bullish)
+    };
+    var divergenceScore = (divergence.bullish ? 5 : 0) + (divergence.bearish ? -5 : 0);
+    var volumeClimax = AnalyticsCore.detectVolumeClimax(candles, atr14);
+    var squeeze = AnalyticsCore.detectSqueeze(candles, { deltaSum: deltaSum });
     var funding = premium ? +premium.lastFundingRate : NaN;
     var basis = premium ? (+premium.markPrice - +premium.indexPrice) : NaN;
     var currentBar = last(candles);
@@ -689,14 +703,14 @@
     var trendScore = (Number.isFinite(ema9) ? (close > ema9 ? 6 : -6) : 0) + (Number.isFinite(ema21) ? (close > ema21 ? 8 : -8) : 0) + (Number.isFinite(ema50) ? (close > ema50 ? 10 : -10) : 0) + (Number.isFinite(ema21) && Number.isFinite(ema50) ? (ema21 > ema50 ? 8 : -8) : 0) + (adxNow.adx > 25 && adxNow.plus > adxNow.minus ? 4 : adxNow.adx > 25 && adxNow.minus > adxNow.plus ? -4 : 0);
     var momScore = (Number.isFinite(rsi14) ? (rsi14 > 52 && rsi14 < 70 ? 12 : rsi14 >= 78 ? -8 : rsi14 >= 70 ? 3 : rsi14 < 35 ? -10 : 0) : 0) + (Number.isFinite(macdNow.hist) ? (macdNow.hist > 0 ? 8 : -8) : 0) + (Number.isFinite(stochRsi14) ? (stochRsi14 > 80 ? -3 : stochRsi14 < 20 ? 3 : 0) : 0);
     var flowScore = candleFlow.score;
-    var derivScore = 0;
-    derivScore += AnalyticsCore.calculateFundingContribution(funding);
+    var fundingScore = AnalyticsCore.calculateFundingContribution(funding);
+    var derivScore = fundingScore;
     if (Number.isFinite(basis)) derivScore += basis > 0 ? 3 : -3;
     var chainScore = options.chainScore || 0;
     var bookScore = options.bookScore || 0;
-    var score = clamp(Math.round(trendScore + momScore + flowScore + derivScore + chainScore + bookScore), -100, 100);
+    var score = clamp(Math.round(trendScore + momScore + flowScore + derivScore + chainScore + bookScore + structureShift.score + divergenceScore + squeeze.score), -100, 100);
     var bias = biasFromScore(score);
-    return { modelVersion: MODEL_VERSION, close: close, ema9: ema9, ema21: ema21, ema20: ema20, ema50: ema50, ema200: ema200, rsi14: rsi14, rsiValues: rsiValues, stochRsi14: stochRsi14, mfi14: mfi14, atr14: atr14, macd: macdNow, macdData: macdData, bb: bb, bbPctB: bbPctB, bbWidth: bbWidth, vwap: vwapNow, adx: adxNow, supertrend: supertrendNow, keltner: keltnerNow, donchian: donchianNow, roc12: roc12, obv: obvNow, cmf20: cmf20, realizedVol30: realizedVol30, zScore20: zScore20, williams14: williams14, cci20: cci20, ichimoku: ichimokuNow, fvg: fvg, patterns: patterns, displacement: displacement, regime: regime, supports: supports, resistances: resistances, structure: structure, sweepDown: sweepDown, sweepUp: sweepUp, priorLow: priorLow, priorHigh: priorHigh, deltaSum: deltaSum, avgVol: avgVol, lastVol: lastVol, funding: funding, basis: basis, score: score, bias: bias, trendScore: trendScore, momScore: momScore, flowScore: flowScore, flowAvailable: candleFlow.available, flowCoverage: candleFlow.coverage, candleCount: candles.length, derivScore: derivScore, chainScore: chainScore, bookScore: bookScore, ticker: ticker };
+    return { modelVersion: MODEL_VERSION, close: close, ema9: ema9, ema21: ema21, ema20: ema20, ema50: ema50, ema200: ema200, rsi14: rsi14, rsiValues: rsiValues, stochRsi14: stochRsi14, mfi14: mfi14, atr14: atr14, macd: macdNow, macdData: macdData, bb: bb, bbPctB: bbPctB, bbWidth: bbWidth, vwap: vwapNow, adx: adxNow, supertrend: supertrendNow, keltner: keltnerNow, donchian: donchianNow, roc12: roc12, obv: obvNow, cmf20: cmf20, realizedVol30: realizedVol30, zScore20: zScore20, williams14: williams14, cci20: cci20, ichimoku: ichimokuNow, fvg: fvg, patterns: patterns, displacement: displacement, regime: regime, supports: supports, resistances: resistances, structure: structure, sweepDown: sweepDown, sweepUp: sweepUp, priorLow: priorLow, priorHigh: priorHigh, deltaSum: deltaSum, avgVol: avgVol, lastVol: lastVol, funding: funding, basis: basis, score: score, bias: bias, trendScore: trendScore, momScore: momScore, flowScore: flowScore, fundingScore: fundingScore, structureShift: structureShift, divergence: divergence, divergenceScore: divergenceScore, volumeClimax: volumeClimax, squeeze: squeeze, flowAvailable: candleFlow.available, flowCoverage: candleFlow.coverage, candleCount: candles.length, derivScore: derivScore, chainScore: chainScore, bookScore: bookScore, ticker: ticker };
   }
   function depthWindow(depth, mid, pct) {
     var bidQty = 0, askQty = 0, bidNotional = 0, askNotional = 0;
@@ -1141,11 +1155,12 @@
     }
     var finiteOr = function (value, fallback) { var parsed = AnalyticsCore.toFiniteNumber(value); return parsed === null ? fallback : parsed; };
     if (market) {
-      var d24 = finiteOr(market.price_change_percentage_24h_in_currency, finiteOr(market.price_change_percentage_24h, NaN));
+      // d24 fica fora: o momentum de 24h ja e componente proprio do radar (momentum24h) e
+      // entrava duplicado aqui; o bloco fundamental le posicionamento de medio prazo (7d/30d).
       var d7 = finiteOr(market.price_change_percentage_7d_in_currency, NaN);
       var d30 = finiteOr(market.price_change_percentage_30d_in_currency, NaN);
-      var assetRaw = (Number.isFinite(d24) ? d24 * 1.1 : 0) + (Number.isFinite(d7) ? d7 * 0.35 : 0) + (Number.isFinite(d30) ? d30 * 0.1 : 0);
-      asset = Number.isFinite(d24) || Number.isFinite(d7) || Number.isFinite(d30) ? clamp(Math.round(assetRaw), -12, 12) : 0;
+      var assetRaw = (Number.isFinite(d7) ? d7 * 0.45 : 0) + (Number.isFinite(d30) ? d30 * 0.15 : 0);
+      asset = Number.isFinite(d7) || Number.isFinite(d30) ? clamp(Math.round(assetRaw), -12, 12) : 0;
       if (finiteOr(market.market_cap_rank, Infinity) <= 10) asset += 1;
     }
     if (chain) {
@@ -1235,10 +1250,13 @@
     var cross = (a.patterns || []).find(function (pattern) { return pattern.name === 'Golden cross' || pattern.name === 'Death cross'; });
     return { interval: interval, score: score, bias: score >= 12 ? 'Alta' : score <= -12 ? 'Baixa' : 'Neutro', close: a.close, closeTime: candles.length ? last(candles).closeTime : NaN, rsi: a.rsi14, adx: a.adx.adx, macd: a.macd.hist, structure: a.structure, regime: a.regime, cross: cross ? cross.name : (Number.isFinite(a.ema200) ? (a.ema50 >= a.ema200 ? 'EMA50 > EMA200' : 'EMA50 < EMA200') : 'sem EMA200'), patterns: (a.patterns || []).slice(0, 3) };
   }
-  function summarizeMultiTimeframe(rows) {
+  function summarizeMultiTimeframe(rows, selectedInterval) {
     // Aggregation (weights, directional alignment, bias) lives in the lib so it is tested and
     // covered by the ruleset registry; this wrapper only reattaches the rows for rendering.
-    return Object.assign({ rows: rows }, AnalyticsCore.aggregateMultiTimeframe(rows));
+    // The chart's own timeframe is EXCLUDED from the aggregate: it is already fully scored by
+    // the technical bucket, and the MTF block must measure INDEPENDENT confirmation.
+    var aggregationRows = rows.filter(function (row) { return row.interval !== selectedInterval; });
+    return Object.assign({ rows: rows }, AnalyticsCore.aggregateMultiTimeframe(aggregationRows));
   }
   async function loadMultiTimeframe(symbol, selectedInterval, force, selectedCandles) {
     var intervals = MTF_INTERVALS.concat([selectedInterval]).filter(function (value, index, array) { return array.indexOf(value) === index; });
@@ -1256,7 +1274,7 @@
       state.mtfCache[key] = { value: snapshot, fetchedAt: Date.now() };
       return snapshot;
     }));
-    return summarizeMultiTimeframe(results.map(value).filter(Boolean));
+    return summarizeMultiTimeframe(results.map(value).filter(Boolean), selectedInterval);
   }
   function median(values) {
     if (!values.length) return NaN;
@@ -1463,7 +1481,12 @@
   function dataQuality(a) {
     var closedCount = selectClosedCandles(state.klines).length;
     var technicalQuality = Math.min(1, closedCount / 220);
-    var mtfQuality = Math.min(1, ((state.mtf && state.mtf.rows.length) || 0) / 5);
+    // Quality = coverage of the CANONICAL timeframes (the weekly leg matters most), not raw row
+    // count — the chart TF row used to inflate this while 1w was missing.
+    var mtfRows = (state.mtf && state.mtf.rows) || [];
+    var mtfQuality = MTF_INTERVALS.filter(function (interval) {
+      return mtfRows.some(function (row) { return row.interval === interval; });
+    }).length / MTF_INTERVALS.length;
     var historyQuality = historyFresh(a.history) ? Math.min(1, (a.history.samples || 0) / 20) : 0;
     var flowChecks = [Number.isFinite(a.deltaSum) && Number.isFinite(a.cmf20), Number.isFinite(a.spreadBps) && Number.isFinite(a.buySlipBps)];
     var flowQuality = flowChecks.filter(Boolean).length / flowChecks.length;
@@ -1508,13 +1531,33 @@
   function buildConfluence(a) {
     var news = scoreNews(state.symbol);
     var external = a.external && eligibleDataset(a.external) ? a.external : scoreExternalContext(state.symbol);
-    var technical = clamp(Math.round(a.trendScore * 0.32 + a.momScore * 0.42), -20, 20);
+    // CHoCH/BOS e divergencia entram no tecnico com peso integral (nao diluidos pelos fatores
+    // 0.32/0.42 dos scores continuos) — sao eventos discretos de virada.
+    var technical = clamp(Math.round(a.trendScore * 0.32 + a.momScore * 0.42 + (a.structureShift ? a.structureShift.score : 0) + (a.divergenceScore || 0)), -20, 20);
     var multi = state.mtf || { score: 0, alignment: 0, bias: 'Misto', rows: [] };
     var smart = smartMoneyAnalysis(a);
-    var flow = clamp(Math.round(a.flowScore * 0.48 + a.bookScore * 0.35 + smart.score * 0.55), -18, 18);
+    var trapScore = a.trap && a.trap.trap ? a.trap.score : 0;
+    var squeezeScore = a.squeeze ? a.squeeze.score : 0;
+    var flow = clamp(Math.round(a.flowScore * 0.48 + a.bookScore * 0.35 + smart.score * 0.55 + trapScore + squeezeScore), -18, 18);
     var optionsData = a.options || state.options;
-    var derivativeDetail = AnalyticsCore.calculateDerivativeDetailContribution({ detail: a.derivativeDetail, options: optionsData, close: a.close, vwap: a.vwap, oiPriceChangePct: a.oiPriceChangePct, asOf: Date.now() });
-    var derivatives = clamp(Math.round(a.derivScore * 1.25 + derivativeDetail), -12, 12);
+    var detailPercentiles = a.derivativeDetail && a.derivativeDetail.percentiles ? a.derivativeDetail.percentiles : {};
+    var carry = AnalyticsCore.calculateCarryRegime({
+      fundingAvg: a.derivativeDetail ? a.derivativeDetail.fundingAvg : null,
+      oiPercentile: detailPercentiles.oi
+    });
+    var derivativeDetail = AnalyticsCore.calculateDerivativeDetailContribution({
+      detail: a.derivativeDetail,
+      options: optionsData,
+      close: a.close,
+      vwap: a.vwap,
+      oiPriceChangePct: a.oiPriceChangePct,
+      percentiles: detailPercentiles,
+      muteOiQuadrant: carry.muteBuildup,
+      asOf: Date.now()
+    });
+    // Funding scores ONCE in the setup: via the detail contribution (percentile or fundingAvg
+    // fallback). derivScore keeps it for the radar/board, so subtract it here.
+    var derivatives = clamp(Math.round((a.derivScore - (a.fundingScore || 0)) * 1.25 + derivativeDetail + carry.carryScore), -12, 12);
     var scoreChain = eligibleDataset(a.coinMetrics) ? a.chainScore : (Number.isFinite(a.nativeChainScore) ? a.nativeChainScore : 0);
     var chain = clamp(Math.round(scoreChain + external.defi * 0.45 + external.asset * 0.2), -10, 10);
     var etfFlow = latestEtfFlow(a.institutional || state.institutional);
@@ -1530,25 +1573,41 @@
     if (Number.isFinite(a.bb.latestLower) && a.close < a.bb.latestLower && a.rsi14 <= 35) risk -= 6;
     if (a.sweepDown && a.close > a.vwap) risk += 5;
     if (a.sweepUp) risk -= 5;
-    if (volumeRatio > 1.45 && a.deltaSum > 0) risk += 4;
-    if (volumeRatio > 1.45 && a.deltaSum < 0) risk -= 4;
+    var climax = a.volumeClimax && a.volumeClimax.climax ? a.volumeClimax : null;
+    if (climax) {
+      // Volume climatico com fecho no terco oposto e exaustao: warning contra a tendencia,
+      // nunca o antigo bonus pro-tendencia por "volume alto".
+      risk += climax.direction === 'exhaustion-top' ? -5 : 5;
+    } else {
+      if (volumeRatio > 1.45 && a.deltaSum > 0) risk += 4;
+      if (volumeRatio > 1.45 && a.deltaSum < 0) risk -= 4;
+    }
     var liq = liquidationSummary();
     if (liq.total > 0 && liq.longValue > liq.shortValue * 2 && a.sweepDown) risk += 2;
     if (liq.total > 0 && liq.shortValue > liq.longValue * 2 && a.sweepUp) risk -= 2;
-    risk = clamp(risk, -10, 10);
+    risk = clamp(risk, -14, 14);
     var total = clamp(Math.round(technical + multi.score + flow + derivatives + chain + macro + historyScore + risk), -100, 100);
     var quality = dataQuality(a);
+    // Gate HTF: 1d e 1w precisam existir e nao podem estar ambos contra a direcao da entrada.
+    var htf1d = multi.rows ? multi.rows.find(function (row) { return row.interval === '1d'; }) : null;
+    var htf1w = multi.rows ? multi.rows.find(function (row) { return row.interval === '1w'; }) : null;
+    var htfGateAvailable = !!(htf1d && htf1w);
+    var htfVetoLong = htfGateAvailable && htf1d.bias === 'Baixa' && htf1w.bias === 'Baixa';
+    var htfVetoShort = htfGateAvailable && htf1d.bias === 'Alta' && htf1w.bias === 'Alta';
+    var trapVeto = activeTrapVeto(a);
     var decision = 'Sem entrada clara';
     var tone = 'wait';
-    if (total >= 60 && multi.bias === 'Alta' && multi.alignment >= 0.6 && quality >= 63) { decision = 'Entrada favoravel'; tone = 'long'; }
-    else if (total >= 42 && multi.score >= 0) { decision = 'Entrada com confirmacao'; tone = 'long'; }
+    if (total >= 60 && multi.bias === 'Alta' && multi.alignment >= 0.6 && quality >= 63 && htfGateAvailable && !htfVetoLong) { decision = 'Entrada favoravel'; tone = 'long'; }
+    else if (total >= 42 && multi.score >= 0 && !htfVetoLong) { decision = 'Entrada com confirmacao'; tone = 'long'; }
+    else if (total >= 42 && htfVetoLong) { decision = 'Gate HTF: 1d+1w baixistas vetam long'; tone = 'wait'; }
     else if (total >= 20) { decision = 'Aguardar pullback'; tone = 'wait'; }
     else if (total <= -45) { decision = 'Evitar / venda domina'; tone = 'avoid'; }
     else if (total <= -20) { decision = 'Cautela'; tone = 'avoid'; }
+    if (tone === 'long' && trapVeto === 'long') { decision = 'Veto pos-trap: aguardar ' + trapVetoBarsLeft(a) + ' barra(s)'; tone = 'wait'; }
     if (quality < 40) { decision = 'Dados insuficientes'; tone = 'wait'; }
     var reasons = [
       { tone: technical > 7 ? 'good' : technical < -7 ? 'bad' : 'neutral', text: technical > 7 ? 'Tecnica do timeframe selecionado favorece compra.' : technical < -7 ? 'Tecnica do timeframe selecionado pesa contra.' : 'Tecnica local mista: falta rompimento ou reteste confirmado.' },
-      { tone: multi.score > 7 ? 'good' : multi.score < -7 ? 'bad' : 'neutral', text: multi.score > 7 ? 'Timeframes superiores confirmam tendencia de alta.' : multi.score < -7 ? 'Timeframes superiores divergem ou mantem tendencia de baixa.' : 'Multi-timeframe ainda sem alinhamento direcional forte.' },
+      { tone: multi.score > 5 ? 'good' : multi.score < -5 ? 'bad' : 'neutral', text: multi.score > 5 ? 'Demais timeframes confirmam tendencia de alta de forma independente.' : multi.score < -5 ? 'Demais timeframes divergem ou mantem tendencia de baixa.' : 'Multi-timeframe ainda sem alinhamento direcional forte.' },
       { tone: flow > 7 ? 'good' : flow < -7 ? 'bad' : 'neutral', text: flow > 7 ? 'Fluxo confirma: delta taker e livro mostram demanda no curto prazo.' : flow < -7 ? 'Fluxo pressiona: agressao vendedora ou ask dominando o livro.' : 'Fluxo equilibrado: livro e volume ainda nao confirmam direcao.' },
       { tone: derivatives > 4 ? 'good' : derivatives < -4 ? 'bad' : 'neutral', text: derivatives > 4 ? 'Derivativos dao apoio leve, sem excesso evidente no funding.' : derivatives < -4 ? 'Derivativos pedem cautela: funding/basis podem indicar trade lotado.' : 'Derivativos neutros, sem vantagem quantitativa clara.' },
       { tone: macro > 3 ? 'good' : macro < -3 ? 'bad' : 'neutral', text: macro > 3 ? 'Noticias e macro favorecem risco.' : macro < -3 ? 'Noticias e macro elevam risco negativo.' : 'Noticias e macro sem impulso dominante.' },
@@ -1557,15 +1616,21 @@
     if (risk !== 0) {
       reasons.push({ tone: risk > 0 ? 'good' : 'bad', text: risk > 0 ? 'Ajuste de risco melhora o setup por absorcao/volume.' : 'Ajuste de risco reduz o setup por esticamento, sweep contra ou volume vendedor.' });
     }
+    if (climax) {
+      reasons.push({ tone: 'bad', text: 'Climax de volume com fecho no terco oposto: exaustao provavel da perna ' + (climax.direction === 'exhaustion-top' ? 'de alta' : 'de baixa') + '; nao tratar volume como confirmacao.' });
+    }
+    if (a.trap && a.trap.trap) {
+      reasons.push({ tone: a.trap.score > 0 ? 'good' : 'bad', text: (a.trap.trap === 'bull' ? 'Bear trap: sweep de minima revertido com flip de delta' : 'Bull trap: sweep de maxima rejeitado com flip de delta') + (a.trap.confirmed ? ' e confirmacao de OI/liquidacao' : '') + '; entradas ' + (a.trap.vetoDirection === 'short' ? 'vendidas' : 'compradas') + ' vetadas por ' + a.trap.vetoBars + ' barras.' });
+    }
     var components = [
       { name: 'Tecnica', ruleId: 'setup.technical.v1', score: technical, max: 20, status: 'fresh', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines'], reason: 'trendScore*0.32 + momScore*0.42 do timeframe selecionado' },
-      { name: 'Multi-TF', ruleId: 'setup.mtf.v1', score: multi.score, max: 24, status: multi.rows && multi.rows.length ? 'fresh' : 'missing', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines'], reason: 'Confirmacao de tendencia em ' + ((multi.rows && multi.rows.length) || 0) + ' timeframes com candles fechados proprios' },
+      { name: 'Multi-TF', ruleId: 'setup.mtf.v2', score: multi.score, max: 16, status: multi.rows && multi.rows.length ? 'fresh' : 'missing', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines'], reason: 'Confirmacao INDEPENDENTE (TF do grafico excluido) + gate 1d/1w em ' + ((multi.rows && multi.rows.length) || 0) + ' timeframes' },
       { name: 'Smart/fluxo', ruleId: 'setup.flow.v1', score: flow, max: 18, status: a.flowAvailable ? 'fresh' : 'missing', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines', 'binance-spot-depth'], reason: 'flowScore*0.48 + book*0.35 + smart money*0.55' },
       { name: 'Derivativos', ruleId: 'setup.derivatives.v1', score: derivatives, max: 12, status: datasetStatus(a.derivativeDetail) || 'missing', scope: 'symbol', isProxy: false, sources: ['binance-futures', 'deribit-options'], reason: 'derivScore*1.25 + detalhe de OI/funding/taker/opcoes elegiveis' },
       { name: 'On-chain/fund.', ruleId: 'setup.chain.v1', score: chain, max: 10, status: eligibleDataset(a.coinMetrics) ? 'fresh' : a.coinMetrics ? datasetStatus(a.coinMetrics) : 'missing', scope: 'symbol', isProxy: !!(a.mempoolContext && a.mempoolContext.isProxy), sources: ['coinmetrics-community', 'defillama', 'mempool-space'], reason: 'chainScore + defi*0.45 + asset*0.2' },
       { name: 'Noticias/macro', ruleId: 'setup.macro.v1', score: macro, max: 10, status: news.items.length || state.newsMode !== 'auto' ? 'fresh' : 'missing', scope: 'market', isProxy: false, sources: ['rss-news', 'alternative-me', 'treasury-cboe', 'etf-flows'], reason: 'news*0.36 + sentimento*0.45 + global*0.45 + ETF' },
       { name: 'Historico', ruleId: 'setup.history.v1', score: historyScore, max: 12, status: history ? 'fresh' : historyCandidate ? 'stale' : 'missing', scope: 'symbol', isProxy: false, sources: ['binance-daily-history'], reason: history ? (history.samples || 0) + ' amostras de regimes semelhantes' : 'sem perfil historico fresco' },
-      { name: 'Risco', ruleId: 'setup.risk.v1', score: risk, max: 10, status: 'fresh', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines', 'binance-liquidations'], reason: 'Esticamento de bandas, sweeps, volume e liquidacoes' }
+      { name: 'Risco', ruleId: 'setup.risk.v2', score: risk, max: 14, status: 'fresh', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines', 'binance-liquidations'], reason: 'Esticamento de bandas, sweeps, climax de volume, traps e liquidacoes' }
     ];
     components.forEach(function (component) { component.contribution = component.score; });
     var reconciledTotal = components.reduce(function (sum, component) { return sum + component.score; }, 0);
@@ -1592,7 +1657,10 @@
       dataConfidence: quality,
       history: history,
       multi: multi,
-      reasons: reasons.slice(0, 6),
+      gates: { htfAvailable: htfGateAvailable, htfVetoLong: htfVetoLong, htfVetoShort: htfVetoShort, trapVeto: trapVeto },
+      trap: a.trap || null,
+      carry: carry,
+      reasons: reasons.slice(0, 7),
       components: components
     };
   }
@@ -1903,8 +1971,12 @@
       oiWindowStart = +oiHist[0].timestamp;
       oiWindowEnd = +oiHist[oiHist.length - 1].timestamp;
     }
-    var fundingAvg = NaN;
-    if (Array.isArray(fundingRows) && fundingRows.length) fundingAvg = avg(fundingRows.map(function (row) { return +row.fundingRate; }).filter(Number.isFinite));
+    var fundingAvg = NaN, fundingSeries = [];
+    if (Array.isArray(fundingRows) && fundingRows.length) {
+      fundingSeries = fundingRows.map(function (row) { return +row.fundingRate; }).filter(Number.isFinite);
+      // fundingAvg keeps its original 12-settlement (~4d) meaning; the full series feeds percentiles.
+      fundingAvg = avg(fundingSeries.slice(-12));
+    }
     var latestLongShort = Array.isArray(longShortRows) && longShortRows.length ? longShortRows[longShortRows.length - 1] : null;
     var latestTaker = Array.isArray(takerRows) && takerRows.length ? takerRows[takerRows.length - 1] : null;
     var latestTopAccount = Array.isArray(topAccountRows) && topAccountRows.length ? topAccountRows[topAccountRows.length - 1] : null;
@@ -1920,10 +1992,27 @@
       basisRate: latestRowsObservedAt([basisRows])
     };
     var observedTimes = Object.keys(metricObservedAt).map(function (key) { return metricObservedAt[key]; }).filter(Number.isFinite);
+    // Percentile of the CURRENT reading within the asset's own fetched history. percentileRank
+    // returns null under 30 samples, which downstream treats as "use the fixed threshold".
+    var seriesOf = function (rows, selector) {
+      return Array.isArray(rows) ? rows.map(selector).filter(Number.isFinite) : [];
+    };
+    var oiSeries = seriesOf(oiHist, function (row) { return +row.sumOpenInterestValue || +row.sumOpenInterest; });
+    var longShortSeries = seriesOf(longShortRows, function (row) { return +row.longShortRatio; });
+    var takerSeries = seriesOf(takerRows, function (row) { return +row.buySellRatio; });
+    var topPositionSeries = seriesOf(topPositionRows, function (row) { return +row.longShortRatio; });
+    var percentiles = {
+      funding: AnalyticsCore.percentileRank(fundingSeries, fundingSeries[fundingSeries.length - 1]),
+      longShort: AnalyticsCore.percentileRank(longShortSeries, longShortSeries[longShortSeries.length - 1]),
+      taker: AnalyticsCore.percentileRank(takerSeries, takerSeries[takerSeries.length - 1]),
+      topPosition: AnalyticsCore.percentileRank(topPositionSeries, topPositionSeries[topPositionSeries.length - 1]),
+      oi: AnalyticsCore.percentileRank(oiSeries, oiSeries[oiSeries.length - 1])
+    };
     return {
       oiChangePct: oiChangePct,
       oiWindowStart: Number.isFinite(oiWindowStart) ? oiWindowStart : NaN,
       oiWindowEnd: Number.isFinite(oiWindowEnd) ? oiWindowEnd : NaN,
+      percentiles: percentiles,
       fundingAvg: fundingAvg,
       longShortRatio: latestLongShort ? +latestLongShort.longShortRatio : NaN,
       longAccount: latestLongShort ? +latestLongShort.longAccount : NaN,
@@ -1965,12 +2054,14 @@
     if (!force && cached && Date.now() - cached.fetchedAt < DERIVATIVES_REFRESH_MS) return markDataset(cached.value, cached.fetchedAt, staleAfterMs);
     var s = encodeURIComponent(symbol);
     var rows = await Promise.allSettled([
-      fetchJSON('https://fapi.binance.com/futures/data/openInterestHist?symbol=' + s + '&period=' + period + '&limit=30', 9000, 'Binance futuros'),
-      fetchJSON('https://fapi.binance.com/fapi/v1/fundingRate?symbol=' + s + '&limit=12', 9000, 'Binance futuros'),
-      fetchJSON('https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=' + s + '&period=' + period + '&limit=30', 9000, 'Binance futuros'),
-      fetchJSON('https://fapi.binance.com/futures/data/takerlongshortRatio?symbol=' + s + '&period=' + period + '&limit=30', 9000, 'Binance futuros'),
+      // Longer windows feed the percentile engine (positioning vs the asset's OWN history).
+      // fundingRate keeps ~333d of 8h settlements; the futures/data endpoints retain ~30d.
+      fetchJSON('https://fapi.binance.com/futures/data/openInterestHist?symbol=' + s + '&period=' + period + '&limit=500', 9000, 'Binance futuros'),
+      fetchJSON('https://fapi.binance.com/fapi/v1/fundingRate?symbol=' + s + '&limit=1000', 9000, 'Binance futuros'),
+      fetchJSON('https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=' + s + '&period=' + period + '&limit=500', 9000, 'Binance futuros'),
+      fetchJSON('https://fapi.binance.com/futures/data/takerlongshortRatio?symbol=' + s + '&period=' + period + '&limit=500', 9000, 'Binance futuros'),
       fetchJSON('https://fapi.binance.com/futures/data/topLongShortAccountRatio?symbol=' + s + '&period=' + period + '&limit=30', 9000, 'Binance futuros'),
-      fetchJSON('https://fapi.binance.com/futures/data/topLongShortPositionRatio?symbol=' + s + '&period=' + period + '&limit=30', 9000, 'Binance futuros'),
+      fetchJSON('https://fapi.binance.com/futures/data/topLongShortPositionRatio?symbol=' + s + '&period=' + period + '&limit=500', 9000, 'Binance futuros'),
       fetchJSON('https://fapi.binance.com/futures/data/basis?pair=' + s + '&contractType=PERPETUAL&period=' + period + '&limit=30', 9000, 'Binance futuros')
     ]);
     var detail = normalizeDerivativeDetail(value(rows[0]), value(rows[1]), value(rows[2]), value(rows[3]), value(rows[4]), value(rows[5]), value(rows[6]));
@@ -1990,6 +2081,40 @@
     if (!hasDerivativeData(markedDetail)) return markedDetail;
     state.derivativeCache[key] = { value: detail, fetchedAt: detail.fetchedAt };
     return markedDetail;
+  }
+  var INTERVAL_MS = { '1m': 60e3, '3m': 180e3, '5m': 300e3, '15m': 900e3, '30m': 1800e3, '1h': 3600e3, '2h': 7200e3, '4h': 14400e3, '6h': 21600e3, '8h': 28800e3, '12h': 43200e3, '1d': 86400e3, '3d': 259200e3, '1w': 604800e3, '1M': 2592000e3 };
+  function intervalToMs(interval) { return INTERVAL_MS[interval] || 300e3; }
+  /**
+   * Trap veto: after a confirmed trap, entries in the trapped direction stay blocked for
+   * vetoBars candles of the CURRENT timeframe. Keyed by symbol+interval; expires by close time.
+   */
+  function registerTrapVeto(symbol, interval, trap, lastCloseTime) {
+    if (!trap || !trap.trap || !Number.isFinite(lastCloseTime)) return;
+    state.trapVeto = {
+      key: symbol + ':' + interval,
+      direction: trap.vetoDirection === 'short' ? 'short' : 'long',
+      until: lastCloseTime + trap.vetoBars * intervalToMs(interval)
+    };
+  }
+  function activeTrapVeto(a) {
+    var veto = state.trapVeto;
+    if (!veto || veto.key !== state.symbol + ':' + state.interval) return null;
+    var reference = a && a.signalCandle && Number.isFinite(a.signalCandle.closeTime) ? a.signalCandle.closeTime : Date.now();
+    return reference < veto.until ? veto.direction : null;
+  }
+  function trapVetoBarsLeft(a) {
+    var veto = state.trapVeto;
+    if (!veto) return 0;
+    var reference = a && a.signalCandle && Number.isFinite(a.signalCandle.closeTime) ? a.signalCandle.closeTime : Date.now();
+    return Math.max(0, Math.ceil((veto.until - reference) / intervalToMs(state.interval)));
+  }
+  function liquidationBiasFor() {
+    var summary = liquidationSummary();
+    if (!summary.total) return null;
+    // Long liquidations are forced sells; short liquidations are forced buys.
+    if (summary.longValue > summary.shortValue * 2) return 'sell';
+    if (summary.shortValue > summary.longValue * 2) return 'buy';
+    return null;
   }
   // Price change over the OI history window, so OIxprice quadrants read both in the same window.
   function priceChangeOverWindow(candles, startTs, endTs) {
@@ -2040,6 +2165,15 @@
     var analysis = mergeSelected(symbol, closedCandles, value(results[3]), value(results[1]), value(results[4]), value(results[2]), chain || {}, chainAdjustment);
     analysis.derivativeDetail = value(results[5]) || {};
     analysis.oiPriceChangePct = priceChangeOverWindow(closedCandles, analysis.derivativeDetail.oiWindowStart, analysis.derivativeDetail.oiWindowEnd);
+    // Trap engine: sweep+reclaim+flip de delta com confirmacao de OI/liquidacao; registra veto.
+    analysis.trap = AnalyticsCore.detectTrap(closedCandles, {
+      atr: analysis.atr14,
+      priorLow: analysis.priorLow,
+      priorHigh: analysis.priorHigh,
+      oiChangePct: analysis.derivativeDetail.oiChangePct,
+      liquidationBias: liquidationBiasFor()
+    });
+    if (analysis.trap && analysis.trap.trap) registerTrapVeto(symbol, interval, analysis.trap, last(closedCandles).closeTime);
     analysis.coinMetrics = coinMetrics;
     analysis.options = options;
     analysis.institutional = institutional;
@@ -2162,7 +2296,8 @@
     var upTrigger = a.resistances[0], downTrigger = a.supports[0];
     text('triggerLine', (upTrigger ? 'Alta > ' + money(upTrigger) : '') + (downTrigger ? ' | Baixa < ' + money(downTrigger) : ''));
     var sweep = a.sweepDown ? 'Sweep de baixa absorvido' : a.sweepUp ? 'Sweep de topo rejeitado' : 'Sem sweep relevante';
-    text('structureLine', a.structure + ' | ' + sweep + ' | fechamento confirmado ' + money(a.close) + ' ' + (a.close > a.vwap ? 'acima' : 'abaixo') + ' do VWAP' + (a.hasOpenCandle ? ' | atual ' + money(livePrice) + ' em formacao' : ''));
+    var shiftLabel = a.structureShift && a.structureShift.event ? ' | ' + a.structureShift.event + ' ' + (a.structureShift.direction === 'bull' ? 'altista' : 'baixista') + ' em ' + money(a.structureShift.brokenLevel) : '';
+    text('structureLine', a.structure + shiftLabel + ' | ' + sweep + ' | fechamento confirmado ' + money(a.close) + ' ' + (a.close > a.vwap ? 'acima' : 'abaixo') + ' do VWAP' + (a.hasOpenCandle ? ' | atual ' + money(livePrice) + ' em formacao' : ''));
     text('ema9', money(a.ema9));
     text('ema21', money(a.ema21));
     text('ema50', money(a.ema50));
@@ -2175,7 +2310,8 @@
     text('bbLine', money(a.bb.latestLower) + ' / ' + money(a.bb.latestUpper));
     text('vwapLine', money(a.vwap));
     text('volumeRatio', Number.isFinite(a.avgVol) && a.avgVol ? num(a.lastVol / a.avgVol, 2) + 'x' : '--');
-    text('rsiState', a.rsi14 >= 70 ? 'Sobrecompra' : a.rsi14 <= 30 ? 'Sobrevenda' : 'Neutro');
+    var divergenceLabel = a.divergence && a.divergence.bearish ? ' | divergencia bearish (maturidade de tendencia)' : a.divergence && a.divergence.bullish ? ' | divergencia bullish (maturidade de tendencia)' : '';
+    text('rsiState', (a.rsi14 >= 70 ? 'Sobrecompra' : a.rsi14 <= 30 ? 'Sobrevenda' : 'Neutro') + divergenceLabel);
     text('macdState', a.macd.hist > 0 ? 'Acima do sinal' : 'Abaixo do sinal');
     text('volumeState', Number.isFinite(a.avgVol) && a.lastVol > a.avgVol * 1.35 ? 'Volume alto' : 'Normal');
     updateScore(a); updateBook(a); updateChain(chain); renderCoinMetrics(a); renderExternalContext(a); renderAdvancedIndicators(a); renderSetupQuality(a); renderLiquidity(a); renderDerivativesDetails(a); renderMultiTimeframe(a); renderHistoricalProfile(a); renderSmartMoney(a); renderConfluence(a); renderWrittenAnalysis(a); renderHistoricalLab(a); renderFuturesConsole(a); renderLiquidations(); renderOptions(); renderExchangeFlows(a); renderInstitutional(); renderMacroFlow(a); renderCorrelation(a); calculatePosition(); drawPriceChart(); drawRsiChart(); drawMacdChart(); drawVolumeChart(); drawFlowChart(); updateSelectedBoardCard(livePrice);
@@ -2432,7 +2568,8 @@
     if (Number.isFinite(detail.topPositionRatio) && detail.topPositionRatio > 1.7) { risk -= 2; reasons.push({ tone: 'bad', text: 'Posicoes dos top traders estao concentradas em long.' }); }
     text('futuresRegime', smart.oiPhase);
     text('futuresOi', a.oi && Number.isFinite(+a.oi.openInterest) ? compactNumber(+a.oi.openInterest) + ' | ' + percent(detail.oiChangePct, 2) : '--');
-    text('futuresFunding', (Number.isFinite(a.funding) ? percent(a.funding * 100, 4) : '--') + ' / ' + (Number.isFinite(detail.fundingAvg) ? percent(detail.fundingAvg * 100, 4) : '--'));
+    var carryInfo = AnalyticsCore.calculateCarryRegime({ fundingAvg: detail.fundingAvg, oiPercentile: detail.percentiles && detail.percentiles.oi });
+    text('futuresFunding', (Number.isFinite(a.funding) ? percent(a.funding * 100, 4) : '--') + ' / ' + (Number.isFinite(detail.fundingAvg) ? percent(detail.fundingAvg * 100, 4) : '--') + (Number.isFinite(carryInfo.annualizedCarryPct) ? ' | carry ' + percent(carryInfo.annualizedCarryPct, 1) + ' a.a.' + (carryInfo.deltaNeutral ? ' (delta-neutro)' : '') : ''));
     text('futuresBasis', Number.isFinite(detail.basisRate) ? percent(detail.basisRate * 100, 4) + ' | ' + money(a.basis) : Number.isFinite(a.basis) ? money(a.basis) : '--');
     text('futuresLongShort', Number.isFinite(detail.longShortRatio) ? 'global ' + num(detail.longShortRatio, 2) + 'x' + (Number.isFinite(detail.topPositionRatio) ? ' | top ' + num(detail.topPositionRatio, 2) + 'x' : '') : '--');
     text('futuresTaker', Number.isFinite(detail.takerRatio) ? num(detail.takerRatio, 2) + 'x' : '--');

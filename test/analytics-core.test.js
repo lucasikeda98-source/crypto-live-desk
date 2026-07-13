@@ -459,6 +459,15 @@ test('trap engine: sem reclaim nao ha trap, e o espelho bearish veta longs', () 
   assert.equal(bullTrap.vetoDirection, 'long');
 });
 
+test('regime delta-neutro muta o quadrante de OI no scorer de derivativos', () => {
+  const asOf = 10_000;
+  const detail = { observedAt: 9_000, staleAfterMs: 2_000, dataStatus: 'fresh', oiChangePct: 8 };
+  const normal = core.calculateDerivativeDetailContribution({ detail, oiPriceChangePct: 2, asOf });
+  assert.equal(normal, 3, 'long buildup pontua +3 em regime direcional');
+  const muted = core.calculateDerivativeDetailContribution({ detail, oiPriceChangePct: 2, muteOiQuadrant: true, asOf });
+  assert.equal(muted, 0, 'OI hedgeado (basis trade) nao e leitura direcional');
+});
+
 function mtfRow(interval, score) { return { interval, score }; }
 
 test('MTF: alignment conta apenas timeframes alinhados COM a direcao do bias', () => {
