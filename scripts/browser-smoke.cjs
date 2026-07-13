@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
+const PACKAGE_VERSION = require('../package.json').version;
 
 const EDGE_PATH = process.env.EDGE_PATH || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const BASE_URL = process.env.BASE_URL || 'http://127.0.0.1:5173/';
@@ -279,6 +280,9 @@ async function main() {
       const before = node.dataset.snapshotId;
       mode.value = 'neutral';
       mode.dispatchEvent(new Event('change', { bubbles: true }));
+      document.getElementById('newsOverrideAuthor').value = 'browser-smoke';
+      document.getElementById('newsOverrideReason').value = 'verificacao deterministica da trilha manual';
+      document.getElementById('newsOverridePanel').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
       const after = node.dataset.snapshotId;
       const stamp = node.textContent;
       mode.value = 'auto';
@@ -345,7 +349,7 @@ async function main() {
       closedCandleExplained: assetResult.structure.includes('fechamento confirmado'),
       setupNamed: assetResult.setup.includes('Setup Score preview') && assetResult.setup.includes('Data Confidence preview'),
       proxyExplained: assetResult.options.includes('proxy informativo'),
-      modelStatus: assetResult.status.includes('Modelo 1.0.0-preview.6'),
+      modelStatus: assetResult.status.includes('Modelo ' + PACKAGE_VERSION),
       noValueLeaks: dashboardResult.gridLeaks === false,
       scoreExplained: assetResult.explanationRows >= 8 && assetResult.explanationEnvelope.includes('regras'),
       snapshotIdentityChanges: !!snapshotResult.before && !!snapshotResult.after && snapshotResult.before !== snapshotResult.after && /\| r\d+$/.test(snapshotResult.stamp),

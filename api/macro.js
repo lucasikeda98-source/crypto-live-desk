@@ -1,9 +1,22 @@
+const { toFiniteNumber } = require('../lib/analytics-core');
+const { applyApiPolicyAsync } = require('../lib/api-guard');
+
 function xmlValue(entry, name) {
   const match = entry.match(new RegExp(`<d:${name}(?:\\s[^>]*)?>([^<]+)<\\/d:${name}>`, 'i'));
-  return match && Number.isFinite(Number(match[1])) ? Number(match[1]) : null;
+  return match ? toFiniteNumber(match[1]) : null;
 }
 
-function parseTreasury(xml) {
+function validObservationDate(value, asOf) {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && timestamp >= 0 && timestamp <= asOf + 5 * 60 * 1000;
+}
+
+function safeDifference(left, right) {
+  const value = left - right;
+  return Number.isFinite(value) ? value : null;
+}
+
+function parseTreasury(xml, asOf = Date.now()) {
   const rows = (String(xml || '').match(/<entry>[\s\S]*?<\/entry>/gi) || []).map((entry) => {
     const dateMatch = entry.match(/<d:NEW_DATE(?:\s[^>]*)?>([^<]+)<\/d:NEW_DATE>/i);
     return {
@@ -12,26 +25,28 @@ function parseTreasury(xml) {
       y10: xmlValue(entry, 'BC_10YEAR'),
       y30: xmlValue(entry, 'BC_30YEAR'),
     };
-  }).filter((row) => row.date && row.y2 !== null && row.y10 !== null).sort((a, b) => Date.parse(a.date) - Date.parse(b.date));
+  }).filter((row) => validObservationDate(row.date, asOf) && row.y2 !== null && row.y10 !== null).sort((a, b) => Date.parse(a.date) - Date.parse(b.date));
   const latest = rows.at(-1);
   const prior = rows.at(-6) || rows.at(0);
   return latest ? {
     ...latest,
-    curve10y2y: latest.y10 - latest.y2,
-    y10Change5d: prior ? latest.y10 - prior.y10 : null,
-    y2Change5d: prior ? latest.y2 - prior.y2 : null,
+    curve10y2y: safeDifference(latest.y10, latest.y2),
+    y10Change5d: prior ? safeDifference(latest.y10, prior.y10) : null,
+    y2Change5d: prior ? safeDifference(latest.y2, prior.y2) : null,
   } : null;
 }
 
-function parseVix(csv) {
+function parseVix(csv, asOf = Date.now()) {
   const lines = String(csv || '').trim().split(/\r?\n/);
   if (lines.length < 2) return null;
   const rows = lines.slice(1).map((line) => {
     const parts = line.split(',');
-    return { date: parts[0], close: Number(parts[4]) };
-  }).filter((row) => row.date && Number.isFinite(row.close));
+    return { date: parts[0], close: toFiniteNumber(parts[4]) };
+  }).filter((row) => validObservationDate(row.date, asOf) && row.close !== null && row.close > 0)
+    .sort((a, b) => Date.parse(a.date) - Date.parse(b.date));
   const latest = rows.at(-1), prior = rows.at(-6) || rows.at(0);
-  return latest ? { ...latest, change5d: prior && prior.close ? ((latest.close - prior.close) / prior.close) * 100 : null } : null;
+  const rawChange = latest && prior && prior.close ? ((latest.close - prior.close) / prior.close) * 100 : null;
+  return latest ? { ...latest, change5d: Number.isFinite(rawChange) ? rawChange : null } : null;
 }
 
 async function getText(url) {
@@ -43,18 +58,30 @@ async function getText(url) {
   return response.text();
 }
 
+function treasuryYearsFor(date) {
+  const value = date instanceof Date ? date : new Date(date);
+  const year = value.getUTCFullYear();
+  return value.getUTCMonth() === 0 ? [year - 1, year] : [year];
+}
+
 module.exports = async function handler(request, response) {
+  if (!await applyApiPolicyAsync(request, response, { cacheControl: 'public, s-maxage=3600, stale-while-revalidate=21600' })) return;
   if (request.method !== 'GET') {
     response.setHeader('Allow', 'GET');
     return response.status(405).json({ error: 'Method not allowed' });
   }
 
-  const year = new Date().getUTCFullYear();
-  const treasuryUrl = `https://home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml?data=daily_treasury_yield_curve&field_tdr_date_value=${year}`;
+  const now = new Date();
+  const treasuryYears = treasuryYearsFor(now);
+  const treasuryUrls = treasuryYears.map((value) => `https://home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml?data=daily_treasury_yield_curve&field_tdr_date_value=${value}`);
   const vixUrl = 'https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv';
-  const results = await Promise.allSettled([getText(treasuryUrl), getText(vixUrl)]);
-  const treasury = results[0].status === 'fulfilled' ? parseTreasury(results[0].value) : null;
-  const vix = results[1].status === 'fulfilled' ? parseVix(results[1].value) : null;
+  const results = await Promise.allSettled(treasuryUrls.map(getText).concat([getText(vixUrl)]));
+  const treasuryResults = results.slice(0, treasuryUrls.length);
+  const vixResult = results[results.length - 1];
+  const treasuryXml = treasuryResults.filter((result) => result.status === 'fulfilled').map((result) => result.value).join('\n');
+  const asOf = now.getTime();
+  const treasury = parseTreasury(treasuryXml, asOf);
+  const vix = vixResult.status === 'fulfilled' ? parseVix(vixResult.value, asOf) : null;
   if (treasury) treasury.observedAt = Date.parse(treasury.date);
   if (vix) vix.observedAt = Date.parse(vix.date);
   let score = 0;
@@ -62,9 +89,14 @@ module.exports = async function handler(request, response) {
   if (treasury && Number.isFinite(treasury.y10Change5d)) score += treasury.y10Change5d >= 0.15 ? -2 : treasury.y10Change5d <= -0.15 ? 2 : 0;
   if (treasury && treasury.curve10y2y < 0) score -= 1;
 
-  response.setHeader('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=21600');
-  response.setHeader('Access-Control-Allow-Origin', '*');
+  const errors = {};
+  if (!treasury) errors.treasury = treasuryResults.map((result) => result.status === 'rejected' ? String(result.reason && result.reason.message || result.reason) : 'sem linhas validas').join('; ');
+  if (!vix) errors.vix = vixResult.status === 'rejected' ? String(vixResult.reason && vixResult.reason.message || vixResult.reason) : 'sem linhas validas';
   const observedDates = [treasury && treasury.observedAt, vix && vix.observedAt].filter(Number.isFinite);
   const observedAt = observedDates.length ? Math.max(...observedDates) : null;
-  return response.status(treasury || vix ? 200 : 503).json({ treasury, vix, score, observedAt, fetchedAt: Date.now() });
+  return response.status(treasury || vix ? 200 : 503).json({ treasury, vix, score, dataStatus: Object.keys(errors).length ? (treasury || vix ? 'partial' : 'error') : 'fresh', errors, observedAt, fetchedAt: Date.now() });
 };
+
+module.exports.parseTreasury = parseTreasury;
+module.exports.parseVix = parseVix;
+module.exports.treasuryYearsFor = treasuryYearsFor;

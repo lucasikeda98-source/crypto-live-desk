@@ -8,10 +8,11 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body data-view="dashboard">
-    <main class="shell">
+    <a class="skip-link" href="#mainContent">Pular para o conteudo principal</a>
+    <main class="shell" id="mainContent">
       <header class="topbar">
         <div class="identity">
-          <div class="mark">B</div>
+          <div class="mark" aria-hidden="true">B</div>
           <div>
             <h1>Crypto Live Desk Pro</h1>
             <p id="sourceLine">Binance + Coin Metrics + DeFiLlama + CoinGecko + Treasury/Cboe + TradFi + noticias</p>
@@ -119,6 +120,13 @@
             <button id="externalRefreshButton" class="chip-button">Atualizar dados</button>
           </div>
         </div>
+        <form id="newsOverridePanel" class="news-override-panel" hidden novalidate>
+          <p>Override manual exige autoria e motivo. Ele fica registrado no snapshot e no export.</p>
+          <label><span>Autor / identificador</span><input id="newsOverrideAuthor" name="newsOverrideAuthor" type="text" maxlength="80" autocomplete="off" placeholder="Ex.: Lucas" required></label>
+          <label><span>Motivo</span><input id="newsOverrideReason" name="newsOverrideReason" type="text" maxlength="180" autocomplete="off" placeholder="Ex.: evento macro ainda nao refletido nos feeds" required></label>
+          <button class="chip-button" type="submit">Aplicar override</button>
+          <small id="newsOverrideFeedback" role="status" aria-live="polite">Preencha os dois campos para aplicar.</small>
+        </form>
         <div class="confluence-grid">
           <div class="entry-card">
             <span class="label">Decisao de entrada</span>
@@ -156,7 +164,7 @@
         <details class="score-explanation" id="scoreExplanation">
           <summary>Como este score foi calculado?</summary>
           <p id="explanationEnvelope" class="mini-caption">--</p>
-          <div class="explanation-table-wrap">
+          <div class="explanation-table-wrap" role="region" aria-label="Detalhes do score; deslize horizontalmente para ver todas as colunas" tabindex="0">
             <table class="explanation-table">
               <thead><tr><th>Componente</th><th>Regra</th><th>Contribuicao</th><th>Limite</th><th>Estado</th><th>Escopo</th><th>Fontes</th><th>Leitura</th></tr></thead>
               <tbody id="explanationRows"><tr><td colspan="8">Aguardando o primeiro calculo.</td></tr></tbody>
@@ -265,7 +273,7 @@
             <span id="sourceCount">--</span>
           </div>
           <div id="dataSources" class="source-list"></div>
-          <p class="mini-caption">Dados sem chave atualizam em ciclos diferentes: ativo em foco 3s, radar multiativos 15s, contexto externo 2min, noticias 5min.</p>
+          <p class="mini-caption">Dados sem chave atualizam em ciclos diferentes: ativo em foco 3s, radar multiativos 30-60s, contexto externo 2min, noticias 5min.</p>
         </div>
       </section>
 
@@ -297,16 +305,16 @@
               </div>
             </div>
           </div>
-          <div class="chart-frame"><canvas id="priceCanvas" width="1200" height="620"></canvas></div>
+          <div class="chart-frame"><canvas id="priceCanvas" width="1200" height="620" role="img" aria-label="Grafico de preco e indicadores tecnicos do ativo selecionado">O resumo numerico do grafico esta disponivel nos campos logo abaixo.</canvas></div>
           <div class="signal-row">
             <div><span class="label">Suporte</span><strong id="supportLevels">--</strong></div>
             <div><span class="label">Resistencia</span><strong id="resistanceLevels">--</strong></div>
             <div><span class="label">Gatilho</span><strong id="triggerLine">--</strong></div>
           </div>
           <div class="indicator-charts">
-            <div class="indicator-card"><div class="mini-head"><span>RSI</span><strong id="rsiState">--</strong></div><canvas id="rsiCanvas" width="420" height="180"></canvas></div>
-            <div class="indicator-card"><div class="mini-head"><span>MACD</span><strong id="macdState">--</strong></div><canvas id="macdCanvas" width="420" height="180"></canvas></div>
-            <div class="indicator-card"><div class="mini-head"><span>Volume</span><strong id="volumeState">--</strong></div><canvas id="volumeCanvas" width="420" height="180"></canvas></div>
+            <div class="indicator-card"><div class="mini-head"><span>RSI</span><strong id="rsiState">--</strong></div><canvas id="rsiCanvas" width="420" height="180" role="img" aria-label="Grafico do RSI">O valor atual do RSI aparece acima deste grafico.</canvas></div>
+            <div class="indicator-card"><div class="mini-head"><span>MACD</span><strong id="macdState">--</strong></div><canvas id="macdCanvas" width="420" height="180" role="img" aria-label="Grafico do MACD">O estado atual do MACD aparece acima deste grafico.</canvas></div>
+            <div class="indicator-card"><div class="mini-head"><span>Volume</span><strong id="volumeState">--</strong></div><canvas id="volumeCanvas" width="420" height="180" role="img" aria-label="Grafico de volume">O estado atual do volume aparece acima deste grafico.</canvas></div>
           </div>
         </div>
 
@@ -332,7 +340,7 @@
         <div class="panel advanced-indicators"><div class="section-head compact"><h2>Indicadores avancados</h2></div><div class="metric-grid"><div><span>ADX / DI</span><strong id="adxLine">--</strong></div><div><span>Supertrend</span><strong id="supertrendLine">--</strong></div><div><span>Keltner</span><strong id="keltnerLine">--</strong></div><div><span>Donchian</span><strong id="donchianLine">--</strong></div><div><span>BB %B / Width</span><strong id="bbStatsLine">--</strong></div><div><span>ROC 12</span><strong id="rocLine">--</strong></div><div><span>OBV</span><strong id="obvLine">--</strong></div><div><span>CMF 20</span><strong id="cmfLine">--</strong></div><div><span>Vol realizada</span><strong id="realizedVolLine">--</strong></div><div><span>Z-score 20</span><strong id="zScoreLine">--</strong></div><div><span>Williams %R</span><strong id="williamsLine">--</strong></div><div><span>CCI 20</span><strong id="cciLine">--</strong></div><div><span>Ichimoku</span><strong id="ichimokuLine">--</strong></div><div><span>Regime</span><strong id="regimeLine">--</strong></div></div></div>
         <div class="panel setup-quality"><div class="section-head compact"><h2>Qualidade do setup</h2><span id="setupScoreLine">--</span></div><div id="setupChecklist" class="setup-checklist"></div><p class="mini-caption" id="setupCaption">--</p></div>
         <div class="panel liquidity-panel"><div class="section-head compact"><h2>Liquidez e execucao</h2></div><div class="metric-grid"><div><span>Spread bps</span><strong id="spreadBpsLine">--</strong></div><div><span>Microprice</span><strong id="micropriceLine">--</strong></div><div><span>Book 0.1%</span><strong id="book01Line">--</strong></div><div><span>Book 0.5%</span><strong id="book05Line">--</strong></div><div><span>Slippage compra</span><strong id="buySlipLine">--</strong></div><div><span>Slippage venda</span><strong id="sellSlipLine">--</strong></div></div></div>
-        <div class="panel"><div class="section-head compact"><h2>Fluxo</h2></div><div class="chart-mini"><canvas id="flowCanvas" width="640" height="230"></canvas></div><div class="mini-caption" id="flowCaption">--</div></div>
+        <div class="panel"><div class="section-head compact"><h2>Fluxo</h2></div><div class="chart-mini"><canvas id="flowCanvas" width="640" height="230" role="img" aria-label="Grafico de fluxo comprador e vendedor">O resumo numerico do fluxo aparece na legenda abaixo.</canvas></div><div class="mini-caption" id="flowCaption">--</div></div>
         <div class="panel"><div class="section-head compact"><h2>Livro</h2></div><div class="book-stack"><div class="book-bar"><span id="bidBar"></span><span id="askBar"></span></div><div class="book-numbers"><strong id="bidDepth">--</strong><strong id="askDepth">--</strong></div></div><p class="mini-caption" id="spreadLine">--</p></div>
         <div class="panel"><div class="section-head compact"><h2>On-chain / rede</h2><span id="coinMetricsStatus">--</span></div><div class="metric-grid"><div><span>Enderecos ativos</span><strong id="activeAddresses">--</strong></div><div><span>Transacoes</span><strong id="networkTransactions">--</strong></div><div><span>Fees USD</span><strong id="networkFees">--</strong></div><div><span>MVRV / NVT</span><strong id="valuationMetrics">--</strong></div><div><span>Bloco BTC</span><strong id="blockHeight">--</strong></div><div><span>Mempool BTC</span><strong id="mempoolTx">--</strong></div><div><span>Fee rapida BTC</span><strong id="fastFee">--</strong></div><div><span>Fee baixa BTC</span><strong id="lowFee">--</strong></div></div></div>
         <div class="panel derivatives-detail"><div class="section-head compact"><h2>Derivativos Binance</h2></div><div class="metric-grid"><div><span>OI historico</span><strong id="oiChangeLine">--</strong></div><div><span>Funding medio</span><strong id="fundingAvgLine">--</strong></div><div><span>Long/Short</span><strong id="longShortLine">--</strong></div><div><span>Taker L/S</span><strong id="takerRatioLine">--</strong></div></div><p class="mini-caption" id="derivativesCaption">--</p></div>
@@ -368,9 +376,9 @@
           </div>
         </div>
         <div class="panel futures-risk-panel">
-          <div class="section-head compact"><h2>Risco de derivativos</h2><span id="futuresRiskScore">--</span></div>
+          <div class="section-head compact"><h2>Risco de lotacao em derivativos</h2><span id="futuresRiskScore">--</span></div>
           <div id="futuresRiskList" class="reason-list"></div>
-          <p class="mini-caption">Liquidacoes reais, heatmaps e dados de opcoes exigem uma fonte especializada; o painel nao fabrica esses dados.</p>
+          <p class="mini-caption">O stream atual de liquidacoes e os dados de opcoes usam fontes especializadas; heatmap historico nao esta disponivel e nao e fabricado pelo painel.</p>
         </div>
       </section>
 
@@ -481,8 +489,16 @@
               <button id="clearSignalsButton" class="chip-button" type="button">Limpar registro</button>
             </div>
           </div>
+          <div class="signal-sync-panel" role="group" aria-labelledby="signalSyncTitle">
+            <div><strong id="signalSyncTitle">Sincronizacao duravel</strong><small>O codigo privado identifica este journal em outros dispositivos. Nao publique nem compartilhe com terceiros.</small></div>
+            <label for="signalSyncCode">Codigo privado</label>
+            <input id="signalSyncCode" type="password" minlength="32" maxlength="128" autocomplete="off" spellcheck="false" aria-describedby="signalSyncStatus">
+            <button id="syncSignalsButton" class="chip-button" type="button">Sincronizar</button>
+            <button id="copySignalSyncCodeButton" class="chip-button" type="button">Copiar codigo</button>
+            <p id="signalSyncStatus" class="mini-caption" role="status">Somente local ate o armazenamento do servidor ser provisionado.</p>
+          </div>
           <p id="signalsStatus" class="mini-caption">--</p>
-          <div class="explanation-table-wrap">
+          <div class="explanation-table-wrap" role="region" aria-label="Registro de sinais; deslize horizontalmente para ver todas as colunas" tabindex="0">
             <table class="explanation-table">
               <thead><tr><th>Quando</th><th>Par</th><th>TF</th><th>Setup</th><th>DC</th><th>Decisao</th><th>Preco</th><th>1h</th><th>24h</th><th>7d</th></tr></thead>
               <tbody id="signalRows"><tr><td colspan="10">Nenhum sinal registrado ainda nesta versao do modelo.</td></tr></tbody>
@@ -491,7 +507,7 @@
         </div>
         <div class="panel signals-summary-panel">
           <div class="section-head compact"><h2>Acerto por faixa de score</h2><span id="signalSummaryCount">--</span></div>
-          <div class="explanation-table-wrap">
+          <div class="explanation-table-wrap" role="region" aria-label="Acerto por faixa de score; deslize horizontalmente para ver todas as colunas" tabindex="0">
             <table class="explanation-table">
               <thead><tr><th>Faixa</th><th>Sinais</th><th>Avaliados</th><th>Acerto 24h</th><th>Mediana 24h</th></tr></thead>
               <tbody id="signalSummaryRows"><tr><td colspan="5">--</td></tr></tbody>
@@ -509,13 +525,13 @@
           </div>
           <p id="activeTradeLine" class="mini-caption">Sem posicao simulada aberta neste par/TF.</p>
           <p id="lagBacktestLine" class="mini-caption">--</p>
-          <div class="explanation-table-wrap">
+          <div class="explanation-table-wrap" role="region" aria-label="Trades simulados; deslize horizontalmente para ver todas as colunas" tabindex="0">
             <table class="explanation-table">
               <thead><tr><th>Fechado</th><th>Par</th><th>TF</th><th>Lado</th><th>Gatilho</th><th>Regime</th><th>P&L%</th><th>R</th><th>MAE/MFE</th><th>Barras</th><th>Saida</th></tr></thead>
               <tbody id="tradeRows"><tr><td colspan="11">Nenhum trade simulado fechado nesta versao do modelo.</td></tr></tbody>
             </table>
           </div>
-          <div class="explanation-table-wrap">
+          <div class="explanation-table-wrap" role="region" aria-label="Resumo de trades; deslize horizontalmente para ver todas as colunas" tabindex="0">
             <table class="explanation-table">
               <thead><tr><th>Regime</th><th>Gatilho</th><th>Faixa</th><th>Trades</th><th>Acerto</th><th>R medio</th><th>Amostra</th></tr></thead>
               <tbody id="tradeSummaryRows"><tr><td colspan="7">--</td></tr></tbody>
@@ -527,7 +543,7 @@
           <div class="section-head compact"><h2>Alertas de transicao</h2><span id="alertsStatus">Desativados</span></div>
           <div class="alert-toggles">
             <label><input type="checkbox" id="alertsEnabled" /> Ativar notificacoes do navegador</label>
-            <label><input type="checkbox" data-alert-rule="scoreCross" checked /> Setup Score cruza +42 / +60 / -45</label>
+            <label><input type="checkbox" data-alert-rule="scoreCross" checked /> Setup Score cruza ±42 / ±60</label>
             <label><input type="checkbox" data-alert-rule="biasChange" checked /> Mudanca de vies</label>
             <label><input type="checkbox" data-alert-rule="regimeChange" checked /> Mudanca de regime</label>
             <label><input type="checkbox" data-alert-rule="fundingExtreme" checked /> Funding extremo</label>
@@ -543,16 +559,16 @@
           <div class="calculator-grid">
             <label><span>Modalidade</span><select id="calcMode"><option value="spot">Spot</option><option value="futures">Futuros</option></select></label>
             <label><span>Direcao</span><select id="calcSide"><option value="long">Long / compra</option><option value="short">Short / venda</option></select></label>
-            <label><span>Quantidade atual</span><input id="calcCurrentQty" type="number" min="0" step="any" value="1" /></label>
-            <label><span>Preco medio atual</span><input id="calcCurrentPrice" type="number" min="0" step="any" value="98000" /></label>
-            <label><span>Nova entrada em x da quantidade inicial</span><input id="calcAddMultiple" type="number" min="0" step="0.1" value="3" /></label>
-            <label><span>Preco da nova entrada</span><input id="calcAddPrice" type="number" min="0" step="any" value="60000" /></label>
-            <label><span>Taxa de entrada (%)</span><input id="calcEntryFee" type="number" min="0" step="0.001" value="0.1" /></label>
-            <label><span>Taxa de saida (%)</span><input id="calcExitFee" type="number" min="0" step="0.001" value="0.1" /></label>
+            <label><span>Quantidade atual</span><input id="calcCurrentQty" type="number" min="0" max="1000000000000000" step="any" value="1" /></label>
+            <label><span>Preco medio atual</span><input id="calcCurrentPrice" type="number" min="0" max="1000000000000000" step="any" value="98000" /></label>
+            <label><span>Nova entrada em x da quantidade inicial</span><input id="calcAddMultiple" type="number" min="0" max="1000000" step="0.1" value="3" /></label>
+            <label><span>Preco da nova entrada</span><input id="calcAddPrice" type="number" min="0" max="1000000000000000" step="any" value="60000" /></label>
+            <label><span>Taxa de entrada (%)</span><input id="calcEntryFee" type="number" min="0" max="99" step="0.001" value="0.1" /></label>
+            <label><span>Taxa de saida (%)</span><input id="calcExitFee" type="number" min="0" max="99" step="0.001" value="0.1" /></label>
             <label><span>Alavancagem</span><input id="calcLeverage" type="number" min="1" max="125" step="1" value="1" /></label>
-            <label><span>Funding por periodo (%)</span><input id="calcFunding" type="number" step="0.0001" value="0" /></label>
-            <label><span>Periodos de funding</span><input id="calcFundingPeriods" type="number" min="0" step="1" value="0" /></label>
-            <label><span>Margem de manutencao (%)</span><input id="calcMaintenance" type="number" min="0" step="0.01" value="0.4" /></label>
+            <label><span>Funding por periodo (%)</span><input id="calcFunding" type="number" min="-100" max="100" step="0.0001" value="0" /></label>
+            <label><span>Periodos de funding</span><input id="calcFundingPeriods" type="number" min="0" max="1000000" step="1" value="0" /></label>
+            <label><span>Margem de manutencao (%)</span><input id="calcMaintenance" type="number" min="0" max="99" step="0.01" value="0.4" /></label>
           </div>
           <div class="calculator-results">
             <div><span>Quantidade final</span><strong id="calcFinalQty">--</strong></div>
@@ -566,9 +582,12 @@
           <p id="calculatorNote" class="mini-caption">As taxas exatas dependem do VIP, maker/taker, desconto BNB, bracket de manutencao e modo de margem da conta.</p>
         </div>
       </section>
-      <footer class="status-bar"><span id="statusText">Inicializando painel...</span><span>Migracao v1 preview | Radar Score e Setup Score nao representam probabilidade nem recomendacao</span></footer>
+      <footer class="status-bar"><span id="statusText" role="status" aria-live="polite">Inicializando painel...</span><span>Migracao v1 preview | Radar Score e Setup Score nao representam probabilidade nem recomendacao</span></footer>
     </main>
     <script src="lib/analytics-core.js"></script>
+    <script src="lib/request-client.js"></script>
+    <script src="lib/cross-tab-lock.js"></script>
+    <script src="lib/signal-sync-client.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

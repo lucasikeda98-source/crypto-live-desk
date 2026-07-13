@@ -1,3 +1,5 @@
+const { applyApiPolicyAsync } = require('../lib/api-guard');
+
 const SOURCES = [
   {
     name: 'Google News Crypto',
@@ -31,17 +33,24 @@ function tag(item, name) {
   return match ? decodeXml(match[1]) : '';
 }
 
-function parseRss(xml, source) {
+function clip(value, length) {
+  const text = String(value || '');
+  return text.length <= length ? text : text.slice(0, length);
+}
+
+function parseRss(xml, source, asOf = Date.now()) {
   const items = String(xml || '').match(/<item\b[\s\S]*?<\/item>/gi) || [];
   return items.slice(0, 18).map((item) => {
-    const title = tag(item, 'title');
+    const title = clip(tag(item, 'title'), 300);
     const publishedValue = tag(item, 'pubDate') || tag(item, 'dc:date') || tag(item, 'date');
+    const parsedPublished = Date.parse(publishedValue);
+    const published = Number.isFinite(parsedPublished) && parsedPublished >= 0 && parsedPublished <= asOf + 5 * 60 * 1000 ? parsedPublished : null;
     return {
       title,
-      body: tag(item, 'description'),
-      url: tag(item, 'link'),
-      source: tag(item, 'source') || source.name,
-      published: Number.isFinite(Date.parse(publishedValue)) ? Date.parse(publishedValue) : null,
+      body: clip(tag(item, 'description'), 2000),
+      url: clip(tag(item, 'link'), 2048),
+      source: clip(tag(item, 'source') || source.name, 120),
+      published,
       type: source.type,
     };
   }).filter((item) => item.title && /^https?:\/\//i.test(item.url));
@@ -57,6 +66,7 @@ async function fetchFeed(source) {
 }
 
 module.exports = async function handler(request, response) {
+  if (!await applyApiPolicyAsync(request, response, { cacheControl: 'public, s-maxage=300, stale-while-revalidate=900' })) return;
   if (request.method !== 'GET') {
     response.setHeader('Allow', 'GET');
     return response.status(405).json({ error: 'Method not allowed' });
@@ -75,7 +85,7 @@ module.exports = async function handler(request, response) {
     error: result.status === 'rejected' ? String(result.reason && result.reason.message || result.reason) : null,
   }));
 
-  response.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=900');
-  response.setHeader('Access-Control-Allow-Origin', '*');
   return response.status(items.length ? 200 : 503).json({ items, sources, fetchedAt: Date.now() });
 };
+
+module.exports.parseRss = parseRss;

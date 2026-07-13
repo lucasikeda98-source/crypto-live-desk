@@ -5,6 +5,15 @@ const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
 const net = require('node:net');
 const path = require('node:path');
+const { isWithinRoot } = require('../scripts/dev-server.cjs');
+
+test('dev server recusa alvos reais fora da raiz, inclusive via link simbolico', () => {
+  const root = path.resolve(__dirname, '..');
+  assert.equal(isWithinRoot(root, path.join(root, 'index.html')), true);
+  assert.equal(isWithinRoot(root, root), true);
+  assert.equal(isWithinRoot(root, path.resolve(root, '..', 'segredo.txt')), false);
+  assert.equal(isWithinRoot(root, path.resolve(root, '..')), false);
+});
 
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -50,6 +59,8 @@ test('dev server sobrevive a URL malformada e bloqueia dotfiles e traversal', as
 
     const afterMalformed = await fetch(base + '/', { signal: AbortSignal.timeout(2000) });
     assert.equal(afterMalformed.status, 200, 'servidor deve continuar vivo apos URL malformada');
+    assert.equal(afterMalformed.headers.get('x-content-type-options'), 'nosniff');
+    assert.match(afterMalformed.headers.get('content-security-policy'), /frame-ancestors 'none'/);
 
     const dotfile = await fetch(base + '/.gitignore', { signal: AbortSignal.timeout(2000) });
     assert.equal(dotfile.status, 404, 'dotfiles nao devem ser servidos');
@@ -62,6 +73,15 @@ test('dev server sobrevive a URL malformada e bloqueia dotfiles e traversal', as
 
     const index = await fetch(base + '/index.html', { signal: AbortSignal.timeout(2000) });
     assert.equal(index.status, 200, 'index.html deve ser servido');
+
+    const head = await fetch(base + '/index.html', { method: 'HEAD', signal: AbortSignal.timeout(2000) });
+    assert.equal(head.status, 200);
+    assert.equal(await head.text(), '', 'HEAD nao deve transferir o corpo do arquivo');
+
+    const staticPost = await fetch(base + '/index.html', { method: 'POST', signal: AbortSignal.timeout(2000) });
+    assert.equal(staticPost.status, 405, 'arquivos estaticos aceitam somente GET/HEAD');
+    assert.equal(staticPost.headers.get('allow'), 'GET, HEAD');
+    assert.equal(staticPost.headers.get('cache-control'), 'no-store');
   } finally {
     child.kill();
   }

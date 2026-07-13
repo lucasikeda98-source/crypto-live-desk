@@ -4,6 +4,8 @@ Status: especificação normativa para implementação e migração
 Versão inicial: `1.0.0`  
 Data: 2026-07-12
 
+Revisão operacional corrente: `1.0.0-preview.7-codex.2`, feita via Codex e **AGUARDANDO CLAUDE CODE**. O histórico v1 permanece; quando uma regra abaixo foi reconciliada com o runtime posterior, a mudança é explicitada neste documento.
+
 ## 1. Objetivo e escopo
 
 Este contrato define o significado, o cálculo, a rastreabilidade e a apresentação dos três resultados analíticos canônicos do sistema:
@@ -86,6 +88,8 @@ Toda entrada utilizada pelo modelo DEVE existir em um registro versionado de fon
 - regra de indisponibilidade.
 
 Uma fonte sem `stale_after_ms` ou sem validador NÃO É elegível para score. Horários futuros além da tolerância de relógio registrada são `invalid`.
+
+Checkpoint Codex `preview.7-codex.2`: o runtime implementa `SOURCE_REGISTRY` versionado para 22 fontes live, históricas e manuais. O objeto completo integra o `rulesetHash`, é validado por teste estrutural, acompanha o export schema 3 e fornece os identificadores mostrados na explicação do score. Esta implementação permanece **AGUARDANDO CLAUDE CODE** e, isoladamente, não demonstra a conformidade ponta a ponta de cada valor observado.
 
 ### 4.3 Horários obrigatórios
 
@@ -173,22 +177,22 @@ O viés DEVE sempre aparecer ao lado do Data Confidence. Um score alto com baixa
 
 O Setup Score mede a confluência direcional de um símbolo, timeframe e snapshot específicos. Ele serve para explicar se a leitura local, o multi-timeframe e os contextos disponíveis se apoiam ou se contradizem.
 
-O Setup Score NÃO DEVE ser usado para ordenar o radar. Um valor negativo indica evidência baixista ou risco contra uma tese compradora; ele não autoriza automaticamente uma posição short.
+O Setup Score NÃO DEVE ser usado para ordenar o radar. Um valor negativo indica evidência baixista. A máquina simulada PODE considerar short somente com os mesmos gates exigidos para long (limiar, gatilho nomeado, HTF disponível, ausência de veto e R:R estrutural); o valor negativo isolado não autoriza posição nem constitui recomendação.
 
 ### 7.2 Componentes e limites v1
 
 | Componente | Contribuição permitida |
 | --- | ---: |
 | Técnica local | `-20` a `+20` |
-| Multi-timeframe | `-24` a `+24` |
+| Multi-timeframe | `-16` a `+16` |
 | Smart money e fluxo | `-18` a `+18` |
 | Derivativos | `-12` a `+12` |
 | On-chain e fundamental | `-10` a `+10` |
 | Notícias e macro | `-10` a `+10` |
 | Histórico semelhante | `-12` a `+12` |
-| Ajuste direcional de risco | `-10` a `+10` |
+| Ajuste direcional de risco | `-14` a `+14` |
 
-O limite absoluto total dos componentes é `116`. Cada contribuição `s_i` DEVE ser calculada por uma regra identificada e respeitar seu limite.
+O limite absoluto total dos componentes é `112`. Cada contribuição `s_i` DEVE ser calculada por uma regra identificada e respeitar seu limite. A fonte normativa desses caps no runtime é `RULESET.setupCaps`.
 
 ```text
 setup_score = round(clamp(Σ(s_i), -100, +100))
@@ -208,8 +212,9 @@ As faixas abaixo preservam a linguagem atual durante a migração. Elas são heu
 | `score >= +42` e MTF não negativo | Entrada com confirmação |
 | `+20` a `+41` | Aguardar pullback/confirmação |
 | `-19` a `+19` | Sem entrada clara |
-| `-44` a `-20` | Cautela |
-| `<= -45` | Venda domina / evitar tese compradora |
+| `-41` a `-20` | Cautela |
+| `score <= -42` e MTF não positivo | Entrada vendedora com confirmação, sujeita aos mesmos gates |
+| `score <= -60`, MTF de baixa, alinhamento `>= 0,60` e Data Confidence `>= 63` | Entrada vendedora favorável, sujeita aos mesmos gates |
 | `score = null` | Setup indisponível |
 
 Qualquer chamada operacional DEVE mostrar Data Confidence. Com Data Confidence abaixo de `40`, a interface DEVE substituir a chamada operacional por “dados insuficientes”, sem alterar o valor direcional calculado. A alteração futura dessas faixas exige nova versão de modelo e validação histórica.
@@ -245,7 +250,7 @@ O Data Confidence usa os pesos nominais do Radar Score e, no Setup Score, os lim
 
 ```text
 radar_data_confidence = round(100 × Σ(w_i × component_quality_i) / 100)
-setup_data_confidence = round(100 × Σ(cap_i × component_quality_i) / 116)
+setup_data_confidence = round(100 × Σ(cap_i × component_quality_i) / 112)
 ```
 
 O fator padrão v1 de um fallback equivalente é `0,80`, salvo valor diferente explicitamente registrado e testado. Fallback equivalente significa a mesma métrica, unidade, janela e semântica; não significa proxy de outro ativo.
@@ -326,6 +331,10 @@ Um registro histórico de sinal DEVE persistir `model_version`, `ruleset_hash`, 
 
 Dado o mesmo snapshot, horário de referência, versão e regras, o resultado DEVE ser idêntico independentemente de ordem de chegada das respostas, navegador ou execução.
 
+Checkpoint Codex `preview.7-codex.2`: o export schema 3 inclui `rawEvidence` schema 1, capturado no mesmo limite sincrono do `inputSnapshotId`. Doze datasets carregam payload normalizado, fontes registradas, horario observado, contagem/tamanho canonicos e hash individual; o manifesto e o envelope possuem verificacao de integridade apos serializacao JSON. Um arquivo real BTC/5m foi reaberto com 500 candles spot, seis timeframes, sete series de derivativos e 3.252 candles diarios. O fechamento permanece **AGUARDANDO CLAUDE CODE** e nao substitui a pendencia de persistencia duravel de sinais.
+
+Checkpoint de persistencia Codex: o codigo inclui namespace privado com hash, conciliacao sem apagar outcomes, retencao de pendentes, Redis e worker cron que escolhe o primeiro candle fechado no/depois de 1h, 24h e 7d. A troca concorrente de namespace invalida a transacao anterior para impedir mistura entre journals. Esses contratos possuem testes locais, mas Redis e `CRON_SECRET` ainda nao foram provisionados nem comprovados na Vercel; portanto a exigencia de persistencia remota continua operacionalmente aberta.
+
 ## 12. Critérios de aceitação v1
 
 A implementação só está em conformidade quando todos os itens abaixo possuírem testes automatizados:
@@ -397,6 +406,16 @@ O legado só PODE ser removido quando:
 - uma janela de observação definida não apresentar mistura de ativo/timeframe, `NaN`, score sem explicação ou dado `stale` influenciando resultado.
 
 Após a troca, qualquer backtest, relatório ou comparação DEVE segmentar resultados por versão do modelo.
+
+### Estado da migração no runtime preview.7-codex.2
+
+- **Fase 0:** parcialmente concluída; fixtures, snapshots, divergências e ledger existem, mas o comportamento histórico ainda não está preservado em uma base durável.
+- **Fase 1:** parcialmente concluída; existe núcleo puro, registro normativo de 22 fontes e envelope schema 3 com 12 datasets/series verificáveis. A cobertura integral ainda depende de revisão independente e de referências duráveis fora do arquivo exportado.
+- **Fase 2:** parcialmente concluída; candles fechados, proxies, ausências, staleness, concorrência, calendário ETF e override manual auditável foram endurecidos, mas a conformidade de todas as fontes ainda precisa ser demonstrada ponta a ponta.
+- **Fase 3:** parcialmente concluída; rótulos, contribuições, horários e estados degradados estão visíveis, mas ainda não existem feature flag, telemetria de divergência e rollback operacional testado.
+- **Fase 4:** bloqueada pelos itens anteriores. O legado não foi formalmente encerrado.
+
+Portanto, o runtime **NÃO É CONFORME** ao contrato v1 neste checkpoint. Testes verdes demonstram regressão controlada no escopo exercitado, não conformidade integral. Todas as mudanças desta revisão foram feitas via Codex e permanecem **AGUARDANDO CLAUDE CODE**.
 
 ## 14. Fora do escopo desta versão
 

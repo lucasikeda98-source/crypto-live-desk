@@ -1,6 +1,6 @@
 # Crypto Live Desk - cobertura analitica
 
-## Modelo analitico 1.0.0-preview.6
+## Modelo analitico 1.0.0-preview.7-codex.2
 
 Esta e uma versao de migracao parcial. O contrato normativo completo esta em `ANALYTIC_CONTRACT_V1.md`. A interface distingue:
 
@@ -9,6 +9,26 @@ Esta e uma versao de migracao parcial. O contrato normativo completo esta em `AN
 - Data Confidence para cobertura dos dados, sem interpretar o valor como probabilidade de acerto.
 
 Indicadores e eventos confirmados usam apenas candles fechados. Opcoes e mempool BTC exibidos para altcoins sao proxies informativos e possuem contribuicao zero nos scores especificos e no Data Confidence do ativo.
+
+## Mudancas da auditoria preview.7-codex.2
+
+1. Entradas analiticas e de API passaram a rejeitar timestamps futuros, valores negativos impossiveis, campos ausentes convertidos em zero, OHLCV incoerente, duplicatas e ordem temporal invalida.
+2. A identidade do snapshot inclui as entradas em tempo real que alteram o Setup Score; o export schema 3 agora carrega tambem um envelope bruto imutavel com 12 datasets, series integrais normalizadas, manifesto e hashes verificaveis apos round-trip.
+3. Candles fechados, outcomes de 1h/24h/7d, gaps, volatilidade realizada, multi-timeframe, traps, stops e journal receberam testes causais, adversariais e de simetria long/short.
+4. APIs usam deadline absoluto, erros semanticos e parciais tipados, allowlists de ativos, cabecalhos coerentes, politica same-origin e limite local; quando Redis existe, o mesmo gate adiciona sliding window distribuido.
+5. Cache, tentativa/backoff e coalescencia reduzem fan-out; todas as chamadas do cliente compartilham budget de concorrencia, janela global, fatia por fonte, prioridade e fila. A implementacao distribuida foi testada em memoria, mas ainda nao foi ativada/provada entre instancias da Vercel.
+6. Interface recebeu estados indisponiveis explicitos, cobertura MTF, timezone, foco visivel, alvos de toque, grafico mobile adaptativo e calculadora limitada contra `NaN`/infinito.
+7. A suite deterministica inclui fuzz com sementes fixas e contratos de API; navegador integrado validou os fluxos principais em desktop e 390 x 844 px.
+8. O registro normativo `SOURCE_REGISTRY` descreve 22 fontes com metricas, unidades, validadores, escopo, relogio, TTL, fallback, proveniencia, cache, indisponibilidade e elegibilidade; sua versao integra o ruleset e o export.
+9. Fluxos ETF recebem `reported`/`reportReason` por flag do provedor ou calendario de sessoes dos EUA; o parser atravessa envelopes MCP aninhados e preserva zero reportado em dia de negociacao.
+10. Override manual de noticias exige autor e motivo antes de mudar o score e registra ambos no snapshot, export e explicacao; voltar a `Auto` remove a trilha manual ativa.
+11. O envelope bruto foi exercitado no browser e reaberto fora da UI: BTC/5m continha 500 candles spot, seis series MTF, sete series de derivativos e 3.252 candles historicos; os 12 hashes e o hash global foram validados em um arquivo de 3.524.193 bytes.
+12. O journal ganhou cliente de sincronizacao isolado, backend Redis, retencao que nunca sacrifica horizontes pendentes e worker cron para outcomes sem aba. O codigo foi testado com Redis falso; storage/segredo ainda nao estao provisionados no projeto remoto.
+13. Rede/orcamento e sincronizacao/persistencia foram extraidos do `app.js` para modulos UMD independentes, incluindo regressao contra vazamento entre codigos privados concorrentes.
+14. Toda esta rodada foi feita via Codex e permanece **AGUARDANDO CLAUDE CODE**; ela nao declara conformidade integral com o contrato v1.
+15. A persistencia passou a adotar o snapshot canonico remoto no primeiro sync, usa merge+schedule atomico em Lua para impedir que cliente atrasado apague outcome do worker e serializa limpeza contra GET/POST em voo.
+16. O worker compartilha janelas de mercado, le a fila em pipeline, usa lease distribuido e processa ate 300 itens/24s. Isso cobre um cliente 5m continuo, mas nao transforma o cron Hobby diario em arquitetura multiusuario escalavel.
+17. O gate atual possui 215 testes; cobertura Node de 98,76% linhas, 79,41% branches e 97,30% funcoes, com pisos bloqueantes de 95%/75%/90%. Oito modulos foram novamente percorridos no navegador integrado em 390 x 844 px sem overflow do documento ou erro de console.
 
 ## Mudancas do preview.6
 
@@ -38,7 +58,7 @@ Indicadores e eventos confirmados usam apenas candles fechados. Opcoes e mempool
 7. Netflow 7d: exige cobertura de pelo menos 5 dos 7 dias; abaixo disso o valor fica indisponivel em vez de subestimado.
 8. Fluxo de candles: o delta taker exige cobertura de pelo menos 50% da janela de 40 candles.
 9. Contexto externo: variacoes ausentes de mercado/chain/protocolo nao contam mais como 0% observado; falha total das 11 fontes preserva a leitura anterior como stale em vez de fabricar um zero fresco.
-10. `observedAt` de opcoes/contexto usa clamp contra o relogio local (skew de relogio nao invalida mais dados ao vivo); ETF usa updatedAt, data da ultima linha ou fetchedAt, nesta ordem.
+10. `observedAt` de opcoes/contexto tolera apenas o skew explicitamente aceito; timestamps futuros alem dessa tolerancia ficam invalidos. `fetchedAt` nao substitui o instante observado. ETF usa a data da ultima linha realmente reportada e fica indisponivel quando ela nao existe.
 11. `inputSnapshotId` passa a ser derivado apenas das entradas (candle fechado + carimbo de cada dataset + modo de noticias); o horario do calculo e a revisao ficam em campos separados.
 
 ## Atualidade e elegibilidade
@@ -50,7 +70,7 @@ O horario em que a fonte observou o dado (`observedAt`) e separado do horario em
 | Derivativos historicos | 15 s | 2x o timeframe, minimo 45 s |
 | Opcoes Deribit | 60 s | 5 min |
 | Coin Metrics diario | 15 min | 48 h |
-| ETF / institucional | 5 min | 36 h |
+| ETF / institucional | 5 min | 96 h |
 | Microestrutura cross-venue | 15 s | 60 s, apenas informativo |
 | CFTC COT Bitcoin CME | 5 min no cliente / 6 h no proxy | 10 dias, apenas informativo |
 | Noticias RSS | 5 min | 36 h por noticia |

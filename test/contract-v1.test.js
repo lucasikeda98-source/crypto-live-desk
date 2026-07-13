@@ -42,6 +42,7 @@ test('contrato 12.4: remover um bloco nao cria vies e reduz o Data Confidence', 
 test('contrato 12.12/12.13: limites e caso incalculavel', () => {
   const extreme = core.aggregateRadarParts([{ name: 'x', weight: 100, available: true, value: 500, quality: 1 }]);
   assert.equal(extreme.score, 100);
+  assert.equal(extreme.rawScore, 100, 'valor do componente e limitado a escala declarada');
   const empty = core.aggregateRadarParts([
     { name: 'a', weight: 60, available: false, value: 0 },
     { name: 'b', weight: 40, available: false, value: 0 }
@@ -50,6 +51,22 @@ test('contrato 12.12/12.13: limites e caso incalculavel', () => {
   assert.equal(empty.bias, 'Indisponivel');
   assert.equal(empty.dataConfidence, 0);
   assert.equal(empty.dataStatus, 'unavailable');
+});
+
+test('agregador ignora pesos negativos/invalidos e permanece finito sob magnitudes hostis', () => {
+  const result = core.aggregateRadarParts([
+    { name: 'valido', weight: 10, available: true, value: 20, quality: 1 },
+    { name: 'negativo', weight: -50, available: true, value: -100, quality: 1 },
+    { name: 'enorme', weight: 1e308, available: true, value: 1e308, quality: 1 },
+    { name: 'invalido', weight: 'x', available: true, value: 50, quality: 1 }
+  ]);
+  assert.ok(Number.isFinite(result.rawScore));
+  assert.ok(Number.isFinite(result.score));
+  assert.ok(result.score >= -100 && result.score <= 100);
+  assert.equal(result.contributions[1].available, false);
+  assert.equal(result.contributions[1].contribution, 0);
+  assert.equal(result.contributions[3].available, false);
+  assert.ok(Number.isFinite(core.calculateDataConfidence([{ weight: 1e308, quality: 1 }, { weight: 1e308, quality: 0.5 }])));
 });
 
 test('contrato 8.2: Data Confidence e graduado por qualidade, nao binario', () => {
@@ -101,9 +118,9 @@ test('ichimoku: kumo atual usa os spans projetados de 26 barras atras', () => {
   assert.equal(core.ichimokuState(candles.slice(0, 30)).state, 'Sem dados');
 });
 
-test('resolveObservedAt: clampa futuro, cai para fetchedAt e preserva passado', () => {
-  assert.deepEqual(core.resolveObservedAt(2000, 1000, 60), { observedAt: 1000, provenance: 'clamped' });
-  assert.deepEqual(core.resolveObservedAt(null, 1000), { observedAt: 1000, provenance: 'fetched' });
+test('resolveObservedAt: futuro invalido e ausencia nunca sao mascarados por fetchedAt', () => {
+  assert.deepEqual(core.resolveObservedAt(2000, 1000, 60), { observedAt: 2000, provenance: 'invalid' });
+  assert.deepEqual(core.resolveObservedAt(null, 1000), { observedAt: null, provenance: 'missing' });
   assert.deepEqual(core.resolveObservedAt(900, 1000), { observedAt: 900, provenance: 'data' });
   assert.deepEqual(core.resolveObservedAt(1030, 1000, 60000), { observedAt: 1030, provenance: 'data' }, 'skew dentro da tolerancia e aceito');
 });
@@ -127,6 +144,12 @@ test('ruleset: hash e deterministico e muda quando uma regra muda', () => {
   const altered = JSON.parse(JSON.stringify(core.RULESET));
   altered.radarBias.bull = 40;
   assert.notEqual(core.rulesetHash(altered), core.rulesetHash());
+  function changedImplementation() { return 1; }
+  assert.notEqual(core.rulesetHash(undefined, [changedImplementation]), core.rulesetHash(), 'implementacao adicional altera o hash mesmo com RULESET igual');
+  assert.equal(core.stableHash({ b: 2, a: { y: 2, x: 1 } }), core.stableHash({ a: { x: 1, y: 2 }, b: 2 }), 'hash de evidencia independe da ordem de chaves');
+  assert.notEqual(core.stableHash({ value: 1 }), core.stableHash({ value: 2 }));
+  assert.equal(Object.isFrozen(core.RULESET), true);
+  assert.equal(Object.isFrozen(core.RULESET.setupCaps), true);
 });
 
 test('contrato 12.10: proxies BTC seguem fora do score de altcoins', () => {
