@@ -91,8 +91,11 @@ geo-restrição). O gate autoritativo é contra o deploy:
 ### Fase C — Retomar o checklist original (Blocos 1-3)
 
 Depois da Fase B, seguir o checklist já apresentado:
-- **Bloco 1 — Conformidade v1:** gap analysis dos 17 critérios (§12), fixtures mínimos
-  faltantes, aposentadoria do legado (Fases 2→4 da migração), rollback testado.
+- **Bloco 1 — Conformidade v1:** gap analysis dos 17 critérios ENTREGUE em
+  `CONFORMANCE_V1_GAP.md` (11 cobertos, 5 parciais, 1 lacuna real). §12.17 (comunicação) já
+  fechado com teste de lint. Próximos: golden fixtures (12.16), invariância do candle aberto
+  (12.8), rastreabilidade por campo (12.14), fator de proveniência do fallback (12.7),
+  auditoria de aliases legados (Fase 4).
 - **Bloco 2 — Roadmap:** backtesting walk-forward, calibração de probabilidade, alertas por
   regime, portfolio risk, calendário de eventos, integração autenticada isolada no backend.
 - **Bloco 3 — Infra:** estabilizar o smoke de navegador, gate de CI alternativo, questão

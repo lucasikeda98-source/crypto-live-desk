@@ -134,3 +134,26 @@ test('contrato 12.10: proxies BTC seguem fora do score de altcoins', () => {
   assert.equal(core.bitcoinMempoolContext('ADAUSDT', 90).score, 0);
   assert.equal(core.resolveOptionsScope('BTCUSDT').eligibleForScore, true);
 });
+
+test('contrato 12.17: comunicacao nao promete acerto nem trata Data Confidence como probabilidade', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const read = (file) => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+  const html = read('index.html');
+  const appjs = read('app.js');
+
+  // Disclaimer obrigatorio: os scores nao sao probabilidade nem recomendacao.
+  assert.match(html, /nao representam probabilidade nem recomendacao/i,
+    'o rodape deve declarar que Radar/Setup Score nao sao probabilidade nem recomendacao');
+  // Data Confidence deve ser enquadrado como cobertura de dados, nao chance de acerto.
+  assert.match(appjs, /Data Confidence[^\n]*cobertura de dados, nao chance de acerto/i,
+    'a UI deve dizer que Data Confidence mede cobertura de dados, nao chance de acerto');
+
+  // Linguagem de promessa/garantia nao pode aparecer em nenhuma copy visivel.
+  const forbidden = [/lucro garantido/i, /retorno garantido/i, /ganho garantido/i,
+    /recomendacao garantida/i, /100% de acerto/i, /sinal garantido/i, /acerto garantido/i];
+  for (const rx of forbidden) {
+    assert.ok(!rx.test(html), 'index.html nao pode conter linguagem de garantia: ' + rx);
+    assert.ok(!rx.test(appjs), 'app.js nao pode conter linguagem de garantia: ' + rx);
+  }
+});
