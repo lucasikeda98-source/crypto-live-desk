@@ -19,6 +19,7 @@ const apiHandlers = {
   '/api/tradfi': '../api/tradfi',
   '/api/options': '../api/options',
   '/api/institutional': '../api/institutional',
+  '/api/market-microstructure': '../api/market-microstructure',
   '/api/market': '../api/market',
   '/api/defillama': '../api/defillama'
 };

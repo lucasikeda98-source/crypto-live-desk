@@ -1,5 +1,5 @@
 (function () {
-  var MODEL_VERSION = '1.0.0-preview.5';
+  var MODEL_VERSION = '1.0.0-preview.6';
   var AnalyticsCore = window.CryptoAnalyticsCore;
   if (!AnalyticsCore) throw new Error('CryptoAnalyticsCore nao foi carregado.');
   var RULESET_HASH = AnalyticsCore.rulesetHash();
@@ -18,6 +18,8 @@
   var OPTIONS_STALE_MS = 5 * 60 * 1000;
   var INSTITUTIONAL_REFRESH_MS = 300000;
   var INSTITUTIONAL_STALE_MS = 36 * 60 * 60 * 1000;
+  var MICROSTRUCTURE_REFRESH_MS = 15000;
+  var MICROSTRUCTURE_STALE_MS = 60 * 1000;
   var NEWS_ITEM_STALE_MS = 36 * 60 * 60 * 1000;
   var EXTERNAL_STALE_MS = 10 * 60 * 1000;
   var EOD_STALE_MS = 96 * 60 * 60 * 1000;
@@ -79,7 +81,7 @@
     ARBUSDT: { gecko: 'arbitrum', paprika: 'arb-arbitrum', chain: 'Arbitrum', kind: 'Ethereum L2', narrative: 'ARB depende de TVL, volume DEX, atividade de L2 e calendario de desbloqueios.' },
     OPUSDT: { gecko: 'optimism', paprika: 'op-optimism', chain: 'Optimism', kind: 'Ethereum L2', narrative: 'OP reage a atividade do Superchain, TVL, receitas de L2 e desbloqueios de tokens.' }
   };
-  var state = { symbol: 'BTCUSDT', interval: '5m', view: 'dashboard', assetTab: 'summary', live: true, refreshing: false, pendingRefresh: false, boardRefreshing: false, boardPendingRefresh: false, contextRefreshing: false, chainRefreshing: false, timer: null, klines: [], analysis: null, board: [], boardFetchedAt: 0, boardInterval: '', sort: 'score', chain: null, chainFetchedAt: 0, news: [], newsFetchedAt: 0, newsAttemptedAt: 0, newsMode: 'auto', newsSources: [], external: {}, externalFetchedAt: 0, derivativeCache: {}, mtfCache: {}, mtf: null, historyProfiles: {}, historyCandles: {}, historyLoading: {}, historySweepStarted: false, coinMetricsCache: {}, coinMetrics: null, optionsCache: {}, options: null, optionsFetchedAt: 0, institutionalCache: {}, institutional: null, institutionalFetchedAt: 0, liquidations: [], liquidationSocket: null, liquidationSymbol: '', liquidationConnected: false, liquidationReconnectTimer: null, apiHealth: {}, boardFailures: {}, signalMachineEval: {}, quantChecks: null, chart: { ema9: true, ema21: true, ema50: true, ema200: false, bb: false, vwap: false, supertrend: false, levels: true, fib: false, patterns: true, candles: 120 } };
+  var state = { symbol: 'BTCUSDT', interval: '5m', view: 'dashboard', assetTab: 'summary', live: true, refreshing: false, pendingRefresh: false, boardRefreshing: false, boardPendingRefresh: false, contextRefreshing: false, chainRefreshing: false, timer: null, klines: [], analysis: null, board: [], boardFetchedAt: 0, boardInterval: '', sort: 'score', chain: null, chainFetchedAt: 0, news: [], newsFetchedAt: 0, newsAttemptedAt: 0, newsMode: 'auto', newsSources: [], external: {}, externalFetchedAt: 0, derivativeCache: {}, mtfCache: {}, mtf: null, historyProfiles: {}, historyCandles: {}, historyLoading: {}, historySweepStarted: false, coinMetricsCache: {}, coinMetrics: null, optionsCache: {}, options: null, optionsFetchedAt: 0, institutionalCache: {}, institutional: null, institutionalFetchedAt: 0, microstructureCache: {}, microstructure: null, liquidations: [], liquidationSocket: null, liquidationSymbol: '', liquidationConnected: false, liquidationReconnectTimer: null, apiHealth: {}, boardFailures: {}, signalMachineEval: {}, quantChecks: null, chart: { ema9: true, ema21: true, ema50: true, ema200: false, bb: false, vwap: false, supertrend: false, levels: true, fib: false, patterns: true, candles: 120 } };
   var $ = function (id) { return document.getElementById(id); };
   function analysisMatchesSelection(analysis) {
     if (!analysis) return false;
@@ -884,6 +886,21 @@
       return markDataset(payload, institutionalNow, INSTITUTIONAL_STALE_MS, status, payload.observedAt);
     } catch (error) {
       return cached ? markDataset(cached.value, cached.fetchedAt, INSTITUTIONAL_STALE_MS) : null;
+    }
+  }
+  async function loadMicrostructure(symbol, force) {
+    var cached = state.microstructureCache[symbol];
+    if (!force && cached && Date.now() - cached.fetchedAt < MICROSTRUCTURE_REFRESH_MS) {
+      return markDataset(cached.value, cached.fetchedAt, MICROSTRUCTURE_STALE_MS);
+    }
+    try {
+      var payload = await fetchJSON('/api/market-microstructure?symbol=' + encodeURIComponent(symbol), 14000, 'Microestrutura cross-venue');
+      var fetchedAt = Number.isFinite(+payload.fetchedAt) ? +payload.fetchedAt : Date.now();
+      var status = Array.isArray(payload.venues) && payload.venues.length || payload.orderFlow && payload.orderFlow.trades ? 'fresh' : 'missing';
+      state.microstructureCache[symbol] = { value: payload, fetchedAt: fetchedAt };
+      return markDataset(payload, fetchedAt, MICROSTRUCTURE_STALE_MS, status, payload.observedAt);
+    } catch (error) {
+      return cached ? markDataset(cached.value, cached.fetchedAt, MICROSTRUCTURE_STALE_MS) : null;
     }
   }
   function closeLiquidationStream() {
@@ -2231,7 +2248,8 @@
       loadDerivativeDetail(symbol, p, !!force),
       loadCoinMetrics(symbol, false),
       loadOptions(symbol, !!force),
-      loadInstitutional(symbol, !!force)
+      loadInstitutional(symbol, !!force),
+      loadMicrostructure(symbol, !!force)
     ]);
     if (!refreshGate.isCurrent(requestId)) return false;
     var candles = parseKlines(value(results[0])), closedCandles = selectClosedCandles(candles);
@@ -2239,6 +2257,7 @@
     var coinMetrics = value(results[6]);
     var options = value(results[7]);
     var institutional = value(results[8]);
+    var microstructure = value(results[9]);
     var chainAdjustment = 0;
     if (eligibleDataset(coinMetrics)) {
       chainAdjustment += coinMetrics.score;
@@ -2263,6 +2282,7 @@
     analysis.coinMetrics = coinMetrics;
     analysis.options = options;
     analysis.institutional = institutional;
+    analysis.microstructure = microstructure;
     analysis.signalCandle = last(closedCandles);
     analysis.liveCandle = last(candles) || analysis.signalCandle;
     analysis.liveClose = analysis.liveCandle.close;
@@ -2279,6 +2299,7 @@
     state.optionsFetchedAt = options ? Date.now() : state.optionsFetchedAt;
     state.institutional = institutional;
     state.institutionalFetchedAt = institutional ? Date.now() : state.institutionalFetchedAt;
+    state.microstructure = microstructure;
     state.mtf = mtf;
     stampAnalysisSnapshot(analysis, 'selected-refresh', { symbol: symbol, interval: interval, requestId: requestId, signalCloseTime: analysis.signalCandle.closeTime });
     render(value(results[3]), value(results[4]), value(results[2]), chain || {}, value(results[1]));
@@ -2809,6 +2830,15 @@
     }).join('') : '<div class="institutional-row"><div><strong>' + (configured.etf ? 'Sem fluxos retornados' : 'Ativo sem ETF coberto') + '</strong><span>A fonte publica cobre BTC, ETH, SOL, XRP e HYPE.</span></div></div>';
     var errors = data.errors || {};
     text('institutionalCaption', errors.etf ? 'CryptoETF publico: ' + errors.etf + '.' : 'Dados obtidos por uma fonte publica sem chave de API.');
+    var cftc = data.cftc && data.cftc.latest;
+    var cftcObservedAt = data.cftc && Number.isFinite(+data.cftc.observedAt) ? +data.cftc.observedAt : NaN;
+    var cftcFresh = Number.isFinite(cftcObservedAt) && Date.now() - cftcObservedAt <= 10 * 24 * 60 * 60 * 1000;
+    text('cftcStatus', cftc ? (cftcFresh ? 'Semanal fresh | informativo' : 'Stale | informativo') : 'Indisponivel');
+    text('cftcNonCommNet', cftc && Number.isFinite(+cftc.nonCommercialNet) ? signed(+cftc.nonCommercialNet) + ' contratos' : '--');
+    text('cftcNonCommChange', cftc && Number.isFinite(+cftc.changeNonCommercialNet) ? signed(+cftc.changeNonCommercialNet) + ' contratos' : '--');
+    text('cftcCommercialNet', cftc && Number.isFinite(+cftc.commercialNet) ? signed(+cftc.commercialNet) + ' contratos' : '--');
+    text('cftcOpenInterest', cftc && Number.isFinite(+cftc.openInterest) ? num(+cftc.openInterest, 0) + ' contratos' : '--');
+    text('cftcCaption', cftc ? 'CFTC Legacy Futures Only, CME Bitcoin, data do relatorio ' + new Date(cftcObservedAt).toLocaleDateString('pt-BR') + '. Contratos nao equivalem diretamente a BTC ou USD e ainda nao alteram os scores.' : errors.cftc ? 'CFTC: ' + errors.cftc + '.' : 'CFTC sem leitura.');
   }
   function renderMacroFlow(a) {
     var ext = state.external || {}, markets = ext.coinMarkets || {};
@@ -2840,7 +2870,25 @@
     if (tradfiGrid) tradfiGrid.innerHTML = tradfi.length ? tradfi.map(function (item) {
       return '<div class="tradfi-item"><span>' + escapeHTML(item.symbol + ' | ' + item.group) + '</span><strong>' + money(+item.close) + ' | 5d ' + percent(+item.change5d, 2) + '</strong></div>';
     }).join('') : '<div class="tradfi-item"><span>Fonte EOD</span><strong>Indisponivel agora</strong></div>';
+    renderMicrostructure(a);
     renderCoverage(a);
+  }
+  function renderMicrostructure(a) {
+    var data = a && a.microstructure || state.microstructure;
+    var eligible = eligibleDataset(data);
+    var flow = data && data.orderFlow || {};
+    text('microstructureStatus', data ? datasetStatus(data) + ' | informativo' : 'sem leitura');
+    text('cvdUsdLine', eligible && Number.isFinite(+flow.cvdUsd) ? compactMoney(+flow.cvdUsd) : '--');
+    text('takerImbalanceLine', eligible && Number.isFinite(+flow.imbalancePct) ? percent(+flow.imbalancePct, 1) : '--');
+    text('coinbasePremiumLine', eligible && Number.isFinite(+data.coinbasePremiumBps) ? num(+data.coinbasePremiumBps, 2) + ' bps' : '--');
+    text('venueDispersionLine', eligible && Number.isFinite(+data.dispersionBps) ? num(+data.dispersionBps, 2) + ' bps' : '--');
+    var rows = $('venuePriceRows');
+    if (rows) rows.innerHTML = data && Array.isArray(data.venues) && data.venues.length ? data.venues.map(function (venue) {
+      return '<div class="institutional-row"><div><strong>' + escapeHTML(venue.name) + '</strong><span>premium vs mediana</span></div><strong>' + money(+venue.price) + ' | ' + (Number.isFinite(+venue.premiumBps) ? num(+venue.premiumBps, 2) + ' bps' : '--') + '</strong></div>';
+    }).join('') : '<div class="institutional-row"><div><strong>Sem venues</strong><span>Fonte publica indisponivel agora</span></div></div>';
+    text('microstructureCaption', eligible && Number.isFinite(+flow.firstTradeAt) && Number.isFinite(+flow.lastTradeAt)
+      ? flow.trades + ' aggTrades Binance entre ' + new Date(+flow.firstTradeAt).toLocaleTimeString('pt-BR') + ' e ' + new Date(+flow.lastTradeAt).toLocaleTimeString('pt-BR') + '. CVD e premiums sao informativos e nao alteram o Setup Score.'
+      : 'CVD e premiums sao informativos e nao alteram o Setup Score.');
   }
   function renderCoverage(a) {
     var freshNewsCount = freshNewsItems().length;
@@ -2851,6 +2899,7 @@
       { name: 'Derivativos', ok: hasDerivativeData(a.derivativeDetail), detail: 'OI, funding, L/S, taker' },
       { name: 'On-chain no score', ok: eligibleDataset(a.coinMetrics), detail: a.coinMetrics ? a.coinMetrics.asset.toUpperCase() + ' | ' + datasetStatus(a.coinMetrics) : 'sem cobertura' },
       { name: 'Livro e execucao', ok: Number.isFinite(a.spreadBps), detail: Number.isFinite(a.spreadBps) ? num(a.spreadBps, 2) + ' bps' : 'sem leitura' },
+      { name: 'Microestrutura informativa', ok: !!(a.microstructure && eligibleDataset(a.microstructure)), detail: a.microstructure && Array.isArray(a.microstructure.venues) ? a.microstructure.venues.length + ' venues + CVD' : 'sem leitura' },
       { name: 'Noticias', ok: freshNewsCount > 0, detail: freshNewsCount + ' itens fresh' },
       { name: 'Macro oficial', ok: externalContextFresh() && macroSourceAvailable(state.external.macro), detail: externalContextFresh() && macroSourceAvailable(state.external.macro) ? 'Treasury / VIX' : 'stale' },
       { name: 'TradFi', ok: externalContextFresh() && activeTradFiAssets(state.external.tradfi).length > 0, detail: externalContextFresh() && activeTradFiAssets(state.external.tradfi).length ? 'acoes e ETFs EOD' : 'stale' },
@@ -3515,6 +3564,8 @@
       coinMetrics: analysis.coinMetrics ? { status: datasetStatus(analysis.coinMetrics), observedAt: analysis.coinMetrics.observedAt || null } : null,
       options: analysis.options ? { status: datasetStatus(analysis.options), observedAt: analysis.options.observedAt || null, isProxy: !!analysis.options.isProxy } : null,
       institutional: analysis.institutional ? { status: datasetStatus(analysis.institutional), observedAt: analysis.institutional.observedAt || null } : null,
+      microstructure: analysis.microstructure ? { status: datasetStatus(analysis.microstructure), observedAt: analysis.microstructure.observedAt || null, informational: true } : null,
+      cftc: analysis.institutional && analysis.institutional.cftc ? { observedAt: analysis.institutional.cftc.observedAt || null, informational: true } : null,
       external: state.external && state.external.fetchedAt ? { fetchedAt: state.external.fetchedAt, dataStatus: state.external.dataStatus || 'fresh' } : null,
       news: { fetchedAt: state.newsFetchedAt || null, mode: state.newsMode }
     };

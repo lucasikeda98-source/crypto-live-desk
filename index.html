@@ -422,6 +422,16 @@
           </div>
           <p id="institutionalCaption" class="mini-caption">--</p>
         </div>
+        <div class="panel cftc-panel">
+          <div class="section-head compact"><div><h2>CFTC COT — CME Bitcoin</h2><p>Posicionamento semanal oficial em contratos; contexto institucional informativo para todo o mercado cripto.</p></div><span id="cftcStatus">--</span></div>
+          <div class="metric-grid">
+            <div><span>Non-commercial net</span><strong id="cftcNonCommNet">--</strong></div>
+            <div><span>Variacao semanal net</span><strong id="cftcNonCommChange">--</strong></div>
+            <div><span>Commercial net</span><strong id="cftcCommercialNet">--</strong></div>
+            <div><span>Open interest</span><strong id="cftcOpenInterest">--</strong></div>
+          </div>
+          <p id="cftcCaption" class="mini-caption">--</p>
+        </div>
       </section>
 
       <section class="deep-dive-grid view-asset" data-asset-panel="macro">
@@ -432,6 +442,17 @@
         <div class="panel tradfi-panel">
           <div class="section-head compact"><div><h2>Acoes e mercados correlatos</h2><p>Proxies de empresas cripto, tecnologia e liquidez global.</p></div><span id="tradfiStatus">--</span></div>
           <div id="tradfiGrid" class="tradfi-grid"></div>
+        </div>
+        <div class="panel microstructure-panel">
+          <div class="section-head compact"><div><h2>Microestrutura cross-venue</h2><p>CVD recente por aggTrades e diferencas de preco entre venues publicos; leitura informativa.</p></div><span id="microstructureStatus">--</span></div>
+          <div class="metric-grid">
+            <div><span>CVD recente</span><strong id="cvdUsdLine">--</strong></div>
+            <div><span>Imbalance taker</span><strong id="takerImbalanceLine">--</strong></div>
+            <div><span>Coinbase premium</span><strong id="coinbasePremiumLine">--</strong></div>
+            <div><span>Dispersao cross-venue</span><strong id="venueDispersionLine">--</strong></div>
+          </div>
+          <div id="venuePriceRows" class="institutional-list"></div>
+          <p id="microstructureCaption" class="mini-caption">--</p>
         </div>
         <div class="panel coverage-panel">
           <div class="section-head compact"><div><h2>Cobertura analitica</h2><p>Dados presentes, ausentes e impacto sobre a confianca.</p></div><span id="coverageSummary">--</span></div>

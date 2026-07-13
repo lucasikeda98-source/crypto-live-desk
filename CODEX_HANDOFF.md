@@ -118,6 +118,40 @@ Revisao pelo Claude Code significa revisao independente de codigo, regras analit
 - Revisao futura solicitada:
   - Claude Code deve revisar os commits do intervalo `df16c8b..b334389`, com atencao especial aos itens dos Ciclos B e C descritos no CX-003 e no handoff original.
 
+### CX-005 — Ciclo D fase 1: microestrutura e CFTC
+
+- Data: 2026-07-12
+- Responsavel: Codex
+- Branch: `codex/cycle-d-sources`
+- Base: `8d18107`
+- Estado: **AGUARDANDO CLAUDE CODE**
+- Escopo:
+  - Versao de desenvolvimento elevada para `1.0.0-preview.6`.
+  - Nova rota `api/market-microstructure.js` consulta ate 1.000 aggTrades Binance e tickers publicos Binance, Coinbase, Bybit e OKX.
+  - CVD usa o campo Binance `m` para separar agressao compradora e vendedora em notional de cotacao.
+  - Comparacao cross-venue calcula mediana, dispersao e Coinbase premium vs Binance.
+  - Fonte oficial CFTC Legacy Futures Only adicionada ao proxy institucional para o contrato Bitcoin CME (`133741`).
+  - Interface ganhou paineis de Microestrutura cross-venue e CFTC COT.
+  - Todas as novas leituras permanecem informativas e fora de Radar Score, Setup Score e Data Confidence.
+- Fontes primarias conferidas:
+  - Binance Spot API / aggTrades.
+  - Coinbase Exchange / product ticker.
+  - Bybit V5 / market tickers.
+  - OKX V5 / market ticker.
+  - CFTC Public Reporting Environment, dataset Legacy Futures Only `6dca-aqww`.
+- Validacao Codex:
+  - 98 de 98 testes deterministas aprovados.
+  - Consulta real BTC retornou quatro venues, 1.000 aggTrades e nenhuma falha de fonte.
+  - Painel local exibiu CVD, imbalance, Coinbase premium, dispersao e quatro venues sem erros de console.
+  - CFTC real exibiu relatorio de 07/07/2026: non-commercial net +3.500, variacao -270, commercial net -3.217 e OI 18.832 contratos.
+- Limitacoes conhecidas:
+  - CVD cobre somente os ultimos 1.000 aggTrades, nao uma serie acumulada de longo prazo.
+  - Coinbase pode nao listar todos os ativos em par USD; falha parcial fica explicita e nao invalida os demais venues.
+  - CFTC e contexto semanal de Bitcoin/CME e nao deve ser aplicado como posicionamento especifico de cada altcoin.
+  - CoinGecko derivatives, unlocks DeFiLlama, calendario macro e FRED ainda nao fazem parte desta fase.
+- Revisao futura solicitada:
+  - Confirmar a interpretacao do campo Binance `m`, unidades CFTC e politica de manter as fontes fora dos scores.
+
 ## Revisoes do Claude Code
 
 Nenhuma revisao registrada ate o momento.

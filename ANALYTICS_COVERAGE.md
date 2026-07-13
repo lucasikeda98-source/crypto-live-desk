@@ -1,6 +1,6 @@
 # Crypto Live Desk - cobertura analitica
 
-## Modelo analitico 1.0.0-preview.5
+## Modelo analitico 1.0.0-preview.6
 
 Esta e uma versao de migracao parcial. O contrato normativo completo esta em `ANALYTIC_CONTRACT_V1.md`. A interface distingue:
 
@@ -9,6 +9,14 @@ Esta e uma versao de migracao parcial. O contrato normativo completo esta em `AN
 - Data Confidence para cobertura dos dados, sem interpretar o valor como probabilidade de acerto.
 
 Indicadores e eventos confirmados usam apenas candles fechados. Opcoes e mempool BTC exibidos para altcoins sao proxies informativos e possuem contribuicao zero nos scores especificos e no Data Confidence do ativo.
+
+## Mudancas do preview.6
+
+1. Microestrutura: CVD recente usa os ultimos 1.000 `aggTrades` da Binance e classifica o lado agressor pelo campo `m` da API.
+2. Cross-venue: Binance, Coinbase, Bybit e OKX sao normalizadas em uma leitura de mediana, dispersao e Coinbase premium vs Binance.
+3. As novas leituras sao informativas: nao alteram Radar Score, Setup Score ou Data Confidence enquanto nao houver historico e validacao suficientes.
+4. Falhas parciais permanecem explicitas por venue; ausencia de uma fonte nao vira preco zero nem sinal direcional.
+5. CFTC COT: posicionamento semanal oficial do contrato Bitcoin CME exibe non-commercial net, variacao semanal, commercial net e open interest em contratos, sem conversao enganosa para BTC ou USD.
 
 ## Mudancas acumuladas do preview.3 ao preview.5
 
@@ -43,6 +51,8 @@ O horario em que a fonte observou o dado (`observedAt`) e separado do horario em
 | Opcoes Deribit | 60 s | 5 min |
 | Coin Metrics diario | 15 min | 48 h |
 | ETF / institucional | 5 min | 36 h |
+| Microestrutura cross-venue | 15 s | 60 s, apenas informativo |
+| CFTC COT Bitcoin CME | 5 min no cliente / 6 h no proxy | 10 dias, apenas informativo |
 | Noticias RSS | 5 min | 36 h por noticia |
 | Contexto externo agregado | 2 min | 10 min |
 | Perfil historico | 6 h | 48 h apos o ultimo candle diario fechado |
@@ -56,6 +66,8 @@ Estados `stale`, `missing`, `invalid`, `error` e `informational` tem contribuica
 - Market cap perdido nao representa, por si so, dinheiro que saiu do ativo.
 - Padroes graficos sao hipoteses. Um padrao so e operacional depois de confirmacao no fechamento, volume e invalidacao objetiva.
 - Liquidacoes, fluxo de exchanges e opcoes nao devem ser estimados sem uma fonte propria.
+- CVD recente nao e CVD historico completo: cobre apenas a janela de `aggTrades` declarada na interface.
+- Posicoes CFTC sao contratos do CME; o painel nao as apresenta como BTC ou USD.
 
 ## Score do radar multiativos
 

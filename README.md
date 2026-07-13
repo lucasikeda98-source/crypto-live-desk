@@ -8,7 +8,7 @@ Producao atual: https://crypto-live-desk.vercel.app
 
 ## Estado do modelo
 
-O modelo analitico em estabilizacao usa a versao de migracao `1.0.0-preview.5`. Ela implementa parte do contrato v1, sem declarar conformidade completa, e separa tres conceitos:
+O modelo analitico em estabilizacao usa a versao de migracao `1.0.0-preview.6`. Ela implementa parte do contrato v1, sem declarar conformidade completa, e separa tres conceitos:
 
 - **Radar Score:** ordena os 24 ativos no dashboard.
 - **Setup Score:** explica a confluencia do ativo e timeframe selecionados.
@@ -65,6 +65,8 @@ O workflow `.github/workflows/quality.yml` executa a suite deterministica em Nod
 - **Alertas** opcionais do navegador em transicoes confirmadas: cruzamento de score, mudanca de vies/regime, funding extremo e pico de liquidacoes.
 - **Exportar snapshot**: JSON auditavel com envelope completo (modelo, hash de regras, snapshot de entradas, contribuicoes por componente e frescor dos datasets).
 - **Correlacao cross-asset**: correlacao, beta e forca relativa vs BTC/ETH no timeframe atual e correlacao diaria vs QQQ/SPY.
+- **Microestrutura cross-venue**: CVD dos 1.000 aggTrades mais recentes e comparacao informativa de preco entre Binance, Coinbase, Bybit e OKX; ainda fora dos scores.
+- **CFTC COT**: posicionamento semanal oficial do Bitcoin CME em contratos, exibido como contexto institucional e ainda fora dos scores.
 - Painel "Como este score foi calculado?": regra, contribuicao, limite, estado, escopo e fontes de cada componente, com reconciliacao da soma.
 
 ## Limites

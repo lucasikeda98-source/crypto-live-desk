@@ -345,7 +345,7 @@ async function main() {
       closedCandleExplained: assetResult.structure.includes('fechamento confirmado'),
       setupNamed: assetResult.setup.includes('Setup Score preview') && assetResult.setup.includes('Data Confidence preview'),
       proxyExplained: assetResult.options.includes('proxy informativo'),
-      modelStatus: assetResult.status.includes('Modelo 1.0.0-preview.5'),
+      modelStatus: assetResult.status.includes('Modelo 1.0.0-preview.6'),
       noValueLeaks: dashboardResult.gridLeaks === false,
       scoreExplained: assetResult.explanationRows >= 8 && assetResult.explanationEnvelope.includes('regras'),
       snapshotIdentityChanges: !!snapshotResult.before && !!snapshotResult.after && snapshotResult.before !== snapshotResult.after && /\| r\d+$/.test(snapshotResult.stamp),
