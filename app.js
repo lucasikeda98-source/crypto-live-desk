@@ -1652,13 +1652,18 @@
     var trapVeto = activeTrapVeto(a);
     var decision = 'Sem entrada clara';
     var tone = 'wait';
+    // Ladder simetrico: o lado short existe com os MESMOS gates do lado long (o plano de trade e
+    // o motor v2 ja eram bidirecionais; o ladder dizia 'Evitar' enquanto o plano dizia short).
     if (total >= 60 && multi.bias === 'Alta' && multi.alignment >= 0.6 && quality >= 63 && htfGateAvailable && !htfVetoLong) { decision = 'Entrada favoravel'; tone = 'long'; }
+    else if (total <= -60 && multi.bias === 'Baixa' && multi.alignment >= 0.6 && quality >= 63 && htfGateAvailable && !htfVetoShort) { decision = 'Entrada vendedora favoravel'; tone = 'short'; }
     else if (total >= 42 && multi.score >= 0 && !htfVetoLong) { decision = 'Entrada com confirmacao'; tone = 'long'; }
+    else if (total <= -42 && multi.score <= 0 && !htfVetoShort) { decision = 'Entrada vendedora com confirmacao'; tone = 'short'; }
     else if (total >= 42 && htfVetoLong) { decision = 'Gate HTF: 1d+1w baixistas vetam long'; tone = 'wait'; }
+    else if (total <= -42 && htfVetoShort) { decision = 'Gate HTF: 1d+1w altistas vetam short'; tone = 'wait'; }
     else if (total >= 20) { decision = 'Aguardar pullback'; tone = 'wait'; }
-    else if (total <= -45) { decision = 'Evitar / venda domina'; tone = 'avoid'; }
     else if (total <= -20) { decision = 'Cautela'; tone = 'avoid'; }
     if (tone === 'long' && trapVeto === 'long') { decision = 'Veto pos-trap: aguardar ' + trapVetoBarsLeft(a) + ' barra(s)'; tone = 'wait'; }
+    if (tone === 'short' && trapVeto === 'short') { decision = 'Veto pos-trap: aguardar ' + trapVetoBarsLeft(a) + ' barra(s)'; tone = 'wait'; }
     if (quality < 40) { decision = 'Dados insuficientes'; tone = 'wait'; }
     var reasons = [
       { tone: technical > 7 ? 'good' : technical < -7 ? 'bad' : 'neutral', text: technical > 7 ? 'Tecnica do timeframe selecionado favorece compra.' : technical < -7 ? 'Tecnica do timeframe selecionado pesa contra.' : 'Tecnica local mista: falta rompimento ou reteste confirmado.' },
@@ -2607,7 +2612,8 @@
       var shortStop = (a.resistances[0] || a.close + atrValue) + atrValue * 0.25;
       var shortMid = (shortEntryLow + shortEntryHigh) / 2;
       var shortRisk = shortStop - shortMid;
-      var shortTargets = [1.5, 2.2, 3].map(function (rr) { return shortMid - shortRisk * rr; });
+      // Piso de sanidade: em ativo barato com ATR enorme, um multiplo de R poderia cruzar zero.
+      var shortTargets = [1.5, 2.2, 3].map(function (rr) { return Math.max(shortMid - shortRisk * rr, shortMid * 0.05); });
       return {
         side: 'Short condicional',
         levels: [
@@ -2623,7 +2629,7 @@
     var entryLow = Math.max(a.supports[0] || a.close - atrValue * 0.5, a.close - atrValue * 0.55);
     var entryHigh = a.close + atrValue * 0.12;
     // Stop estrutural: atras do suporte (swing) com buffer de ATR — consistente com o motor v2.
-    var structuralStop = (a.supports[0] || a.close - atrValue) - atrValue * 0.25;
+    var structuralStop = Math.max((a.supports[0] || a.close - atrValue) - atrValue * 0.25, a.close * 0.02);
     var invalidation = a.structureShift && Number.isFinite(a.structureShift.brokenLevel) && a.structureShift.direction === 'bull' ? a.structureShift.brokenLevel : null;
     var mid = (entryLow + entryHigh) / 2;
     var longRisk = mid - structuralStop;
@@ -2663,6 +2669,19 @@
     var planGrid = $('tradePlanGrid');
     if (planGrid) planGrid.innerHTML = plan.levels.map(function (level) { return '<div class="trade-level ' + (level.cls || '') + '"><span>' + escapeHTML(level.label) + '</span><strong>' + escapeHTML(level.value) + '</strong></div>'; }).join('');
     text('tradePlanRationale', plan.rationale);
+    // Cenarios base/alternativo/range com invalidacao ESTRUTURAL (nivel do CHoCH quando ha).
+    var structuralInvalidation = a.structureShift && Number.isFinite(a.structureShift.brokenLevel) ? a.structureShift.brokenLevel : null;
+    var scenarios = AnalyticsCore.buildScenarios({
+      close: a.close, atr: a.atr14, bias: a.bias,
+      supports: a.supports, resistances: a.resistances,
+      structuralInvalidation: structuralInvalidation
+    });
+    if (scenarios.length) {
+      var base = scenarios[0], alt = scenarios[1], range = scenarios[2];
+      text('scenarioLines', 'Cenario base (' + base.direction + '): gatilho ' + money(base.trigger) + ', alvo ' + money(base.target) + ', invalida em ' + money(base.invalidation) + '. Alternativo (' + alt.direction + '): gatilho ' + money(alt.trigger) + ', alvo ' + money(alt.target) + ', invalida em ' + money(alt.invalidation) + '. Range: ' + money(range.lower) + ' a ' + money(range.upper) + '.');
+    } else {
+      text('scenarioLines', '--');
+    }
   }
   function renderFuturesConsole(a) {
     var detail = scoreableDerivativeDetail(a.derivativeDetail), smart = smartMoneyAnalysis(a);
@@ -3271,10 +3290,19 @@
   function runSignalMachine(analysis) {
     if (!analysis || !analysis.signalCandle || !Number.isFinite(analysis.signalCandle.closeTime)) return;
     var key = state.symbol + ':' + state.interval;
-    if (state.signalMachineEval[key] === analysis.signalCandle.closeTime) return;
-    var confluence = confluenceFor(analysis);
-    if (confluence.dataConfidence < 40) return;
+    var closeTime = analysis.signalCandle.closeTime;
+    if (state.signalMachineEval[key] === closeTime) return;
     var machines = loadMachineStates();
+    var persisted = machines[key] || null;
+    // Idempotencia PERSISTIDA: tanto o estado ACTIVE quanto o tombstone FLAT guardam o ultimo
+    // candle processado — reload/multi-aba nunca reavalia o mesmo candle (nem re-entra no
+    // candle que acabou de gerar um exit).
+    if (persisted && Number.isFinite(persisted.lastCloseTime) && closeTime <= persisted.lastCloseTime) return;
+    var activeState = persisted && persisted.phase === 'ACTIVE' ? persisted : null;
+    var confluence = confluenceFor(analysis);
+    // DC<40 bloqueia ENTRADAS; uma posicao ativa continua sendo gerida (stop/alvo/tempo sao
+    // leituras de preco do candle fechado — congelar exits distorceria as base rates).
+    if (!activeState && confluence.dataConfidence < 40) return;
     var snapshot = {
       symbol: state.symbol,
       interval: state.interval,
@@ -3294,9 +3322,11 @@
       gates: confluence.gates,
       inputSnapshotId: analysis.snapshot ? analysis.snapshot.inputSnapshotId : null
     };
-    var result = AnalyticsCore.evaluateSignalTransition(machines[key] || null, snapshot);
-    state.signalMachineEval[key] = analysis.signalCandle.closeTime;
-    if (result.state) machines[key] = result.state; else delete machines[key];
+    var result = AnalyticsCore.evaluateSignalTransition(activeState, snapshot);
+    state.signalMachineEval[key] = closeTime;
+    // FLAT vira tombstone com o carimbo do candle (nunca delete: o marcador de idempotencia
+    // precisa sobreviver ao exit).
+    machines[key] = result.state || { phase: 'FLAT', lastCloseTime: closeTime };
     saveMachineStates(machines);
     if (result.event && result.event.type === 'exit') {
       var journal = loadTradeJournal();
@@ -3307,7 +3337,8 @@
   }
   function renderTradeEngine() {
     var machines = loadMachineStates();
-    var active = machines[state.symbol + ':' + state.interval];
+    var slot = machines[state.symbol + ':' + state.interval];
+    var active = slot && slot.phase === 'ACTIVE' ? slot : null;
     text('activeTradeLine', active
       ? 'Posicao simulada ' + active.side.toUpperCase() + ' em ' + money(active.entryPrice) + ' (gatilho ' + active.trigger + ', score ' + signed(active.entryScore) + ') | stop ' + money(active.stopPrice) + ' | alvo ' + money(active.targetPrice) + ' | ' + active.barsHeld + '/' + active.maxBars + ' barras | MFE ' + percent(active.mfePct, 2) + ' MAE ' + percent(active.maePct, 2)
       : 'Sem posicao simulada aberta neste par/TF.');
@@ -3327,13 +3358,16 @@
     }
   }
   async function runLagBacktest() {
-    text('lagBacktestLine', 'Rodando backtest de lag sobre o historico diario...');
+    // Captura o simbolo NO CLIQUE: trocar de ativo durante o await nao pode misturar dados/label.
+    var symbol = state.symbol;
+    text('lagBacktestLine', 'Rodando backtest de lag sobre o historico diario de ' + baseAsset(symbol) + '...');
+    await delay(30); // deixa o status pintar antes do loop sincrono
     try {
-      await ensureHistoricalProfile(state.symbol, true);
-      var daily = state.historyCandles[state.symbol];
-      if (!daily || daily.length < 260) { text('lagBacktestLine', 'Historico diario insuficiente para o backtest.'); return; }
+      await ensureHistoricalProfile(symbol, true);
+      var daily = state.historyCandles[symbol];
+      if (!daily || daily.length < 260) { text('lagBacktestLine', 'Historico diario insuficiente para o backtest de ' + baseAsset(symbol) + '.'); return; }
       var lag = AnalyticsCore.backtestDetectorLag(daily);
-      text('lagBacktestLine', 'Lag do CHoCH em ' + baseAsset(state.symbol) + ' (diario): topos ' + lag.tops.detected + '/' + lag.tops.count + ' detectados, mediana ' + (Number.isFinite(lag.tops.medianLagBars) ? lag.tops.medianLagBars + ' barras' : '--') + ' | fundos ' + lag.bottoms.detected + '/' + lag.bottoms.count + ', mediana ' + (Number.isFinite(lag.bottoms.medianLagBars) ? lag.bottoms.medianLagBars + ' barras' : '--') + '.');
+      text('lagBacktestLine', 'Lag do CHoCH em ' + baseAsset(symbol) + ' (diario): topos ' + lag.tops.detected + '/' + lag.tops.count + ' detectados, mediana ' + (Number.isFinite(lag.tops.medianLagBars) ? lag.tops.medianLagBars + ' barras' : '--') + ' | fundos ' + lag.bottoms.detected + '/' + lag.bottoms.count + ', mediana ' + (Number.isFinite(lag.bottoms.medianLagBars) ? lag.bottoms.medianLagBars + ' barras' : '--') + '.');
     } catch (error) {
       text('lagBacktestLine', 'Backtest indisponivel: ' + (error && error.message || 'erro'));
     }
