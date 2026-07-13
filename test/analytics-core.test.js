@@ -599,6 +599,20 @@ test('sinais v2: saidas — alvo, stop (stop vence no mesmo candle), deterioraca
   assert.equal(timedRecord.exitReason, 'time');
 });
 
+test('sinais v2: reducer e idempotente por candle (reload nao dobra barsHeld)', () => {
+  const active = core.evaluateSignalTransition(null, machineSnapshot({ structureShift: { event: 'CHoCH', direction: 'bull', score: 6 } })).state;
+  const bar = machineSnapshot({ high: 101.5, low: 98.5, close: 100.5, closeTime: 1_003_600 });
+  const first = core.evaluateSignalTransition(active, bar);
+  assert.equal(first.state.barsHeld, 1);
+  // Mesmo candle reprocessado (F5 na pagina): estado inalterado, sem evento.
+  const replay = core.evaluateSignalTransition(first.state, bar);
+  assert.equal(replay.state.barsHeld, 1, 'mesmo closeTime nao incrementa');
+  assert.equal(replay.event, null);
+  // Candle do proprio momento da entrada tambem nao conta como barra segurada.
+  const entryReplay = core.evaluateSignalTransition(active, machineSnapshot({ closeTime: 1_000_000 }));
+  assert.equal(entryReplay.state.barsHeld, 0);
+});
+
 test('sinais v2: MAE/MFE acumulam pelo caminho e o registro carrega metadados', () => {
   const active = core.evaluateSignalTransition(null, machineSnapshot({ structureShift: { event: 'CHoCH', direction: 'bull', score: 6 } })).state;
   const step1 = core.evaluateSignalTransition(active, machineSnapshot({ high: 102, low: 97, close: 101, closeTime: 1_003_600 }));
