@@ -1462,10 +1462,10 @@
     var setupExternal = eligibleDataset(a.external) ? a.external : null;
     var checks = [
       { name: 'Tendencia', score: a.adx.adx > 22 && a.adx.plus > a.adx.minus && a.close > a.ema50 ? 18 : a.adx.adx > 22 && a.adx.minus > a.adx.plus ? -18 : 0, detail: 'ADX ' + num(a.adx.adx, 1) + ' | DI+ ' + num(a.adx.plus, 1) + ' / DI- ' + num(a.adx.minus, 1) },
-      { name: 'Momentum', score: a.rsi14 > 52 && a.rsi14 < 70 && a.macd.hist > 0 && a.roc12 > 0 ? 16 : a.rsi14 > 76 || (a.macd.hist < 0 && a.roc12 < 0) ? -14 : 0, detail: 'RSI ' + num(a.rsi14, 1) + ' | ROC ' + percent(a.roc12, 2) },
+      { name: 'Momentum', score: a.rsi14 > 52 && a.rsi14 < 70 && a.macd.hist > 0 && a.roc12 > 0 ? 16 : a.rsi14 > 76 || (a.macd.hist < 0 && a.roc12 < 0) ? -16 : 0, detail: 'RSI ' + num(a.rsi14, 1) + ' | ROC ' + percent(a.roc12, 2) },
       { name: 'Fluxo', score: a.deltaSum > 0 && a.cmf20 > 0.05 ? 14 : a.deltaSum < 0 && a.cmf20 < -0.05 ? -14 : 0, detail: 'Delta ' + num(a.deltaSum, 2) + ' | CMF ' + num(a.cmf20, 2) },
-      { name: 'Volume', score: Number.isFinite(volumeRatio) && volumeRatio > 1.35 ? 10 : Number.isFinite(volumeRatio) && volumeRatio < 0.55 ? -6 : 0, detail: Number.isFinite(volumeRatio) ? num(volumeRatio, 2) + 'x media' : '--' },
-      { name: 'Liquidez', score: Number.isFinite(a.spreadBps) && a.spreadBps < 3 && Number.isFinite(a.buySlipBps) && a.buySlipBps < 8 ? 12 : Number.isFinite(a.spreadBps) && a.spreadBps > 12 ? -10 : 0, detail: 'Spread ' + num(a.spreadBps, 2) + ' bps | slip ' + num(a.buySlipBps, 2) + ' bps' },
+      { name: 'Volume', score: Number.isFinite(volumeRatio) && volumeRatio > 1.35 ? 10 : Number.isFinite(volumeRatio) && volumeRatio < 0.55 ? -10 : 0, detail: Number.isFinite(volumeRatio) ? num(volumeRatio, 2) + 'x media' : '--' },
+      { name: 'Liquidez', score: Number.isFinite(a.spreadBps) && a.spreadBps < 3 && Number.isFinite(a.buySlipBps) && a.buySlipBps < 8 ? 12 : Number.isFinite(a.spreadBps) && a.spreadBps > 12 ? -12 : 0, detail: 'Spread ' + num(a.spreadBps, 2) + ' bps | slip ' + num(a.buySlipBps, 2) + ' bps' },
       { name: 'Derivativos', score: Number.isFinite(derivative.takerRatio) && derivative.takerRatio > 1.08 ? 10 : Number.isFinite(derivative.takerRatio) && derivative.takerRatio < 0.92 ? -10 : 0, detail: Object.keys(derivative).length ? 'Taker ' + num(derivative.takerRatio, 2) + ' | OI ' + percent(derivative.oiChangePct, 2) : 'indisponivel ou stale' },
       { name: 'Contexto', score: setupExternal && setupExternal.total > 6 ? 12 : setupExternal && setupExternal.total < -6 ? -12 : 0, detail: setupExternal ? 'Externo ' + signed(setupExternal.total) : 'indisponivel ou stale' }
     ];

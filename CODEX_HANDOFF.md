@@ -251,3 +251,11 @@ Revisao pelo Claude Code significa revisao independente de codigo, regras analit
   - 2 verificadores adversariais confirmaram: math do clamp sem regressao; mapeamento sweep/trap correto (nao invertido); arquivamento seguro e completo.
 
 - Estado FINAL da revisao cruzada: todos os itens EXIGIDOS (RC-002) e RECOMENDADOS (RC-003 itens 4/5/7 + RC-004 item 6) da RC-001 estao aplicados; double-counts claros (OI ja no ciclo do Codex, delta/CMF, sweep-fluxo/risco, sweep/trap) eliminados; vieses direcionais (risco, sweep, carry, volume) corrigidos; contrato reconciliado; journal preservado. Residuais defensaveis documentados. Pendencias operacionais (nao analiticas): release verificado (Vercel preview -> smoke -> main -> prod) e Blocos 1-3 do checklist — ver `HANDOFF_PROXIMA_SESSAO.md`.
+
+### RC-005 — Simetria visual do card setupQuality (cosmetico, sem impacto em score)
+
+- Data: 2026-07-13
+- Responsavel: Claude Code
+- Arquivo: `app.js` (`setupQuality`)
+- Escopo: o card `setupQuality` e SOMENTE exibicao (retornado como campo `setup`, NAO entra no Setup Score, Radar Score, Data Confidence nem em qualquer decisao — nao e somado no `total` da confluencia). Para consistencia visual, as tres linhas com magnitude assimetrica foram igualadas: Momentum `+16/-14 -> +16/-16`, Volume `+10/-6 -> +10/-10`, Liquidez `+12/-10 -> +12/-12`. As demais (Tendencia +/-18, Fluxo +/-14, Derivativos +/-10, Contexto +/-12) ja eram simetricas.
+- Impacto: nenhum em score/DC/decisao (muda apenas os numeros exibidos do card). Sem bump de versao. `node --test` 94/94; nenhum teste referencia o card.
