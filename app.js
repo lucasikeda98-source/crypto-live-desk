@@ -1,5 +1,5 @@
 (function () {
-  var MODEL_VERSION = '1.0.0-preview.4';
+  var MODEL_VERSION = '1.0.0-preview.5';
   var AnalyticsCore = window.CryptoAnalyticsCore;
   if (!AnalyticsCore) throw new Error('CryptoAnalyticsCore nao foi carregado.');
   var RULESET_HASH = AnalyticsCore.rulesetHash();
