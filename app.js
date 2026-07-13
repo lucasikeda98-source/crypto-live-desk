@@ -1258,7 +1258,9 @@
     // The chart's own timeframe is EXCLUDED from the aggregate: it is already fully scored by
     // the technical bucket, and the MTF block must measure INDEPENDENT confirmation.
     var aggregationRows = rows.filter(function (row) { return row.interval !== selectedInterval; });
-    return Object.assign({ rows: rows }, AnalyticsCore.aggregateMultiTimeframe(aggregationRows));
+    // aggregatedCount = how many timeframes actually fed the score (chart TF excluded); the full
+    // `rows` set is kept only for rendering the per-TF table.
+    return Object.assign({ rows: rows, aggregatedCount: aggregationRows.length }, AnalyticsCore.aggregateMultiTimeframe(aggregationRows));
   }
   async function loadMultiTimeframe(symbol, selectedInterval, force, selectedCandles) {
     var intervals = MTF_INTERVALS.concat([selectedInterval]).filter(function (value, index, array) { return array.indexOf(value) === index; });
@@ -1540,15 +1542,19 @@
     var macroChecks = [freshNewsItems().length > 0, externalContextFresh() && !!(state.external && (state.external.global || state.external.paprikaGlobal)), externalContextFresh() && !!(state.external && (macroSourceAvailable(state.external.macro) || activeTradFiAssets(state.external.tradfi).length || fearGreedEligible(state.external)))];
     var macroQuality = macroChecks.filter(Boolean).length / macroChecks.length;
     var riskQuality = (technicalQuality + flowQuality + derivativeQuality) / 3;
+    // Data Confidence weights ARE the setup caps (contract 8.2). Derive them from the ruleset so
+    // the two can never drift again — the caps moved to mtf 16 / risk 14 while these were still
+    // hardcoded at 24 / 10, over-weighting MTF coverage and under-weighting risk in the DC.
+    var caps = AnalyticsCore.RULESET.setupCaps;
     return AnalyticsCore.calculateDataConfidence([
-      { weight: 20, quality: technicalQuality },
-      { weight: 24, quality: mtfQuality },
-      { weight: 18, quality: flowQuality },
-      { weight: 12, quality: derivativeQuality },
-      { weight: 10, quality: fundamentalQuality },
-      { weight: 10, quality: macroQuality },
-      { weight: 12, quality: historyQuality },
-      { weight: 10, quality: riskQuality }
+      { weight: caps.technical, quality: technicalQuality },
+      { weight: caps.multiTimeframe, quality: mtfQuality },
+      { weight: caps.smartFlow, quality: flowQuality },
+      { weight: caps.derivatives, quality: derivativeQuality },
+      { weight: caps.chainFundamental, quality: fundamentalQuality },
+      { weight: caps.newsMacro, quality: macroQuality },
+      { weight: caps.history, quality: historyQuality },
+      { weight: caps.risk, quality: riskQuality }
     ]);
   }
   var confluenceMemo = { key: null, value: null, computedAt: 0 };
@@ -1686,13 +1692,13 @@
     }
     var components = [
       { name: 'Tecnica', ruleId: 'setup.technical.v1', score: technical, max: 20, status: 'fresh', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines'], reason: 'trendScore*0.32 + momScore*0.42 do timeframe selecionado' },
-      { name: 'Multi-TF', ruleId: 'setup.mtf.v2', score: multi.score, max: 16, status: multi.rows && multi.rows.length ? 'fresh' : 'missing', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines'], reason: 'Confirmacao INDEPENDENTE (TF do grafico excluido) + gate 1d/1w em ' + ((multi.rows && multi.rows.length) || 0) + ' timeframes' },
+      { name: 'Multi-TF', ruleId: 'setup.mtf.v2', score: multi.score, max: 16, status: multi.rows && multi.rows.length ? 'fresh' : 'missing', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines'], reason: 'Confirmacao INDEPENDENTE (TF do grafico excluido) + gate 1d/1w em ' + (multi.aggregatedCount || 0) + ' timeframes' },
       { name: 'Smart/fluxo', ruleId: 'setup.flow.v1', score: flow, max: 18, status: a.flowAvailable ? 'fresh' : 'missing', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines', 'binance-spot-depth'], reason: 'flowScore*0.48 + book*0.35 + smart money*0.55' },
       { name: 'Derivativos', ruleId: 'setup.derivatives.v1', score: derivatives, max: 12, status: datasetStatus(a.derivativeDetail) || 'missing', scope: 'symbol', isProxy: false, sources: ['binance-futures', 'deribit-options'], reason: 'derivScore*1.25 + detalhe de OI/funding/taker/opcoes elegiveis' },
       { name: 'On-chain/fund.', ruleId: 'setup.chain.v1', score: chain, max: 10, status: eligibleDataset(a.coinMetrics) ? 'fresh' : a.coinMetrics ? datasetStatus(a.coinMetrics) : 'missing', scope: 'symbol', isProxy: !!(a.mempoolContext && a.mempoolContext.isProxy), sources: ['coinmetrics-community', 'defillama', 'mempool-space'], reason: 'chainScore + defi*0.45 + asset*0.2' },
       { name: 'Noticias/macro', ruleId: 'setup.macro.v1', score: macro, max: 10, status: news.items.length || state.newsMode !== 'auto' ? 'fresh' : 'missing', scope: 'market', isProxy: false, sources: ['rss-news', 'alternative-me', 'treasury-cboe', 'etf-flows'], reason: 'news*0.36 + sentimento*0.45 + global*0.45 + ETF' },
       { name: 'Historico', ruleId: 'setup.history.v1', score: historyScore, max: 12, status: history ? 'fresh' : historyCandidate ? 'stale' : 'missing', scope: 'symbol', isProxy: false, sources: ['binance-daily-history'], reason: history ? (history.samples || 0) + ' amostras de regimes semelhantes' : 'sem perfil historico fresco' },
-      { name: 'Risco', ruleId: 'setup.risk.v2', score: risk, max: 14, status: 'fresh', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines', 'binance-liquidations'], reason: 'Esticamento de bandas, sweeps, climax de volume, traps e liquidacoes' }
+      { name: 'Risco', ruleId: 'setup.risk.v2', score: risk, max: 14, status: 'fresh', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines', 'binance-liquidations'], reason: 'Esticamento de bandas, sweeps, climax de volume e liquidacoes' }
     ];
     components.forEach(function (component) { component.contribution = component.score; });
     var reconciledTotal = components.reduce(function (sum, component) { return sum + component.score; }, 0);

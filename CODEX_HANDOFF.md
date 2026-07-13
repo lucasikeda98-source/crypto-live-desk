@@ -158,3 +158,21 @@ Revisao pelo Claude Code significa revisao independente de codigo, regras analit
   - Journal: corrida TOCTOU entre multiplas abas pode duplicar um registro de trade fechado (single-tab reload e seguro).
 
 - Estado das entradas apos RC-001: CX-001, CX-002, CX-003 -> REVISADO PELO CLAUDE CODE (sem ressalvas). CX-004 -> REVISADO PELO CLAUDE CODE COM RESSALVAS; a implementacao so deve ser considerada alinhada apos as correcoes exigidas (itens 1-3) e a decisao sobre as recomendadas (4-7). Correcoes aplicadas pelo Claude Code entram como nova entrada, conforme o protocolo.
+
+### RC-002 — Correcoes exigidas da RC-001 (itens 1-3)
+
+- Data: 2026-07-13
+- Responsavel: Claude Code
+- Base: working tree pos-RC-001 (commit `cc3b31e`)
+- Arquivos: `app.js`
+- Escopo: aplica as tres correcoes EXIGIDAS listadas na RC-001. As recomendadas (4-7) seguem pendentes; o item 4 (sinal da sobrevenda no bloco de Risco) depende de decisao do proprietario.
+- Mudancas:
+  1. `dataQuality` passa a derivar os pesos do Data Confidence de `AnalyticsCore.RULESET.setupCaps` em vez de hardcodar `24/10`. Elimina a segunda fonte de verdade; o DC agora honra os caps reais (mtf 16, risk 14) conforme §8.2.
+  2. Reason do componente Risco corrigido: removido "traps" (trap pontua em Fluxo, nao em Risco) — §10.
+  3. Reason do componente Multi-TF passa a reportar `aggregatedCount` (timeframes que realmente alimentaram o agregado, TF do grafico excluido) em vez do total de linhas — fim do off-by-one.
+- Impacto analitico DECLARADO (§11): a correcao 1 altera valores de Data Confidence exibidos (ex.: num vetor com MTF coberto e risco ausente, DC 51 -> 46). NAO houve mudanca no `RULESET` nem no `rulesetHash`: o ruleset ja declarava caps 16/14 e o `dataQuality` e que estava desalinhado; portanto trata-se de correcao de implementacao para conformar-se ao modelo ja publicado, nao de nova regra. `MODEL_VERSION` mantido em `1.0.0-preview.5` para preservar o journal de Sinais acumulado (o storage e namespaced por versao; um bump o orfanaria). Caso se prefira um bump para `preview.6`, e uma decisao aberta.
+- Validacao Claude Code:
+  - `node --check app.js` e `node --check lib/analytics-core.js`: OK.
+  - `node --test`: 92/92 verdes (os testes de DC do motor sao independentes do `dataQuality` do app; nenhum quebrou).
+  - Spot-check em runtime confirmou `RULESET.setupCaps` (soma 112) e a diferenca de DC old(24/10) vs new(16/14).
+- Limitacao conhecida: as correcoes 2 e 3 sao textuais/de contagem (sem impacto em score/DC); a 1 muda o DC conforme declarado acima. Itens recomendados 4-7 da RC-001 permanecem abertos.
