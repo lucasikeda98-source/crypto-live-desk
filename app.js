@@ -930,7 +930,9 @@
       fetchJSON('https://api.alternative.me/fng/?limit=1', 9000, 'Alternative.me'),
       fetchJSON('/api/market', 22000, 'Market data'),
       fetchJSON('https://api.llama.fi/v2/chains', 11000, 'DefiLlama'),
-      fetchJSON('/api/defillama', 12000, 'DefiLlama'),
+      // Own throttle key: the same-origin proxy is never rate-limited by Llama, so a 429 on the
+      // direct chains call must not put the proxy in cooldown too.
+      fetchJSON('/api/defillama', 12000, 'DefiLlama protocolos'),
       fetchJSON('https://stablecoins.llama.fi/stablecoins?includePrices=true', 14000, 'DefiLlama stablecoins'),
       fetchJSON('https://api.llama.fi/overview/dexs', 11000, 'DefiLlama DEX'),
       fetchJSON('https://api.coinpaprika.com/v1/global', 9000, 'CoinPaprika'),
@@ -1453,11 +1455,12 @@
     else if (a.deltaSum < 0 && a.cmf20 < -0.05) score -= 4;
     var detail = scoreableDerivativeDetail(a.derivativeDetail);
     if (Number.isFinite(detail.oiChangePct)) {
-      // Price matched to the OI window (falls back to roc12 when the window can't be resolved).
-      var oiPriceSignal = Number.isFinite(a.oiPriceChangePct) ? a.oiPriceChangePct : a.roc12;
-      var quadrant = AnalyticsCore.calculateOiPriceQuadrant(detail.oiChangePct, oiPriceSignal);
-      oiPhase = quadrant.phase;
-      score += quadrant.score;
+      // Same signal and fallback as calculateDerivativeDetailContribution so both read the same
+      // quadrant. Narrative label ONLY: the quadrant SCORES exclusively in the derivatives bucket
+      // (lib) — adding it here too double-counted it into flow via smart.score*0.55.
+      var oiPriceSignal = Number.isFinite(a.oiPriceChangePct) ? a.oiPriceChangePct
+        : Number.isFinite(a.close) && Number.isFinite(a.vwap) ? a.close - a.vwap : NaN;
+      oiPhase = AnalyticsCore.calculateOiPriceQuadrant(detail.oiChangePct, oiPriceSignal).phase;
     }
     return { score: clamp(Math.round(score), -18, 18), structure: a.structure, liquidity: liquidity, imbalance: imbalance, oiPhase: oiPhase };
   }
@@ -1847,7 +1850,8 @@
     // Track consecutive failures per symbol so a delisted pair stops silently hammering the API and
     // flapping the shared 'Binance spot' health; re-test periodically in case it was transient.
     var fails = state.boardFailures[symbol] || 0;
-    if (fails >= BOARD_FAIL_RETEST) fails = 0;
+    var isRetest = fails >= BOARD_FAIL_RETEST;
+    if (isRetest) fails = 0;
     if (fails >= BOARD_FAIL_SKIP) { state.boardFailures[symbol] = fails + 1; return null; }
     try {
       var rows = await fetchSpotJSON('/api/v3/klines?symbol=' + encodeURIComponent(symbol) + '&interval=' + (intervalChoice || state.interval) + '&limit=260', 10000, 'Binance spot');
@@ -1863,7 +1867,9 @@
       state.boardFailures[symbol] = 0;
       return { symbol: symbol, interval: intervalChoice || state.interval, ticker: ticker, premium: premium, candles: candles, analysis: analysis };
     } catch (error) {
-      state.boardFailures[symbol] = fails + 1;
+      // A failed retest jumps straight back into the skip band: one probe per retest window,
+      // not a fresh ramp of SKIP real fetches.
+      state.boardFailures[symbol] = isRetest ? BOARD_FAIL_SKIP : fails + 1;
       return null;
     }
   }

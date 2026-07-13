@@ -62,8 +62,10 @@ module.exports = async function handler(request, response) {
     return response.status(405).json({ error: 'Method not allowed' });
   }
 
+  response.setHeader('Cache-Control', 'public, s-maxage=120, stale-while-revalidate=600');
+  response.setHeader('Access-Control-Allow-Origin', '*');
+
   if (cachedPayload && Date.now() - cachedAt < 120000) {
-    response.setHeader('Cache-Control', 'public, s-maxage=120, stale-while-revalidate=600');
     return response.status(200).json(cachedPayload);
   }
 
@@ -75,7 +77,5 @@ module.exports = async function handler(request, response) {
     cachedPayload = { ...cachedPayload, stale: true };
   }
 
-  response.setHeader('Cache-Control', 'public, s-maxage=120, stale-while-revalidate=600');
-  response.setHeader('Access-Control-Allow-Origin', '*');
   return response.status(200).json(cachedPayload);
 };
