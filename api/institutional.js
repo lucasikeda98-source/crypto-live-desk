@@ -28,12 +28,10 @@ async function callEtfTool(name, args) {
 }
 
 async function loadEtf(asset) {
-  const [flows, weekly, cefi] = await Promise.all([
-    callEtfTool('get_asset_flows', { asset }),
-    callEtfTool('get_weekly_analytics', {}),
-    callEtfTool('get_cefi_index', {}),
-  ]);
-  return { flows, weekly, cefi, source: 'CryptoETF public MCP' };
+  // Only get_asset_flows is consumed by the client; weekly analytics and the CeFi index were
+  // fetched and discarded, tripling the failure surface of the one dataset that scores.
+  const flows = await callEtfTool('get_asset_flows', { asset });
+  return { flows, source: 'CryptoETF public MCP' };
 }
 
 module.exports = async function handler(request, response) {

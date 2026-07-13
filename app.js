@@ -1,5 +1,5 @@
 (function () {
-  var MODEL_VERSION = '1.0.0-preview.3';
+  var MODEL_VERSION = '1.0.0-preview.4';
   var AnalyticsCore = window.CryptoAnalyticsCore;
   if (!AnalyticsCore) throw new Error('CryptoAnalyticsCore nao foi carregado.');
   var RULESET_HASH = AnalyticsCore.rulesetHash();
@@ -853,8 +853,13 @@
       var flows = payload.etf && payload.etf.flows;
       var flowRows = nestedRows(flows);
       var lastFlowRow = flowRows.length ? flowRows[flowRows.length - 1] : null;
-      var flowTimestamp = timestampMs(flows && flows.updatedAt)
-        || timestampMs(lastFlowRow && (lastFlowRow.date || lastFlowRow.day || lastFlowRow.time))
+      // Freshness must follow the data that actually scores: latestEtfFlow skips zero-filled days
+      // (weekends/unreported), so anchor observedAt on the last NON-ZERO row's date. The provider's
+      // updatedAt is a service heartbeat — it kept a days-old flow scoring as current.
+      var reportedRows = flowRows.filter(function (row) { return etfFlowValue(row) !== 0; });
+      var lastReportedRow = reportedRows.length ? reportedRows[reportedRows.length - 1] : lastFlowRow;
+      var flowTimestamp = timestampMs(lastReportedRow && (lastReportedRow.date || lastReportedRow.day || lastReportedRow.time))
+        || timestampMs(flows && flows.updatedAt)
         || timestampMs(payload.fetchedAt);
       payload.fetchedAt = institutionalNow;
       payload.observedAt = AnalyticsCore.resolveObservedAt(flowTimestamp, institutionalNow).observedAt;
@@ -1231,18 +1236,9 @@
     return { interval: interval, score: score, bias: score >= 12 ? 'Alta' : score <= -12 ? 'Baixa' : 'Neutro', close: a.close, closeTime: candles.length ? last(candles).closeTime : NaN, rsi: a.rsi14, adx: a.adx.adx, macd: a.macd.hist, structure: a.structure, regime: a.regime, cross: cross ? cross.name : (Number.isFinite(a.ema200) ? (a.ema50 >= a.ema200 ? 'EMA50 > EMA200' : 'EMA50 < EMA200') : 'sem EMA200'), patterns: (a.patterns || []).slice(0, 3) };
   }
   function summarizeMultiTimeframe(rows) {
-    var weights = { '1s': 0.02, '1m': 0.04, '3m': 0.05, '5m': 0.06, '15m': 0.10, '30m': 0.12, '1h': 0.16, '2h': 0.18, '4h': 0.22, '6h': 0.23, '8h': 0.24, '12h': 0.25, '1d': 0.28, '3d': 0.30, '1w': 0.34, '1M': 0.36 };
-    var weighted = 0, weightTotal = 0, positive = 0, negative = 0;
-    rows.forEach(function (row) {
-      var weight = weights[row.interval] || 0.1;
-      weighted += (row.score / 50) * weight;
-      weightTotal += weight;
-      if (row.score >= 12) positive++; else if (row.score <= -12) negative++;
-    });
-    var normalized = weightTotal ? weighted / weightTotal : 0;
-    var directionCount = Math.max(positive, negative), alignment = rows.length ? directionCount / rows.length : 0;
-    var bias = alignment < 0.5 ? 'Misto' : normalized >= 0.18 ? 'Alta' : normalized <= -0.18 ? 'Baixa' : 'Misto';
-    return { rows: rows, raw: normalized, score: clamp(Math.round(normalized * 24), -24, 24), alignment: alignment, positive: positive, negative: negative, bias: bias };
+    // Aggregation (weights, directional alignment, bias) lives in the lib so it is tested and
+    // covered by the ruleset registry; this wrapper only reattaches the rows for rendering.
+    return Object.assign({ rows: rows }, AnalyticsCore.aggregateMultiTimeframe(rows));
   }
   async function loadMultiTimeframe(symbol, selectedInterval, force, selectedCandles) {
     var intervals = MTF_INTERVALS.concat([selectedInterval]).filter(function (value, index, array) { return array.indexOf(value) === index; });
