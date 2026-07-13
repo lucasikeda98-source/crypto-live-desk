@@ -2,7 +2,7 @@
 
 > **Proxima sessao:** o plano de continuidade (itens em aberto + recomendacoes) esta em
 > `HANDOFF_PROXIMA_SESSAO.md`. As revisoes do Claude Code estao ao final deste arquivo
-> (RC-001, RC-002, RC-003).
+> (RC-001 a RC-007).
 
 ## Objetivo
 
@@ -299,4 +299,15 @@ Revisao pelo Claude Code significa revisao independente de codigo, regras analit
   - Deterministico: `node --test` **101/101** (5 novos testes de contrato).
   - Navegador (novo, independente de Binance): boot-check local em Chromium headless 390x844 — 8/8: zero excecoes nao capturadas do app e zero console.error proprios sob falha TOTAL de rede (227 erros de rede tratados), disclaimer presente, botao de export e tabela de 6 colunas presentes, sem overflow horizontal. Harness no scratchpad da sessao (playwright-core + Chromium do ambiente); o smoke completo com dados reais continua exigindo ambiente com Binance acessivel.
 - Impacto DECLARADO (§11): a fiacao do §12.7 pode REDUZIR o Data Confidence (Setup e Radar) quando o contexto de mercado esta coberto apenas pelo fallback CoinPaprika (credito 0.8 em vez de 1). Nenhum score direcional muda. `rulesetHash` muda pela adicao do campo ao RULESET — coberto pelo bump preview.6 ainda nao publicado.
-- Meta-auditoria do diff acumulado da sessao (origin/main -> working tree): 2 auditores adversariais independentes (interacoes no motor; testes/docs/UI) — EM ANDAMENTO; conclusao e eventuais correcoes serao registradas em follow-up nesta entrada.
+- Meta-auditoria do diff acumulado da sessao (origin/main -> `0d228e3`, 11 commits): 2 auditores adversariais independentes (interacoes no motor; testes/docs/UI). **Conclusao: NENHUM BLOCKER.** Categorias verificadas limpas com evidencia: interacoes entre RCs (clamp x capitulacao, supressao sweep/trap x espelho VWAP, DC x proveniencia em [0,1]), divisor /13 correto, escopo do regex de proveniencia restrito ao market data, sem caminho NaN, coerencia total de versao/hash/journal, wiring da UI (colspans, ids, labels), goldens hardcoded (nao circulares), entradas RC-001..RC-007 batendo com o git log.
+- Correcoes aplicadas a partir da meta-auditoria (follow-up, este commit):
+  1. Changelog do preview.6 no `ANALYTICS_COVERAGE.md` completado com os itens 7 (clamp conjunto de funding, RC-004) e 8 (fator de proveniencia 0.8, RC-007) — ambos alteram resultado visivel e estavam declarados so no handoff.
+  2. Texto do Risco (§10) rederivado dos termos reais: razao positiva cita sobrevenda esticada/exaustao de fundo/volume comprador/liquidacoes absorvidas (antes dizia so "absorcao/volume" quando o maior termo positivo e o +8 de sobrevenda); razao negativa espelhada; reason do componente sem "sweeps" soltos (sweeps agora so confirmados por liquidacoes).
+  3. Alertas de score com rotulos de ZONA ("zona de confirmacao compradora/vendedora", "zona favoravel") em vez de rotulos de DECISAO ("entrada com confirmacao") — a decisao real depende de gates (MTF/alinhamento/DC/vetos) que o alerta nao avalia; teste atualizado.
+  4. Labels de sweep no smart money diferenciam o branch fraco ("sem reclaim/rejeicao VWAP") do confirmado.
+  5. Teste do §12.7 agora TRAVA a convencao entre arquivos: le `api/market.js`, extrai o rotulo real de fallback e asserta fator 0.8 — renomear o rotulo sem ajustar o helper vira teste vermelho.
+  6. `HANDOFF_PROXIMA_SESSAO.md` atualizado (contagens, RCs, estado da conformidade, one-liner) e wording do 12.8 no `CONFORMANCE_V1_GAP.md` precisado (o teste prova o filtro + fronteira; a fiacao filtrar-antes-de-pontuar e verificada por inspecao).
+- Residuais ACEITOS da meta-auditoria (documentados, sem correcao — pequenos, simetricos ou pre-existentes):
+  - Par (sweep + skew de liquidacoes 15m 2x) le o mesmo evento no Risco (+/-2) e no upgrade de confirmacao do trap (6->8 em fluxo) — cross-bucket residual simetrico de baixa magnitude.
+  - Testes das novas fiacoes do app.js (credito de DC do 12.7, carryScore pass-through, gate routing) sao por inspecao — consistente com a separacao motor-testavel vs orquestracao do projeto; os primitivos estao todos travados por teste.
+  - `sufficient` das tabelas de acerto so tem caso negativo em teste; oscilacao de versao (6->5->6) sobrescreveria um arquivo `archived:` anterior (fluxo irreal pre-release); journal preview.6 local pre/pos RC-007 carrega dois rulesetHash (registros se autodescrevem; versao nao publicada).

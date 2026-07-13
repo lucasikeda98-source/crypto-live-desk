@@ -142,6 +142,16 @@ test('contrato 12.7: fallback equivalente recebe o fator de proveniencia registr
   assert.equal(core.sourceProvenanceFactor(null), 1, 'rotulo ausente nao penaliza');
   assert.equal(core.sourceProvenanceFactor(''), 1);
   assert.equal(core.sourceProvenanceFactor(undefined), 1);
+
+  // Trava a convencao ENTRE arquivos: o credito 0.8 depende de a rota de mercado emitir um rotulo
+  // que casa /fallback/i. Renomear o rotulo em api/market.js sem ajustar o helper quebraria o
+  // fator silenciosamente — este assert transforma essa quebra em teste vermelho.
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const marketApi = fs.readFileSync(path.join(__dirname, '..', 'api', 'market.js'), 'utf8');
+  const fallbackLabel = (marketApi.match(/source = '([^']*)'/g) || []).map((m) => m.match(/'([^']*)'/)[1]).find((label) => /fallback/i.test(label));
+  assert.ok(fallbackLabel, 'api/market.js deve emitir um rotulo de fonte contendo "fallback"');
+  assert.equal(core.sourceProvenanceFactor(fallbackLabel), 0.8, 'o rotulo real da rota recebe o fator 0.8');
 });
 
 test('contrato 12.8: variar apenas o candle em formacao nao altera nada confirmado', () => {

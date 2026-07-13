@@ -1523,8 +1523,8 @@
     // duplicate sweep contribution. (bull trap comes from a low-sweep, bear trap from a high-sweep.)
     var bullTrap = !!(a.trap && a.trap.trap === 'bull');
     var bearTrap = !!(a.trap && a.trap.trap === 'bear');
-    if (a.sweepDown) { score += bullTrap ? 0 : (a.close > a.vwap ? 8 : 3); liquidity = 'Sweep de minima / reclaim' + (bullTrap ? ' (trap)' : ''); }
-    if (a.sweepUp) { score -= bearTrap ? 0 : (a.close < a.vwap ? 8 : 3); liquidity = 'Sweep de maxima / rejeicao' + (bearTrap ? ' (trap)' : ''); }
+    if (a.sweepDown) { score += bullTrap ? 0 : (a.close > a.vwap ? 8 : 3); liquidity = 'Sweep de minima' + (a.close > a.vwap ? ' / reclaim' : ' / sem reclaim VWAP') + (bullTrap ? ' (trap)' : ''); }
+    if (a.sweepUp) { score -= bearTrap ? 0 : (a.close < a.vwap ? 8 : 3); liquidity = 'Sweep de maxima' + (a.close < a.vwap ? ' / rejeicao' : ' / sem rejeicao VWAP') + (bearTrap ? ' (trap)' : ''); }
     if (a.displacement === 'Alta') { score += 4; imbalance = 'Deslocamento comprador'; }
     else if (a.displacement === 'Baixa') { score -= 4; imbalance = 'Deslocamento vendedor'; }
     if (a.fvg) imbalance += ' | FVG ' + (a.fvg.type === 'bullish' ? 'alta' : 'baixa');
@@ -1721,7 +1721,7 @@
       reasons.unshift({ tone: a.trap.score > 0 ? 'good' : 'bad', text: (a.trap.trap === 'bull' ? 'Bear trap: sweep de minima revertido com flip de delta' : 'Bull trap: sweep de maxima rejeitado com flip de delta') + (a.trap.confirmed ? ' e confirmacao de OI/liquidacao' : '') + '; entradas ' + (a.trap.vetoDirection === 'short' ? 'vendidas' : 'compradas') + ' vetadas por ' + a.trap.vetoBars + ' barras.' });
     }
     if (risk !== 0) {
-      reasons.push({ tone: risk > 0 ? 'good' : 'bad', text: risk > 0 ? 'Ajuste de risco melhora o setup por absorcao/volume.' : 'Ajuste de risco reduz o setup por esticamento, sweep contra ou volume vendedor.' });
+      reasons.push({ tone: risk > 0 ? 'good' : 'bad', text: risk > 0 ? 'Ajuste de risco favorece: sobrevenda esticada (risco de repique), exaustao de fundo, volume comprador ou liquidacoes de longs absorvidas.' : 'Ajuste de risco pesa contra: sobrecompra esticada, exaustao de topo, volume vendedor ou liquidacoes de shorts no sweep de maxima.' });
     }
     var components = [
       { name: 'Tecnica', ruleId: 'setup.technical.v1', score: technical, max: 20, status: 'fresh', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines'], reason: 'trendScore*0.32 + momScore*0.42 do timeframe selecionado' },
@@ -1731,7 +1731,7 @@
       { name: 'On-chain/fund.', ruleId: 'setup.chain.v1', score: chain, max: 10, status: eligibleDataset(a.coinMetrics) ? 'fresh' : a.coinMetrics ? datasetStatus(a.coinMetrics) : 'missing', scope: 'symbol', isProxy: !!(a.mempoolContext && a.mempoolContext.isProxy), sources: ['coinmetrics-community', 'defillama', 'mempool-space'], reason: 'chainScore + defi*0.45 + asset*0.2' },
       { name: 'Noticias/macro', ruleId: 'setup.macro.v1', score: macro, max: 10, status: news.items.length || state.newsMode !== 'auto' ? 'fresh' : 'missing', scope: 'market', isProxy: false, sources: ['rss-news', 'alternative-me', 'treasury-cboe', 'etf-flows'], reason: 'news*0.36 + sentimento*0.45 + global*0.45 + ETF' },
       { name: 'Historico', ruleId: 'setup.history.v1', score: historyScore, max: 12, status: history ? 'fresh' : historyCandidate ? 'stale' : 'missing', scope: 'symbol', isProxy: false, sources: ['binance-daily-history'], reason: history ? (history.samples || 0) + ' amostras de regimes semelhantes' : 'sem perfil historico fresco' },
-      { name: 'Risco', ruleId: 'setup.risk.v2', score: risk, max: 14, status: 'fresh', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines', 'binance-liquidations'], reason: 'Esticamento de bandas, sweeps, climax de volume e liquidacoes' }
+      { name: 'Risco', ruleId: 'setup.risk.v2', score: risk, max: 14, status: 'fresh', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines', 'binance-liquidations'], reason: 'Esticamento de bandas, climax de volume, volume x delta e sweeps confirmados por liquidacoes' }
     ];
     components.forEach(function (component) { component.contribution = component.score; });
     var reconciledTotal = components.reduce(function (sum, component) { return sum + component.score; }, 0);

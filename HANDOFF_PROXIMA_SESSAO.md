@@ -2,10 +2,11 @@
 
 Data: 2026-07-13
 Branch de trabalho: `claude/crypto-live-desk-checklist-mezzmj` (sincronizada com o remoto)
-Último commit: `a3db327`
+Último commit: ver `git log -1` na branch (ciclo de fechamento RC-007 concluído)
 
 Este documento fecha a sessão atual e diz exatamente por onde a próxima deve seguir, sem
-re-derivar. Leia também, nesta ordem: `CODEX_HANDOFF.md` (entradas RC-001, RC-002, RC-003).
+re-derivar. Leia também, nesta ordem: `CODEX_HANDOFF.md` (entradas RC-001 a RC-007) e
+`CONFORMANCE_V1_GAP.md` (estado da conformidade v1: 16/17 cobertos).
 
 ---
 
@@ -23,9 +24,13 @@ A revisão cruzada obrigatória (CLAUDE.md) dos Ciclos B+C foi concluída e regi
 - **RC-004** (`2c6495d`): item 6 (funding lente dupla) resolvido com clamp conjunto ±7 +
   dedup sweep/trap + arquivamento do journal na virada de versão. Verificado por 2 revisores
   adversariais (ambos CORRETO).
-- Suíte determinística: **94/94 verdes** (`node --test`).
+- **RC-005/006/007** (ver `CODEX_HANDOFF.md`): card simétrico; aba Sinais aprimorada (alertas
+  ±42/±60 com rótulos de zona, 7 bandas espelhadas com flag de amostra, avaliação em lote por
+  símbolo, export do journal); lista de conformidade zerada (§12.7 implementado, §12.8/11/14/16
+  testados, Fase 4 auditada) + meta-auditoria do diff completo da sessão.
+- Suíte determinística: **101/101 verdes** (`node --test`).
 - **Correções analíticas COMPLETAS.** Todos os itens exigidos e recomendados da RC-001 estão
-  aplicados; residuais restantes são defensáveis e documentados (ver RC-004).
+  aplicados; residuais restantes são defensáveis e documentados (RC-004/006/007).
 - **Não deployado.** Tudo está na branch; `main` e produção seguem em preview.5.
 
 ---
@@ -91,11 +96,10 @@ geo-restrição). O gate autoritativo é contra o deploy:
 ### Fase C — Retomar o checklist original (Blocos 1-3)
 
 Depois da Fase B, seguir o checklist já apresentado:
-- **Bloco 1 — Conformidade v1:** gap analysis dos 17 critérios ENTREGUE em
-  `CONFORMANCE_V1_GAP.md` (11 cobertos, 5 parciais, 1 lacuna real). §12.17 (comunicação) já
-  fechado com teste de lint. Próximos: golden fixtures (12.16), invariância do candle aberto
-  (12.8), rastreabilidade por campo (12.14), fator de proveniência do fallback (12.7),
-  auditoria de aliases legados (Fase 4).
+- **Bloco 1 — Conformidade v1: FECHADO no nível motor (RC-007).** `CONFORMANCE_V1_GAP.md`:
+  16/17 cobertos, zero lacunas reais. Único parcial: 12.1 (fiação na UI com dados reais —
+  exige smoke com Binance acessível). Fase 4: auditoria de aliases concluída; resta rollback
+  testado + janela de observação, pós-release.
 - **Bloco 2 — Roadmap:** backtesting walk-forward, calibração de probabilidade, alertas por
   regime, portfolio risk, calendário de eventos, integração autenticada isolada no backend.
 - **Bloco 3 — Infra:** estabilizar o smoke de navegador, gate de CI alternativo, questão
@@ -115,7 +119,8 @@ Depois da Fase B, seguir o checklist já apresentado:
 
 ## 4. Uma linha para iniciar a próxima sessão
 
-> "Continue o Crypto Live Desk. As correções analíticas (RC-001..RC-004) estão completas e na
-> branch `claude/crypto-live-desk-checklist-mezzmj` (preview.6, 94/94, não publicada). Siga pela
-> Fase B do `HANDOFF_PROXIMA_SESSAO.md`: release verificado (push → Vercel preview → smoke contra
-> o preview → main → produção); depois os Blocos 1-3."
+> "Continue o Crypto Live Desk. As correções analíticas e de conformidade (RC-001..RC-007) estão
+> completas na branch `claude/crypto-live-desk-checklist-mezzmj` (preview.6, 101/101, não
+> publicada; conformidade 16/17). Siga pela Fase B do `HANDOFF_PROXIMA_SESSAO.md`: release
+> verificado (push → Vercel preview → smoke contra o preview → main → produção); depois o
+> restante (12.1 na UI, rollback da Fase 4, Blocos 2-3)."

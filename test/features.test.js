@@ -93,7 +93,8 @@ test('alertas: cruzamentos de score sao espelhados na ladder bidirecional (+/-42
   const shortConfirm = core.evaluateAlertTransitions({ ...base, setupScore: -40 }, { ...base, setupScore: -45 }, {});
   assert.equal(shortConfirm.length, 1);
   assert.match(shortConfirm[0].message, /cruzou -42/);
-  assert.match(shortConfirm[0].message, /entrada vendedora com confirmacao/);
+  // Rotulo de ZONA (nao de decisao): o alerta nao avalia os gates MTF/DC/veto da decisao real.
+  assert.match(shortConfirm[0].message, /zona de confirmacao vendedora/);
   const shortStrong = core.evaluateAlertTransitions({ ...base, setupScore: -50 }, { ...base, setupScore: -65 }, {});
   assert.equal(shortStrong.length, 1);
   assert.match(shortStrong[0].message, /cruzou -60/);

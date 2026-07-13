@@ -20,6 +20,8 @@ Correcoes de logica direcional e double-counting apontadas pela revisao cruzada 
 4. Risco: sweep puro sai do bloco de risco (ja pontua em fluxo via smart money); os termos sweep+liquidacao, que exigem tambem desequilibrio de liquidacoes, permanecem.
 5. Fluxo: volume relativo alto deixa de somar +5 direcionless (um selloff de volume alto nao e altista); o volume ainda marca cobertura e a leitura direcional volume x delta segue no bloco de risco. Normalizacao do Radar Fluxo ajustada de /18 para /13.
 6. Derivativos: carry ganha degrau de capitulacao (backwardation < -30% a.a. -> +3), dando ao lado negativo a mesma estrutura de dois degraus do lado positivo; o piso de +2 permanece em -10% a.a. porque o funding neutro ja anualiza a ~+11%.
+7. Derivativos: as duas lentes de funding (percentil vs propria historia, ate +/-6, e carry anualizado, ate +/-3) passam a ser combinadas com clamp conjunto de +/-7 — cada lente mantem autoridade plena sozinha; apenas a cauda correlacionada (euforia/capitulacao, quando co-disparam) e limitada, para um unico dado nao dominar o bucket de +/-12.
+8. Data Confidence: fonte de fallback equivalente (CoinPaprika no lugar da CoinGecko) passa a receber credito de proveniencia parcial (fator 0.8 registrado no ruleset) no bloco Fundamental do Radar e no contexto do Setup — o DC cai levemente quando o contexto de mercado esta coberto apenas pelo fallback. Nenhum score direcional muda por isso.
 
 ## Mudancas acumuladas do preview.3 ao preview.5
 
