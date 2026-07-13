@@ -268,23 +268,33 @@
     }
   }
   function purgeStaleStorage() {
-    // On a MODEL_VERSION bump the previous version's journal/history keys are orphaned; drop them
-    // so old data neither lingers nor eats into the localStorage quota.
+    // On a MODEL_VERSION bump: cached history is dropped (re-fetchable) and the transient trade
+    // state machine is dropped (an open simulated trade can't carry across rule versions). The
+    // signal/trade JOURNALS are ARCHIVED, not deleted (renamed under an 'archived:' prefix): each
+    // record self-describes its modelVersion+rulesetHash, so past signals stay available for
+    // version-segmented analysis (contract 11 forbids AGGREGATING across versions, not preserving).
     try {
       var keepHistoryPrefix = 'liveDesk.history.' + MODEL_VERSION + '.';
-      var versionedPrefixes = ['cld-signal-journal:', 'cld-signal-machine:', 'cld-signal-trades:'];
-      var stale = [];
+      var dropPrefixes = ['cld-signal-machine:'];
+      var archivePrefixes = ['cld-signal-journal:', 'cld-signal-trades:'];
+      var drop = [], archive = [];
       for (var i = 0; i < localStorage.length; i++) {
         var key = localStorage.key(i);
-        if (!key) continue;
+        if (!key || key.indexOf('archived:') === 0) continue;
         var staleHistory = key.indexOf('liveDesk.history.') === 0 && key.indexOf(keepHistoryPrefix) !== 0;
-        var staleVersioned = versionedPrefixes.some(function (prefix) {
-          return key.indexOf(prefix) === 0 && key !== prefix + MODEL_VERSION;
-        });
-        if (staleHistory || staleVersioned) stale.push(key);
+        var staleDrop = dropPrefixes.some(function (prefix) { return key.indexOf(prefix) === 0 && key !== prefix + MODEL_VERSION; });
+        var staleArchive = archivePrefixes.some(function (prefix) { return key.indexOf(prefix) === 0 && key !== prefix + MODEL_VERSION; });
+        if (staleHistory || staleDrop) drop.push(key);
+        else if (staleArchive) archive.push(key);
       }
-      stale.forEach(function (key) { try { localStorage.removeItem(key); } catch (removeError) { /* ignore */ } });
-      return stale.length;
+      archive.forEach(function (key) {
+        try {
+          localStorage.setItem('archived:' + key, localStorage.getItem(key));
+          localStorage.removeItem(key);
+        } catch (archiveError) { /* quota: leave the original in place, no data loss */ }
+      });
+      drop.forEach(function (key) { try { localStorage.removeItem(key); } catch (removeError) { /* ignore */ } });
+      return drop.length + archive.length;
     } catch (error) { return 0; }
   }
   function timestampMs(value) {
@@ -1504,8 +1514,14 @@
   function smartMoneyAnalysis(a) {
     var score = 0, liquidity = 'Sem sweep', imbalance = 'Sem deslocamento', oiPhase = 'OI neutro';
     score += a.structure === 'HH/HL' ? 5 : a.structure === 'LH/LL' ? -5 : 0;
-    if (a.sweepDown) { score += a.close > a.vwap ? 8 : 3; liquidity = 'Sweep de minima / reclaim'; }
-    if (a.sweepUp) { score -= a.close < a.vwap ? 8 : 3; liquidity = 'Sweep de maxima / rejeicao'; }
+    // A confirmed trap already scores the reclaim (with its extra OI/liq confirmation) in trapScore,
+    // which also feeds flow — scoring the raw sweep here too would count the same reclaim twice in
+    // the flow component. When a same-direction trap fired, keep the liquidity label but drop the
+    // duplicate sweep contribution. (bull trap comes from a low-sweep, bear trap from a high-sweep.)
+    var bullTrap = !!(a.trap && a.trap.trap === 'bull');
+    var bearTrap = !!(a.trap && a.trap.trap === 'bear');
+    if (a.sweepDown) { score += bullTrap ? 0 : (a.close > a.vwap ? 8 : 3); liquidity = 'Sweep de minima / reclaim' + (bullTrap ? ' (trap)' : ''); }
+    if (a.sweepUp) { score -= bearTrap ? 0 : (a.close < a.vwap ? 8 : 3); liquidity = 'Sweep de maxima / rejeicao' + (bearTrap ? ' (trap)' : ''); }
     if (a.displacement === 'Alta') { score += 4; imbalance = 'Deslocamento comprador'; }
     else if (a.displacement === 'Baixa') { score -= 4; imbalance = 'Deslocamento vendedor'; }
     if (a.fvg) imbalance += ' | FVG ' + (a.fvg.type === 'bullish' ? 'alta' : 'baixa');
@@ -1609,17 +1625,19 @@
       oiPriceChangePct: a.oiPriceChangePct,
       percentiles: detailPercentiles,
       muteOiQuadrant: carry.muteBuildup,
+      carryScore: carry.carryScore,
       priceChange7dPct: (function () {
         var market = eligibleDataset(state.external.marketData) ? selectedMarket(state.symbol) : null;
         return market ? AnalyticsCore.toFiniteNumber(market.price_change_percentage_7d_in_currency) : null;
       })(),
       asOf: Date.now()
     });
-    // Funding no setup: a leitura RELATIVA (percentil/fundingAvg) vem do detail e a ancora
-    // ABSOLUTA (carry anualizado) vem do carry — lentes complementares. O fundingScore do
-    // premium so e subtraido quando o detail realmente pontuou funding; numa pane parcial do
-    // endpoint fundingRate, o funding ao vivo do premium volta a valer (nada de zerar o sinal).
-    var derivatives = clamp(Math.round((a.derivScore - (detailFundingEligible ? (a.fundingScore || 0) : 0)) * 1.25 + derivativeDetail + carry.carryScore), -12, 12);
+    // Funding no setup: a leitura RELATIVA (percentil/fundingAvg) e a ancora ABSOLUTA (carry
+    // anualizado, passado como carryScore) sao lentes complementares combinadas com clamp conjunto
+    // (+/-7) DENTRO de calculateDerivativeDetailContribution — por isso o carry nao e somado de novo
+    // aqui. O fundingScore do premium so e subtraido quando o detail realmente pontuou funding; numa
+    // pane parcial do endpoint fundingRate, o funding ao vivo do premium volta a valer.
+    var derivatives = clamp(Math.round((a.derivScore - (detailFundingEligible ? (a.fundingScore || 0) : 0)) * 1.25 + derivativeDetail), -12, 12);
     var scoreChain = eligibleDataset(a.coinMetrics) ? a.chainScore : (Number.isFinite(a.nativeChainScore) ? a.nativeChainScore : 0);
     var chain = clamp(Math.round(scoreChain + external.defi * 0.45 + external.asset * 0.2), -10, 10);
     var etfFlow = latestEtfFlow(a.institutional || state.institutional);

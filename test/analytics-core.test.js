@@ -305,6 +305,19 @@ test('percentis substituem thresholds fixos nos derivativos quando a serie e suf
   assert.equal(fallback, 3);
 });
 
+test('derivativos: clamp conjunto das lentes de funding (percentil + carry) em +/-7 (preview.6)', () => {
+  const asOf = 10_000;
+  const detail = (extra) => Object.assign({ observedAt: 9_000, staleAfterMs: 2_000, dataStatus: 'fresh' }, extra);
+  // Percentil p98 sozinho = -4.8 (dentro de +/-7, sem clamp e sem carry passado).
+  closeTo(core.calculateDerivativeDetailContribution({ detail: detail({ fundingAvg: 0.0002 }), percentiles: { funding: 98 }, asOf }), -4.8, 0.001);
+  // p98 (-4.8) + carry de euforia (-3) = -7.8 -> clampado para -7 (cauda correlacionada limitada).
+  assert.equal(core.calculateDerivativeDetailContribution({ detail: detail({ fundingAvg: 0.0002 }), percentiles: { funding: 98 }, carryScore: -3, asOf }), -7);
+  // Lado positivo simetrico: p3 (+4.2) + carry backwardation (+3) = +7.2 -> +7.
+  assert.equal(core.calculateDerivativeDetailContribution({ detail: detail({ fundingAvg: -0.00005 }), percentiles: { funding: 3 }, carryScore: 3, asOf }), 7);
+  // Carry sozinho (funding nao elegivel) mantem autoridade plena dentro do clamp.
+  assert.equal(core.calculateDerivativeDetailContribution({ detail: {}, carryScore: -3, asOf }), -3);
+});
+
 test('obvSeries acumula volume assinado pelo sentido do fechamento', () => {
   const candles = [
     { close: 100, volume: 10 },
