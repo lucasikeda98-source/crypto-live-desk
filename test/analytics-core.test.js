@@ -239,6 +239,62 @@ test('mempool BTC somente influencia o score nativo de Bitcoin', () => {
   assert.equal(altcoin.eligibleForScore, false);
 });
 
+function mtfRow(interval, score) { return { interval, score }; }
+
+test('MTF: alignment conta apenas timeframes alinhados COM a direcao do bias', () => {
+  // Cenario da auditoria: HTF comprado (pesos altos), intraday virando para baixo.
+  // Score ponderado fica positivo, mas so 2 de 5 TFs sao altistas.
+  const turning = core.aggregateMultiTimeframe([
+    mtfRow('1w', 45), mtfRow('1d', 40), mtfRow('4h', -13), mtfRow('1h', -13), mtfRow('15m', -13)
+  ]);
+  assert.ok(turning.raw > 0.18, 'score ponderado e positivo (HTF pesa mais)');
+  assert.equal(turning.positive, 2);
+  assert.equal(turning.negative, 3);
+  // ANTES: alignment = max(2,3)/5 = 0.6 (da direcao CONTRARIA) e bias 'Alta' — gate satisfeito.
+  // AGORA: alinhamento e da direcao do bias tentativo (Alta) = 2/5 = 0.4 -> vira 'Misto'.
+  assert.equal(turning.alignment, 0.4);
+  assert.equal(turning.bias, 'Misto');
+});
+
+test('MTF: alinhamento pleno e vies coerente nas duas direcoes', () => {
+  const bull = core.aggregateMultiTimeframe([
+    mtfRow('1w', 30), mtfRow('1d', 25), mtfRow('4h', 20), mtfRow('1h', 18), mtfRow('15m', 15)
+  ]);
+  assert.equal(bull.bias, 'Alta');
+  assert.equal(bull.alignment, 1);
+  assert.equal(bull.score > 0, true);
+  const bear = core.aggregateMultiTimeframe([
+    mtfRow('1w', -30), mtfRow('1d', -25), mtfRow('4h', -20), mtfRow('1h', -18), mtfRow('15m', -15)
+  ]);
+  assert.equal(bear.bias, 'Baixa');
+  assert.equal(bear.alignment, 1);
+  assert.equal(bear.score < 0, true);
+});
+
+test('MTF: sem linhas ou score fraco fica Misto sem crash', () => {
+  const empty = core.aggregateMultiTimeframe([]);
+  assert.equal(empty.score, 0);
+  assert.equal(empty.alignment, 0);
+  assert.equal(empty.bias, 'Misto');
+  // Score ponderado dentro da banda morta (-0.18..0.18) e Misto mesmo com maioria direcional.
+  const weak = core.aggregateMultiTimeframe([mtfRow('1h', 13), mtfRow('4h', 13), mtfRow('1d', -5)]);
+  assert.equal(weak.bias, 'Misto');
+});
+
+test('put/call OI: banda calibrada para o baseline call-dominante da Deribit', () => {
+  const asOf = 10_000;
+  const optionsWith = (putCallOi) => ({
+    observedAt: 9_000, staleAfterMs: 2_000, dataStatus: 'fresh', market: { putCallOi }
+  });
+  // Baseline Deribit (~0.55) e range historico 0.4-0.8 sao NEUTROS — nao ha sinal em dado tipico.
+  assert.equal(core.calculateDerivativeDetailContribution({ options: optionsWith(0.55), asOf }), 0);
+  assert.equal(core.calculateDerivativeDetailContribution({ options: optionsWith(0.8), asOf }), 0);
+  // Puts realmente elevadas vs baseline = posicionamento defensivo.
+  assert.equal(core.calculateDerivativeDetailContribution({ options: optionsWith(1.1), asOf }), -2);
+  // Call-dominance extremo alem do baseline.
+  assert.equal(core.calculateDerivativeDetailContribution({ options: optionsWith(0.4), asOf }), 1);
+});
+
 test('formatUsd usa digitos significativos abaixo de $1 e 2 casas acima', () => {
   // >= $1: duas casas, sem zeros a esquerda desnecessarios.
   assert.equal(core.formatUsd(63780), '$63,780');
