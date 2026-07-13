@@ -1210,12 +1210,15 @@
     var extEligible = ext.eligibleForScore !== false;
     var externalAvailable = extEligible && !!(ext.market || ext.chain || ext.protocol || fearGreedEligible(state.external) || macroSourceAvailable(state.external.macro) || activeTradFiAssets(state.external.tradfi).length);
     var macroChecks = [!!news.items.length || state.newsMode !== 'auto', fearGreedEligible(state.external), macroSourceAvailable(state.external.macro) || activeTradFiAssets(state.external.tradfi).length > 0];
-    var fundamentalChecks = [!!ext.market, !!(ext.chain || ext.protocol)];
+    // Contrato 8.2/12.7: presenca do bloco de mercado ganha credito parcial (0.8) quando a fonte
+    // que o alimentou e o fallback equivalente (CoinPaprika); chain/protocolo seguem com credito 1.
+    var marketProvenance = AnalyticsCore.sourceProvenanceFactor(state.external.marketData && state.external.marketData.source);
+    var fundamentalChecks = [ext.market ? marketProvenance : 0, (ext.chain || ext.protocol) ? 1 : 0];
     var parts = [
       { name: 'Tecnica', ruleId: 'radar.technical.v2', weight: 30, available: Number.isFinite(analysis.trendScore) && Number.isFinite(analysis.momScore), value: clamp(((analysis.trendScore + analysis.momScore + (analysis.structureShift ? analysis.structureShift.score : 0) + (analysis.divergenceScore || 0) + (analysis.squeeze ? analysis.squeeze.score : 0)) / 60) * 100, -100, 100), quality: Math.min(1, (analysis.candleCount || 0) / 220), raw: analysis.trendScore + analysis.momScore + (analysis.structureShift ? analysis.structureShift.score : 0) + (analysis.divergenceScore || 0) + (analysis.squeeze ? analysis.squeeze.score : 0), scope: 'symbol', reason: 'EMAs, RSI, MACD, ADX, estrutura, CHoCH/BOS, divergencia e squeeze do timeframe' },
       { name: 'Fluxo', ruleId: 'radar.flow.v1', weight: 15, available: analysis.flowAvailable === true, value: clamp((analysis.flowScore / 13) * 100, -100, 100), quality: Number.isFinite(analysis.flowCoverage) ? analysis.flowCoverage : 0, raw: analysis.flowScore, scope: 'symbol', reason: 'Delta taker e CMF (volume marca cobertura, sem bonus direcional)' },
       { name: 'Derivativos', ruleId: 'radar.derivatives.v1', weight: 10, available: Number.isFinite(analysis.funding) || Number.isFinite(analysis.basis), value: clamp((analysis.derivScore / 9) * 100, -100, 100), quality: ((Number.isFinite(analysis.funding) ? 1 : 0) + (Number.isFinite(analysis.basis) ? 1 : 0)) / 2, raw: analysis.derivScore, scope: 'symbol', reason: 'Funding e basis dos perpetuos Binance' },
-      { name: 'Fundamental', ruleId: 'radar.fundamental.v1', weight: 15, available: extEligible && !!(ext.market || ext.chain || ext.protocol), value: clamp(((ext.asset + ext.defi) / 22) * 100, -100, 100), quality: fundamentalChecks.filter(Boolean).length / fundamentalChecks.length, raw: ext.asset + ext.defi, scope: 'symbol', reason: 'Mercado CoinGecko e TVL DeFiLlama mapeados' },
+      { name: 'Fundamental', ruleId: 'radar.fundamental.v1', weight: 15, available: extEligible && !!(ext.market || ext.chain || ext.protocol), value: clamp(((ext.asset + ext.defi) / 22) * 100, -100, 100), quality: (fundamentalChecks[0] + fundamentalChecks[1]) / fundamentalChecks.length, raw: ext.asset + ext.defi, scope: 'symbol', reason: 'Mercado CoinGecko/fallback e TVL DeFiLlama mapeados' },
       { name: 'Macro/noticias', ruleId: 'radar.macro.v1', weight: 10, available: !!(news.items.length || state.newsMode !== 'auto' || externalAvailable), value: clamp(((news.score * 0.45 + ext.sentiment + ext.global) / 30) * 100, -100, 100), quality: macroChecks.filter(Boolean).length / macroChecks.length, raw: news.score * 0.45 + ext.sentiment + ext.global, scope: 'market', reason: 'Noticias RSS, sentimento e macro oficial' },
       { name: 'Historico', ruleId: 'radar.history.v1', weight: 15, available: !!history, value: history ? clamp((history.score / 12) * 100, -100, 100) : 0, quality: history ? Math.min(1, (history.samples || 0) / 20) : 0, raw: history ? history.score : null, scope: 'symbol', reason: 'Regimes semelhantes no historico diario' },
       { name: 'Momentum 24h', ruleId: 'radar.momentum24h.v1', weight: 5, available: Number.isFinite(+ticker.priceChangePercent), value: clamp((+ticker.priceChangePercent / 5) * 100, -100, 100), quality: 1, raw: +ticker.priceChangePercent, scope: 'symbol', reason: 'Variacao 24h do ticker Binance' }
@@ -1554,8 +1557,14 @@
     var derivativeChecks = [Number.isFinite(a.funding) || Number.isFinite(a.basis), hasDerivativeData(a.derivativeDetail)];
     if (eligibleDataset(a.options)) derivativeChecks.push(!!a.options.market);
     var derivativeQuality = derivativeChecks.filter(Boolean).length / derivativeChecks.length;
-    var fundamentalChecks = [!!(a.coinMetrics && a.coinMetrics.latest && eligibleDataset(a.coinMetrics)), externalContextFresh() && !!(findChainContext(state.symbol) || findProtocolContext(state.symbol) || (eligibleDataset(state.external.marketData) && selectedMarket(state.symbol)))];
-    var fundamentalQuality = fundamentalChecks.filter(Boolean).length / fundamentalChecks.length;
+    // Contrato 8.2/12.7: quando o contexto externo so esta coberto pelo market data de FALLBACK
+    // (CoinPaprika no lugar da CoinGecko), o credito de proveniencia e parcial (0.8), nao cheio.
+    var chainOrProtocolContext = externalContextFresh() && !!(findChainContext(state.symbol) || findProtocolContext(state.symbol));
+    var marketContextOk = externalContextFresh() && eligibleDataset(state.external.marketData) && !!selectedMarket(state.symbol);
+    var contextCredit = chainOrProtocolContext ? 1
+      : marketContextOk ? AnalyticsCore.sourceProvenanceFactor(state.external.marketData.source) : 0;
+    var coinMetricsCredit = a.coinMetrics && a.coinMetrics.latest && eligibleDataset(a.coinMetrics) ? 1 : 0;
+    var fundamentalQuality = (coinMetricsCredit + contextCredit) / 2;
     var macroChecks = [freshNewsItems().length > 0, externalContextFresh() && !!(state.external && (state.external.global || state.external.paprikaGlobal)), externalContextFresh() && !!(state.external && (macroSourceAvailable(state.external.macro) || activeTradFiAssets(state.external.tradfi).length || fearGreedEligible(state.external)))];
     var macroQuality = macroChecks.filter(Boolean).length / macroChecks.length;
     var riskQuality = (technicalQuality + flowQuality + derivativeQuality) / 3;
@@ -3557,7 +3566,7 @@
       text('signalsStatus', 'Falha ao exportar sinais: ' + (error && error.message || 'erro inesperado'));
     }
   }
-  var alertState = { enabled: false, lastBySymbol: {}, lastFiredAt: {} };
+  var alertState = { enabled: false, lastBySymbol: {}, lastFiredAt: {}, recent: [] };
   function alertRulesConfig() {
     var config = {};
     document.querySelectorAll('[data-alert-rule]').forEach(function (input) { config[input.dataset.alertRule] = input.checked; });
@@ -3577,7 +3586,13 @@
   }
   function notifyAlert(alert) {
     var log = $('alertLog');
-    if (log) log.textContent = new Date().toLocaleTimeString('pt-BR') + ' | ' + alert.message;
+    if (log) {
+      // Historico curto: duas regras podem disparar no mesmo ciclo (ex.: score + regime) e o
+      // painel mostrava so a ultima; mantem as 4 mais recentes, mais recente primeiro.
+      alertState.recent.unshift(new Date().toLocaleTimeString('pt-BR') + ' | ' + alert.message);
+      alertState.recent = alertState.recent.slice(0, 4);
+      log.innerHTML = alertState.recent.map(escapeHTML).join('<br>');
+    }
     if (alertState.enabled && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
       try { new Notification('Crypto Live Desk', { body: alert.message, tag: alert.id }); } catch (error) { /* notificacao opcional */ }
     }
