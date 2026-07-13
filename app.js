@@ -1332,7 +1332,12 @@
         var profile = historicalProfile(candles);
         if (profile) {
           state.historyProfiles[symbol] = profile;
-          if (keepCandles) state.historyCandles[symbol] = candles;
+          if (keepCandles) {
+            // Only the selected symbol's full daily series is ever read; evict the others so the
+            // cache doesn't grow ~15MB across the 24 assets as the user browses.
+            Object.keys(state.historyCandles).forEach(function (key) { if (key !== symbol) delete state.historyCandles[key]; });
+            state.historyCandles[symbol] = candles;
+          }
           safeStorageSet(historyStorageKey, profile);
         }
         return profile;
@@ -1468,18 +1473,23 @@
       { weight: 10, quality: riskQuality }
     ]);
   }
-  var confluenceMemo = { key: null, value: null };
+  var confluenceMemo = { key: null, value: null, computedAt: 0 };
+  var CONFLUENCE_MEMO_TTL_MS = 15000;
   /**
-   * Memoizes the confluence per snapshot so every panel rendered in the same
-   * pass (gauge, reasons, written analysis, trade plan) reads the exact same
-   * result: freshness is evaluated once per stamp, not once per panel.
+   * Memoizes the confluence per snapshot so every panel rendered in the same pass (gauge,
+   * reasons, written analysis, trade plan) reads the same result, AND so consecutive 3s render
+   * passes reuse it while inputs are unchanged. Keyed by inputSnapshotId only — calculatedAt and
+   * revision bumped on every re-stamp even when inputs were identical, defeating the memo. A short
+   * TTL still forces re-evaluation so a source that goes stale without a new snapshot id (its
+   * observedAt frozen) is re-scored within ~15s instead of serving a stale-eligible confluence.
    */
   function confluenceFor(a) {
     var snapshot = a && a.snapshot;
-    var key = snapshot ? snapshot.inputSnapshotId + '|' + snapshot.calculatedAt + '|' + snapshot.revision : null;
-    if (key && confluenceMemo.key === key) return confluenceMemo.value;
+    var key = snapshot ? snapshot.inputSnapshotId : null;
+    var now = Date.now();
+    if (key && confluenceMemo.key === key && (now - confluenceMemo.computedAt) < CONFLUENCE_MEMO_TTL_MS) return confluenceMemo.value;
     var value = buildConfluence(a);
-    if (key) { confluenceMemo.key = key; confluenceMemo.value = value; }
+    if (key) { confluenceMemo.key = key; confluenceMemo.value = value; confluenceMemo.computedAt = now; }
     return value;
   }
   function buildConfluence(a) {
@@ -2074,6 +2084,22 @@
     });
     renderOverviewDashboard();
   }
+  // Light per-tick board update: the 24-card grid only changes on board refresh (15s), sort or
+  // interval change, so the 3s pass just moves the active highlight and shows the live price on the
+  // selected card instead of rebuilding every card + recomputing 24 radars.
+  function updateSelectedBoardCard(livePrice) {
+    var grid = $('assetGrid'); if (!grid) return;
+    var cards = grid.querySelectorAll('.asset-card');
+    for (var i = 0; i < cards.length; i++) {
+      var card = cards[i];
+      var isActive = card.dataset.symbol === state.symbol;
+      card.classList.toggle('active', isActive);
+      if (isActive && Number.isFinite(livePrice)) {
+        var priceEl = card.querySelector('.asset-row strong');
+        if (priceEl) priceEl.textContent = money(livePrice);
+      }
+    }
+  }
   function scoreClass(bias) { return bias === 'Comprador' ? 'bull' : bias === 'Vendedor' ? 'bear' : 'neutral'; }
   function sparkline(candles) {
     var rows = candles.slice(-18);
@@ -2119,7 +2145,7 @@
     text('rsiState', a.rsi14 >= 70 ? 'Sobrecompra' : a.rsi14 <= 30 ? 'Sobrevenda' : 'Neutro');
     text('macdState', a.macd.hist > 0 ? 'Acima do sinal' : 'Abaixo do sinal');
     text('volumeState', Number.isFinite(a.avgVol) && a.lastVol > a.avgVol * 1.35 ? 'Volume alto' : 'Normal');
-    updateScore(a); updateBook(a); updateChain(chain); renderCoinMetrics(a); renderExternalContext(a); renderAdvancedIndicators(a); renderSetupQuality(a); renderLiquidity(a); renderDerivativesDetails(a); renderMultiTimeframe(a); renderHistoricalProfile(a); renderSmartMoney(a); renderConfluence(a); renderWrittenAnalysis(a); renderHistoricalLab(a); renderFuturesConsole(a); renderLiquidations(); renderOptions(); renderExchangeFlows(a); renderInstitutional(); renderMacroFlow(a); renderCorrelation(a); calculatePosition(); drawPriceChart(); drawRsiChart(); drawMacdChart(); drawVolumeChart(); drawFlowChart(); renderBoard();
+    updateScore(a); updateBook(a); updateChain(chain); renderCoinMetrics(a); renderExternalContext(a); renderAdvancedIndicators(a); renderSetupQuality(a); renderLiquidity(a); renderDerivativesDetails(a); renderMultiTimeframe(a); renderHistoricalProfile(a); renderSmartMoney(a); renderConfluence(a); renderWrittenAnalysis(a); renderHistoricalLab(a); renderFuturesConsole(a); renderLiquidations(); renderOptions(); renderExchangeFlows(a); renderInstitutional(); renderMacroFlow(a); renderCorrelation(a); calculatePosition(); drawPriceChart(); drawRsiChart(); drawMacdChart(); drawVolumeChart(); drawFlowChart(); updateSelectedBoardCard(livePrice);
     renderSnapshotStamp(a);
     document.title = state.symbol + ' ' + money(a.close);
   }
