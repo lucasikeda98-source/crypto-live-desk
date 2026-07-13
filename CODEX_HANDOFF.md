@@ -323,3 +323,13 @@ Revisao pelo Claude Code significa revisao independente de codigo, regras analit
 - Impacto: nenhum em score/DC/decisao (exibicao + infra). Sem bump de versao.
 - Validacao: `node --test` 102/102 (teste de Wilson com valores classicos conferidos a mao: 10/20 -> [29.9, 70.1]; 20/20 -> lower ~83.9 e upper 100; propagacao nos dois resumos); boot-check 8/8 apos a mudanca das celulas.
 - Limitacao conhecida: o job de CI instala Playwright/Chromium por execucao (runner efemero); Binance segue inalcancavel do sandbox — o smoke autoritativo (`npm run test:browser`) permanece gate manual pre-release na maquina do proprietario.
+
+### RC-009 — Release do preview.6 em producao
+
+- Data: 2026-07-13
+- Responsavel: Claude Code, por instrucao explicita do proprietario ("entre no vercel e de o deploy")
+- Merge: `76daa9b` (claude/crypto-live-desk-checklist-mezzmj -> main, 18 commits, RC-001..RC-008)
+- Gates executados antes do merge: suite deterministica 102/102 (tambem re-executada na main integrada); boot-check de navegador 8/8 (Chromium, zero excecoes do app sob falha total de rede); 10+ auditorias adversariais registradas nas entradas RC-001..RC-008.
+- Excecao de fluxo DECLARADA: o smoke autoritativo pre-merge (`npm run test:browser`, exige Binance) NAO foi executado — a Binance e inalcancavel do ambiente remoto desta sessao e o proprietario decidiu publicar mesmo assim. Registro fiel, sem presuncao de aprovacao do smoke.
+- Verificacao pos-deploy (estatica, via conector Vercel): producao `crypto-live-desk.vercel.app` servindo `MODEL_VERSION = '1.0.0-preview.6'` no app.js e `rulesetVersion: '1.0.0-preview.6'` + `fallbackProvenanceFactor: 0.8` + `wilsonInterval` no analytics-core.js. Deploy automatico via integracao GitHub confirmado.
+- Verificacao comportamental PENDENTE (dono): abrir a producao no navegador e conferir 24 ativos carregando, Setup Score/explicacao no ativo, aba Sinais (journal novo comeca vazio na preview.6; o da preview.5 fica arquivado no navegador em que existia), versao preview.6 visivel e ausencia de erros de console.
