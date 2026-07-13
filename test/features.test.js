@@ -67,7 +67,9 @@ test('journal: resumo por faixa separa avaliados e acertos', () => {
     { setupScore: 65, outcome: { r24h: 2 } },
     { setupScore: 62, outcome: { r24h: -1 } },
     { setupScore: 45, outcome: null },
-    { setupScore: -30, outcome: { r24h: -3 } }
+    { setupScore: -30, outcome: { r24h: -3 } },
+    { setupScore: -50, outcome: { r24h: 4 } },
+    { setupScore: -70, outcome: { r24h: -6 } }
   ];
   const summary = core.summarizeSignalJournal(records);
   const top = summary.find((row) => row.band === '>= +60');
@@ -75,8 +77,32 @@ test('journal: resumo por faixa separa avaliados e acertos', () => {
   assert.equal(top.evaluated, 2);
   assert.equal(top.hits, 1);
   assert.equal(top.hitRate, 50);
-  const bear = summary.find((row) => row.band === '<= -20');
+  assert.equal(top.sufficient, false, 'menos de 20 avaliados = amostra insuficiente');
+  // Bandas negativas espelham a ladder bidirecional (+/-42, +/-60).
+  const bear = summary.find((row) => row.band === '-41 a -20');
   assert.equal(bear.hits, 1, 'score negativo acerta quando o retorno e negativo');
+  const bearConfirm = summary.find((row) => row.band === '-59 a -42');
+  assert.equal(bearConfirm.evaluated, 1);
+  assert.equal(bearConfirm.hits, 0, 'short com retorno positivo e erro');
+  const bearStrong = summary.find((row) => row.band === '<= -60');
+  assert.equal(bearStrong.hits, 1);
+});
+
+test('alertas: cruzamentos de score sao espelhados na ladder bidirecional (+/-42, +/-60)', () => {
+  const base = { symbol: 'BTCUSDT', interval: '5m', bias: 'Neutro', regime: 'Range', funding: 0.0001, liquidation15m: 0 };
+  const shortConfirm = core.evaluateAlertTransitions({ ...base, setupScore: -40 }, { ...base, setupScore: -45 }, {});
+  assert.equal(shortConfirm.length, 1);
+  assert.match(shortConfirm[0].message, /cruzou -42/);
+  // Rotulo de ZONA (nao de decisao): o alerta nao avalia os gates MTF/DC/veto da decisao real.
+  assert.match(shortConfirm[0].message, /zona de confirmacao vendedora/);
+  const shortStrong = core.evaluateAlertTransitions({ ...base, setupScore: -50 }, { ...base, setupScore: -65 }, {});
+  assert.equal(shortStrong.length, 1);
+  assert.match(shortStrong[0].message, /cruzou -60/);
+  assert.equal(core.evaluateAlertTransitions({ ...base, setupScore: -44 }, { ...base, setupScore: -46 }, {}).length, 0,
+    'permanecer dentro da zona (sem cruzar -42 nem -60) nao dispara');
+  const longStrong = core.evaluateAlertTransitions({ ...base, setupScore: 55 }, { ...base, setupScore: 62 }, {});
+  assert.equal(longStrong.length, 1);
+  assert.match(longStrong[0].message, /cruzou \+60/);
 });
 
 test('journal: avaliacao precoce nao congela horizontes futuros', () => {
@@ -90,6 +116,39 @@ test('journal: avaliacao precoce nao congela horizontes futuros', () => {
   const merged = core.mergeSignalOutcome(early, { r1h: null, r24h: -3, r7d: null });
   assert.deepEqual(merged, { r1h: 2, r24h: -3, r7d: null }, 'merge preserva horizontes ja preenchidos');
   assert.equal(core.signalOutcomePending({ ...record, outcome: { r1h: 1, r24h: 2, r7d: 3 } }, 999 * hour), false);
+});
+
+test('wilson: intervalo 95% cobre a incerteza da amostra e degrada com poucos dados', () => {
+  const close = (value, expected, tolerance) => assert.ok(Math.abs(value - expected) <= tolerance, value + ' != ' + expected);
+  // 10/20 com z=1.96: intervalo classico [29.9%, 70.1%] — simetrico em p=0.5.
+  const half = core.wilsonInterval(10, 20);
+  close(half.lower, 29.93, 0.1);
+  close(half.upper, 70.07, 0.1);
+  // 20/20: taxa observada 100%, mas o intervalo NAO afirma certeza (lower ~83.9%).
+  const perfect = core.wilsonInterval(20, 20);
+  close(perfect.lower, 83.89, 0.15);
+  assert.equal(perfect.upper, 100);
+  // 3/4: "75% de acerto" vira honestamente [30%, 95%].
+  const tiny = core.wilsonInterval(3, 4);
+  assert.ok(tiny.lower < 31 && tiny.upper > 94, JSON.stringify(tiny));
+  // Amostra maior aperta o intervalo em torno da mesma taxa.
+  const big = core.wilsonInterval(75, 100);
+  assert.ok(big.lower > 65 && big.upper < 83, JSON.stringify(big));
+  // Bordas: sem tentativas -> null; entradas invalidas -> null.
+  assert.equal(core.wilsonInterval(0, 0), null);
+  assert.equal(core.wilsonInterval(5, 4), null);
+  assert.equal(core.wilsonInterval(null, 10), null);
+  // Propagacao: os resumos carregam o intervalo junto da taxa.
+  const signalSummary = core.summarizeSignalJournal([
+    { setupScore: 65, outcome: { r24h: 2 } },
+    { setupScore: 62, outcome: { r24h: -1 } }
+  ]).find((row) => row.band === '>= +60');
+  assert.ok(signalSummary.hitRateInterval && signalSummary.hitRateInterval.lower >= 0 && signalSummary.hitRateInterval.upper <= 100);
+  const tradeSummary = core.summarizeTradeJournal([
+    { pnlPct: 2, entryScore: 50, regime: 'Tendencia', trigger: 'bos', rMultiple: 1 },
+    { pnlPct: -1, entryScore: 50, regime: 'Tendencia', trigger: 'bos', rMultiple: -0.5 }
+  ]);
+  assert.ok(tradeSummary.cells[0].hitRateInterval && Number.isFinite(tradeSummary.cells[0].hitRateInterval.lower));
 });
 
 test('alertas: troca de timeframe nunca gera transicao', () => {

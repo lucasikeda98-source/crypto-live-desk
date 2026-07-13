@@ -134,3 +134,167 @@ test('contrato 12.10: proxies BTC seguem fora do score de altcoins', () => {
   assert.equal(core.bitcoinMempoolContext('ADAUSDT', 90).score, 0);
   assert.equal(core.resolveOptionsScope('BTCUSDT').eligibleForScore, true);
 });
+
+test('contrato 12.7: fallback equivalente recebe o fator de proveniencia registrado', () => {
+  assert.equal(core.RULESET.fallbackProvenanceFactor, 0.8, 'fator registrado no ruleset');
+  assert.equal(core.sourceProvenanceFactor('CoinGecko public'), 1, 'fonte primaria tem credito cheio');
+  assert.equal(core.sourceProvenanceFactor('CoinPaprika fallback'), 0.8, 'fallback declarado tem credito parcial');
+  assert.equal(core.sourceProvenanceFactor(null), 1, 'rotulo ausente nao penaliza');
+  assert.equal(core.sourceProvenanceFactor(''), 1);
+  assert.equal(core.sourceProvenanceFactor(undefined), 1);
+
+  // Trava a convencao ENTRE arquivos: o credito 0.8 depende de a rota de mercado emitir um rotulo
+  // que casa /fallback/i. Renomear o rotulo em api/market.js sem ajustar o helper quebraria o
+  // fator silenciosamente — este assert transforma essa quebra em teste vermelho.
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const marketApi = fs.readFileSync(path.join(__dirname, '..', 'api', 'market.js'), 'utf8');
+  const fallbackLabel = (marketApi.match(/source = '([^']*)'/g) || []).map((m) => m.match(/'([^']*)'/)[1]).find((label) => /fallback/i.test(label));
+  assert.ok(fallbackLabel, 'api/market.js deve emitir um rotulo de fonte contendo "fallback"');
+  assert.equal(core.sourceProvenanceFactor(fallbackLabel), 0.8, 'o rotulo real da rota recebe o fator 0.8');
+});
+
+test('contrato 12.8: variar apenas o candle em formacao nao altera nada confirmado', () => {
+  const candle = (i, close, extra) => Object.assign({
+    time: i * 60000, closeTime: i * 60000 + 59999,
+    open: close - 0.5, close, high: close + 1, low: close - 1, volume: 100, takerBuy: 60
+  }, extra);
+  const closed = [];
+  for (let i = 0; i < 30; i += 1) closed.push(candle(i, 100 + i * 2));
+  const asOf = closed[29].closeTime; // fronteira: closeTime === asOf conta como fechado
+  assert.equal(core.selectClosedCandles(closed, asOf).length, 30);
+
+  // Candle em formacao com valores EXTREMOS (spike de 50% e volume 100x): nao pode vazar.
+  const forming = candle(30, 300, { closeTime: asOf + 60000, volume: 10000, takerBuy: 9000 });
+  const withForming = closed.concat([forming]);
+  const filtered = core.selectClosedCandles(withForming, asOf);
+  assert.equal(filtered.length, 30, 'o candle em formacao e excluido');
+  assert.equal(filtered[filtered.length - 1].closeTime, asOf, 'ultimo candle fechado inalterado');
+
+  const pivotHighs = [{ price: 130, time: 14 * 60000 }, { price: 150, time: 24 * 60000 }];
+  const pivotLows = [{ price: 110, time: 10 * 60000 }, { price: 128, time: 20 * 60000 }];
+  assert.deepEqual(
+    core.detectStructureShift(filtered, pivotHighs, pivotLows),
+    core.detectStructureShift(closed, pivotHighs, pivotLows),
+    'estrutura confirmada identica com ou sem o candle em formacao'
+  );
+  assert.deepEqual(
+    core.detectVolumeClimax(filtered, 2),
+    core.detectVolumeClimax(closed, 2),
+    'climax confirmado identico com ou sem o candle em formacao'
+  );
+});
+
+test('contrato 12.11: resposta de outra selecao (simbolo/timeframe) e descartada pelo gate', () => {
+  const gate = core.createRequestGate();
+  const btcRequest = gate.begin();          // usuario abre BTCUSDT
+  gate.invalidate();                        // usuario troca para ETHUSDT (ou muda o timeframe)
+  const ethRequest = gate.begin();
+  assert.equal(gate.isCurrent(btcRequest), false, 'resposta atrasada do BTC nao pode ser incorporada');
+  assert.equal(gate.isCurrent(ethRequest), true, 'somente a requisicao da selecao atual e valida');
+});
+
+test('contrato 12.14: todo componente declara regra, limite, estado, escopo, proxy, fontes e leitura', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const appjs = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+
+  const setupComponents = appjs.match(/\{ name: '[^']+', ruleId: 'setup\.[^\n]+/g) || [];
+  assert.equal(setupComponents.length, 8, 'os 8 componentes do Setup Score declaram ruleId');
+  for (const line of setupComponents) {
+    for (const key of ['ruleId:', 'max:', 'status:', 'scope:', 'isProxy:', 'sources:', 'reason:']) {
+      assert.ok(line.includes(key), 'componente Setup sem "' + key + '" -> ' + line.slice(0, 60));
+    }
+  }
+  const radarParts = appjs.match(/\{ name: '[^']+', ruleId: 'radar\.[^\n]+/g) || [];
+  assert.equal(radarParts.length, 7, 'os 7 blocos do Radar Score declaram ruleId');
+  for (const line of radarParts) {
+    for (const key of ['ruleId:', 'weight:', 'available:', 'value:', 'quality:', 'raw:', 'scope:', 'reason:']) {
+      assert.ok(line.includes(key), 'bloco Radar sem "' + key + '" -> ' + line.slice(0, 60));
+    }
+  }
+});
+
+test('contrato 12.16: golden fixtures alta/baixa/lateralizacao congelam o resultado do motor', () => {
+  const candle = (i, close) => ({
+    time: i * 60000, closeTime: i * 60000 + 59999,
+    open: close - 0.5, close, high: close + 1, low: close - 1, volume: 100, takerBuy: 60
+  });
+  const pivotHighs = [{ price: 130, time: 14 * 60000 }, { price: 150, time: 24 * 60000 }];
+  const pivotLows = [{ price: 110, time: 10 * 60000 }, { price: 128, time: 20 * 60000 }];
+
+  // ALTA: rompimento do ultimo pivot high em tendencia de alta = BOS de continuacao.
+  const alta = [];
+  for (let i = 0; i < 30; i += 1) alta.push(candle(i, 100 + i * 2));
+  alta[28] = candle(28, 149);
+  alta[29] = candle(29, 153);
+  assert.deepEqual(core.detectStructureShift(alta, pivotHighs, pivotLows),
+    { event: 'BOS', direction: 'bull', score: 4, brokenLevel: 150, barsAgo: 0 });
+
+  // BAIXA: fechamento atraves do ultimo higher-low = CHoCH baixista.
+  const baixa = alta.map((row) => Object.assign({}, row));
+  baixa[28] = candle(28, 129);
+  baixa[29] = candle(29, 126);
+  assert.deepEqual(core.detectStructureShift(baixa, pivotHighs, pivotLows),
+    { event: 'CHoCH', direction: 'bear', score: -6, brokenLevel: 128, barsAgo: 0 });
+
+  // LATERALIZACAO: pivots mistos (sem HH/HL nem LH/LL) = nenhum evento, score 0.
+  const lateral = [];
+  for (let i = 0; i < 30; i += 1) lateral.push(candle(i, 100 + (i % 2)));
+  assert.deepEqual(core.detectStructureShift(lateral,
+    [{ price: 103, time: 10 * 60000 }, { price: 102.5, time: 20 * 60000 }],
+    [{ price: 98, time: 8 * 60000 }, { price: 98.5, time: 18 * 60000 }]),
+    { event: null, direction: null, score: 0, brokenLevel: null, barsAgo: null });
+
+  // Radar completo congelado nos tres regimes; espelhar as entradas espelha exatamente o resultado.
+  const parts = (t, f, d, fu, m, h, mo) => ([
+    { name: 'Tecnica', weight: 30, available: true, value: t, quality: 1 },
+    { name: 'Fluxo', weight: 15, available: true, value: f, quality: 1 },
+    { name: 'Derivativos', weight: 10, available: true, value: d, quality: 1 },
+    { name: 'Fundamental', weight: 15, available: true, value: fu, quality: 1 },
+    { name: 'Macro', weight: 10, available: true, value: m, quality: 1 },
+    { name: 'Historico', weight: 15, available: true, value: h, quality: 1 },
+    { name: 'Momentum24h', weight: 5, available: true, value: mo, quality: 1 }
+  ]);
+  const contribSum = (result) => +result.contributions.reduce((sum, row) => sum + row.contribution, 0).toFixed(6);
+
+  const altaRadar = core.aggregateRadarParts(parts(70, 55, 30, 40, 20, 50, 60));
+  assert.equal(altaRadar.score, 51);
+  assert.equal(altaRadar.bias, 'Comprador');
+  assert.equal(altaRadar.dataConfidence, 100);
+  assert.equal(altaRadar.dataStatus, 'complete');
+  assert.equal(contribSum(altaRadar), 50.75, 'soma das contribuicoes reproduz o bruto (12.3)');
+
+  const baixaRadar = core.aggregateRadarParts(parts(-70, -55, -30, -40, -20, -50, -60));
+  assert.equal(baixaRadar.score, -51, 'espelho exato do cenario de alta');
+  assert.equal(baixaRadar.bias, 'Vendedor');
+  assert.equal(contribSum(baixaRadar), -50.75);
+
+  const lateralRadar = core.aggregateRadarParts(parts(8, -5, 3, 0, -2, 4, 6));
+  assert.equal(lateralRadar.score, 3);
+  assert.equal(lateralRadar.bias, 'Neutro');
+  assert.equal(contribSum(lateralRadar), 2.65);
+});
+
+test('contrato 12.17: comunicacao nao promete acerto nem trata Data Confidence como probabilidade', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const read = (file) => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+  const html = read('index.html');
+  const appjs = read('app.js');
+
+  // Disclaimer obrigatorio: os scores nao sao probabilidade nem recomendacao.
+  assert.match(html, /nao representam probabilidade nem recomendacao/i,
+    'o rodape deve declarar que Radar/Setup Score nao sao probabilidade nem recomendacao');
+  // Data Confidence deve ser enquadrado como cobertura de dados, nao chance de acerto.
+  assert.match(appjs, /Data Confidence[^\n]*cobertura de dados, nao chance de acerto/i,
+    'a UI deve dizer que Data Confidence mede cobertura de dados, nao chance de acerto');
+
+  // Linguagem de promessa/garantia nao pode aparecer em nenhuma copy visivel.
+  const forbidden = [/lucro garantido/i, /retorno garantido/i, /ganho garantido/i,
+    /recomendacao garantida/i, /100% de acerto/i, /sinal garantido/i, /acerto garantido/i];
+  for (const rx of forbidden) {
+    assert.ok(!rx.test(html), 'index.html nao pode conter linguagem de garantia: ' + rx);
+    assert.ok(!rx.test(appjs), 'app.js nao pode conter linguagem de garantia: ' + rx);
+  }
+});

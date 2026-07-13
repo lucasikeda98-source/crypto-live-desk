@@ -305,6 +305,19 @@ test('percentis substituem thresholds fixos nos derivativos quando a serie e suf
   assert.equal(fallback, 3);
 });
 
+test('derivativos: clamp conjunto das lentes de funding (percentil + carry) em +/-7 (preview.6)', () => {
+  const asOf = 10_000;
+  const detail = (extra) => Object.assign({ observedAt: 9_000, staleAfterMs: 2_000, dataStatus: 'fresh' }, extra);
+  // Percentil p98 sozinho = -4.8 (dentro de +/-7, sem clamp e sem carry passado).
+  closeTo(core.calculateDerivativeDetailContribution({ detail: detail({ fundingAvg: 0.0002 }), percentiles: { funding: 98 }, asOf }), -4.8, 0.001);
+  // p98 (-4.8) + carry de euforia (-3) = -7.8 -> clampado para -7 (cauda correlacionada limitada).
+  assert.equal(core.calculateDerivativeDetailContribution({ detail: detail({ fundingAvg: 0.0002 }), percentiles: { funding: 98 }, carryScore: -3, asOf }), -7);
+  // Lado positivo simetrico: p3 (+4.2) + carry backwardation (+3) = +7.2 -> +7.
+  assert.equal(core.calculateDerivativeDetailContribution({ detail: detail({ fundingAvg: -0.00005 }), percentiles: { funding: 3 }, carryScore: 3, asOf }), 7);
+  // Carry sozinho (funding nao elegivel) mantem autoridade plena dentro do clamp.
+  assert.equal(core.calculateDerivativeDetailContribution({ detail: {}, carryScore: -3, asOf }), -3);
+});
+
 test('obvSeries acumula volume assinado pelo sentido do fechamento', () => {
   const candles = [
     { close: 100, volume: 10 },
@@ -420,6 +433,10 @@ test('carry: funding anualizado ancora euforia/estresse em termos absolutos e de
   assert.equal(euphoric.carryScore, -3, 'carry >30% a.a. e euforia (cash-and-carry lotado)');
   assert.equal(core.calculateCarryRegime({ fundingAvg: 0.00015 }).carryScore, -2, '15-30% pede cautela');
   assert.equal(core.calculateCarryRegime({ fundingAvg: -0.0001 }).carryScore, 2, 'backwardation persistente e combustivel');
+  // preview.6: degrau de capitulacao no lado negativo (simetria de magnitude com euforia -3),
+  // sem elevar o piso (funding neutro ~+11% a.a. -> qualquer negativo ja e anomalo).
+  assert.equal(core.calculateCarryRegime({ fundingAvg: -0.0003 }).carryScore, 3, 'backwardation profunda < -30% a.a. = capitulacao -> +3');
+  assert.equal(core.calculateCarryRegime({ fundingAvg: -0.00025 }).carryScore, 2, 'backwardation em -15..-30% a.a. segue em +2 (sem zona morta)');
   const neutral = core.calculateCarryRegime({ fundingAvg: 0.00003, oiPercentile: 85 });
   assert.equal(neutral.carryScore, 0);
   assert.equal(neutral.deltaNeutral, true, 'carry ~0 com OI no p85 = OI hedgeado (basis trade)');
@@ -427,6 +444,17 @@ test('carry: funding anualizado ancora euforia/estresse em termos absolutos e de
   assert.equal(core.calculateCarryRegime({ fundingAvg: 0.00003, oiPercentile: 60 }).deltaNeutral, false);
   assert.equal(core.calculateCarryRegime({ fundingAvg: null }).carryScore, 0);
   assert.equal(core.calculateCarryRegime({ fundingAvg: null }).annualizedCarryPct, null);
+});
+
+test('fluxo: volume relativo alto sozinho nao adiciona bonus direcional (preview.6)', () => {
+  // Delta neutro em todos os candles (takerBuy = metade do volume -> delta 0) e um ultimo candle
+  // de volume 10x a media. Antes somava +5 direcionless (um selloff de volume alto nao e altista).
+  const rows = Array.from({ length: 25 }, () => ({ volume: 10, takerBuy: 5 }));
+  rows.push({ volume: 100, takerBuy: 50 });
+  const flow = core.calculateCandleFlow(rows, null);
+  assert.equal(flow.deltaSum, 0, 'delta neutro');
+  assert.equal(flow.score, 0, 'volume alto sem direcao nao pontua (antes +5)');
+  assert.equal(flow.available, true, 'volume ainda marca cobertura de dados');
 });
 
 function trapBars(priorLow) {

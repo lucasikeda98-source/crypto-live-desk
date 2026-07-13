@@ -26,6 +26,26 @@ jobs:
       - name: Run deterministic tests
         run: npm test
 
+  # BLOQUEANTE e independente de Binance: valida boot no Chromium (zero excecoes do app
+  # sob falha total de rede), DOM esperado e layout 390px. Complementa a suite deterministica
+  # com um gate de navegador que RODA em runner geo-restringido.
+  browser-boot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+      - name: Run browser boot check
+        run: node scripts/browser-boot-check.cjs
+
   # Informativo: runners hospedados do GitHub ficam em regiao onde a Binance
   # responde HTTP 451 (geo-restricao), entao o carregamento completo do painel
   # nao e alcancavel a partir do CI. O gate autoritativo do smoke roda local
