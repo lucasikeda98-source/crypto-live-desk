@@ -124,6 +124,8 @@ Revisao pelo Claude Code significa revisao independente de codigo, regras analit
 - Responsavel: Codex
 - Branch: `codex/cycle-d-sources`
 - Base: `8d18107`
+- Commits de implementacao: `a2a508b`, `aafc933`
+- Preview Vercel validado: `dpl_Hsx2V1npvwirMHh63KVBbxfM9qtM`
 - Estado: **AGUARDANDO CLAUDE CODE**
 - Escopo:
   - Versao de desenvolvimento elevada para `1.0.0-preview.6`.
@@ -144,6 +146,7 @@ Revisao pelo Claude Code significa revisao independente de codigo, regras analit
   - Consulta real BTC retornou quatro venues, 1.000 aggTrades e nenhuma falha de fonte.
   - Painel local exibiu CVD, imbalance, Coinbase premium, dispersao e quatro venues sem erros de console.
   - Preview Vercel confirmou degradacao parcial: Binance, Coinbase e OKX responderam; Bybit ficou indisponivel na regiao do deploy e foi excluida sem fabricar preco.
+  - A interface remota passou a exibir `3/4 venues` e `Fontes indisponiveis: bybit`; nenhum erro de console ou runtime foi encontrado.
   - CFTC real exibiu relatorio de 07/07/2026: non-commercial net +3.500, variacao -270, commercial net -3.217 e OI 18.832 contratos.
 - Limitacoes conhecidas:
   - CVD cobre somente os ultimos 1.000 aggTrades, nao uma serie acumulada de longo prazo.
