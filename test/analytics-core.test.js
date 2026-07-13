@@ -505,6 +505,163 @@ test('regime delta-neutro muta o quadrante de OI no scorer de derivativos', () =
   assert.equal(muted, 0, 'OI hedgeado (basis trade) nao e leitura direcional');
 });
 
+// ===== Ciclo C: motor de sinais v2 =====
+
+function machineSnapshot(overrides) {
+  return Object.assign({
+    symbol: 'BTCUSDT', interval: '1h', total: 50, close: 100, high: 101, low: 99,
+    closeTime: 1_000_000, atr: 2, regime: 'Tendencia de alta',
+    supports: [97, 92], resistances: [104, 110],
+    structureShift: { event: null, direction: null, score: 0, brokenLevel: null },
+    divergence: { bearish: false, bullish: false },
+    trap: { trap: null }, squeeze: { released: null, score: 0 },
+    gates: { htfAvailable: true, htfVetoLong: false, htfVetoShort: false, trapVeto: null },
+    inputSnapshotId: 'snap-1'
+  }, overrides);
+}
+
+test('sinais v2: entrada long exige score, gatilho nomeado, gate HTF e ausencia de veto', () => {
+  const trigger = machineSnapshot({ structureShift: { event: 'CHoCH', direction: 'bull', score: 6, brokenLevel: 98 } });
+  const entry = core.evaluateSignalTransition(null, trigger);
+  assert.ok(entry.state, 'estado ATIVO criado');
+  assert.equal(entry.state.phase, 'ACTIVE');
+  assert.equal(entry.state.side, 'long');
+  assert.equal(entry.state.trigger, 'choch');
+  assert.ok(entry.state.stopPrice < 100, 'stop estrutural abaixo da entrada');
+  assert.ok(entry.state.stopPrice < 97, 'stop atras do swing (suporte), nao ATR generico');
+  assert.equal(entry.state.targetPrice, 104, 'alvo no nivel estrutural');
+  assert.equal(entry.state.maxBars, 30, 'regime de tendencia segura mais tempo');
+  assert.equal(entry.event.type, 'entry');
+  // Sem gatilho nomeado: score alto sozinho NAO entra.
+  assert.equal(core.evaluateSignalTransition(null, machineSnapshot({ total: 80 })).state, null);
+  // Veto pos-trap bloqueia a direcao.
+  assert.equal(core.evaluateSignalTransition(null, machineSnapshot({
+    structureShift: { event: 'CHoCH', direction: 'bull', score: 6 }, gates: { htfAvailable: true, htfVetoLong: false, htfVetoShort: false, trapVeto: 'long' }
+  })).state, null);
+  // Gate HTF indisponivel bloqueia.
+  assert.equal(core.evaluateSignalTransition(null, machineSnapshot({
+    structureShift: { event: 'CHoCH', direction: 'bull', score: 6 }, gates: { htfAvailable: false, htfVetoLong: false, htfVetoShort: false, trapVeto: null }
+  })).state, null);
+  // 1d+1w contra vetam.
+  assert.equal(core.evaluateSignalTransition(null, machineSnapshot({
+    structureShift: { event: 'CHoCH', direction: 'bull', score: 6 }, gates: { htfAvailable: true, htfVetoLong: true, htfVetoShort: false, trapVeto: null }
+  })).state, null);
+});
+
+test('sinais v2: entrada short espelhada e guarda de R:R minimo', () => {
+  const short = core.evaluateSignalTransition(null, machineSnapshot({
+    total: -55, regime: 'Range', supports: [96, 92], resistances: [102, 110],
+    structureShift: { event: 'CHoCH', direction: 'bear', score: -6, brokenLevel: 102 }
+  }));
+  assert.equal(short.state.side, 'short');
+  assert.ok(short.state.stopPrice > 100);
+  assert.equal(short.state.targetPrice, 96);
+  assert.equal(short.state.maxBars, 12, 'range segura menos tempo');
+  // R:R < 1 nao entra: alvo colado (101) com stop longe.
+  const badRr = core.evaluateSignalTransition(null, machineSnapshot({
+    resistances: [100.5, 101], supports: [92],
+    structureShift: { event: 'CHoCH', direction: 'bull', score: 6 }
+  }));
+  assert.equal(badRr.state, null);
+});
+
+test('sinais v2: saidas — alvo, stop (stop vence no mesmo candle), deterioracao, tempo e reversao', () => {
+  const base = machineSnapshot({ structureShift: { event: 'CHoCH', direction: 'bull', score: 6 } });
+  const active = core.evaluateSignalTransition(null, base).state;
+  // Alvo: high cruza o target.
+  const hitTarget = core.evaluateSignalTransition(active, machineSnapshot({ high: 105, close: 104.5, closeTime: 1_003_600 }));
+  assert.equal(hitTarget.state, null, 'posicao fechada');
+  assert.equal(hitTarget.event.type, 'exit');
+  assert.equal(hitTarget.event.record.exitReason, 'target');
+  assert.ok(hitTarget.event.record.pnlPct > 0);
+  assert.ok(hitTarget.event.record.rMultiple > 0);
+  // Stop e alvo no MESMO candle: conservador, stop primeiro.
+  const both = core.evaluateSignalTransition(active, machineSnapshot({ high: 106, low: 94, close: 100, closeTime: 1_003_600 }));
+  assert.equal(both.event.record.exitReason, 'stop');
+  assert.ok(both.event.record.rMultiple <= -0.9, 'stop cheio ~-1R');
+  // Deterioracao de score.
+  const decay = core.evaluateSignalTransition(active, machineSnapshot({ total: 5, closeTime: 1_003_600 }));
+  assert.equal(decay.event.record.exitReason, 'deterioration');
+  // Reversao: CHoCH contra + divergencia contra.
+  const reversal = core.evaluateSignalTransition(active, machineSnapshot({
+    structureShift: { event: 'CHoCH', direction: 'bear', score: -6 }, divergence: { bearish: true, bullish: false }, closeTime: 1_003_600
+  }));
+  assert.equal(reversal.event.record.exitReason, 'reversal');
+  // Tempo: estoura maxBars.
+  let state = active;
+  let timedRecord = null;
+  for (let bar = 0; bar < 31 && state; bar++) {
+    const step = core.evaluateSignalTransition(state, machineSnapshot({ closeTime: 1_003_600 + bar * 3600_000 }));
+    state = step.state;
+    if (step.event && step.event.type === 'exit') timedRecord = step.event.record;
+  }
+  assert.ok(timedRecord, 'fechou por tempo');
+  assert.equal(timedRecord.exitReason, 'time');
+});
+
+test('sinais v2: MAE/MFE acumulam pelo caminho e o registro carrega metadados', () => {
+  const active = core.evaluateSignalTransition(null, machineSnapshot({ structureShift: { event: 'CHoCH', direction: 'bull', score: 6 } })).state;
+  const step1 = core.evaluateSignalTransition(active, machineSnapshot({ high: 102, low: 97, close: 101, closeTime: 1_003_600 }));
+  assert.ok(step1.state.mfePct >= 2 - 1e-9, 'MFE captura o topo do caminho');
+  assert.ok(step1.state.maePct <= -3 + 1e-9, 'MAE captura o fundo do caminho');
+  const exit = core.evaluateSignalTransition(step1.state, machineSnapshot({ high: 105, close: 104.2, closeTime: 1_007_200 }));
+  const record = exit.event.record;
+  assert.equal(record.symbol, 'BTCUSDT');
+  assert.equal(record.trigger, 'choch');
+  assert.equal(record.regime, 'Tendencia de alta');
+  assert.ok(record.durationBars >= 2);
+  assert.ok(Number.isFinite(record.rMultiple));
+  assert.equal(record.entrySnapshotId, 'snap-1');
+});
+
+test('sinais v2: tabelas de acerto por regime x gatilho x faixa com flag de amostra minima', () => {
+  const records = [];
+  for (let i = 0; i < 25; i++) {
+    records.push({ regime: 'Tendencia de alta', trigger: 'choch', entryScore: 55, pnlPct: i % 5 === 0 ? -1 : 2, rMultiple: i % 5 === 0 ? -1 : 1.5 });
+  }
+  records.push({ regime: 'Range', trigger: 'squeeze-release', entryScore: 85, pnlPct: 3, rMultiple: 2 });
+  const summary = core.summarizeTradeJournal(records);
+  const cell = summary.cells.find((row) => row.regime === 'Tendencia de alta' && row.trigger === 'choch' && row.band === '42-59');
+  assert.ok(cell);
+  assert.equal(cell.count, 25);
+  assert.equal(cell.hitRate, 80);
+  assert.equal(cell.sufficient, true, '25 amostras >= minimo');
+  const thin = summary.cells.find((row) => row.trigger === 'squeeze-release');
+  assert.equal(thin.sufficient, false, '1 amostra e so base rate, sem multiplicador');
+  assert.equal(summary.total, 26);
+});
+
+test('cenarios: base/alternativo/range com gatilho, alvo e invalidacao estruturais', () => {
+  const scenarios = core.buildScenarios({
+    close: 100, atr: 2, bias: 'Comprador',
+    supports: [96, 92], resistances: [104, 110],
+    structuralInvalidation: 98
+  });
+  assert.equal(scenarios.length, 3);
+  const base = scenarios.find((s) => s.name === 'base');
+  assert.equal(base.direction, 'long');
+  assert.equal(base.trigger, 104, 'gatilho = rompimento da resistencia');
+  assert.ok(base.target >= 110 || base.target >= 104 + 2, 'alvo no proximo nivel ou 2xATR');
+  assert.equal(base.invalidation, 98, 'invalidacao estrutural (CHoCH level), nao % arbitraria');
+  const alt = scenarios.find((s) => s.name === 'alternativo');
+  assert.equal(alt.direction, 'short');
+  const range = scenarios.find((s) => s.name === 'range');
+  assert.ok(range.lower === 96 && range.upper === 104);
+});
+
+test('backtest de lag: mede barras entre o topo real e o CHoCH nos dados diarios', () => {
+  // Serie sintetica com pullbacks (tendencia real tem pivots): sobe com zigue-zague, vira, desce.
+  const closes = Array.from({ length: 100 }, (_, i) => {
+    const trend = i < 50 ? 100 + i * 1.5 : 100 + 50 * 1.5 - (i - 50) * 1.5;
+    return trend + 3 * Math.sin(i * 1.1);
+  });
+  const candles = closes.map((close, i) => ({ time: i, close, high: close + 1.2, low: close - 1.2, volume: 100 }));
+  const lag = core.backtestDetectorLag(candles);
+  assert.ok(lag.tops.count >= 1, 'detectou pelo menos um topo real');
+  assert.ok(lag.tops.detected >= 1, 'CHoCH disparou apos o topo');
+  assert.ok(Number.isFinite(lag.tops.medianLagBars) && lag.tops.medianLagBars >= 1 && lag.tops.medianLagBars <= 15, `lag mediano plausivel, veio ${lag.tops.medianLagBars}`);
+});
+
 function mtfRow(interval, score) { return { interval, score }; }
 
 test('MTF: alignment conta apenas timeframes alinhados COM a direcao do bias', () => {
