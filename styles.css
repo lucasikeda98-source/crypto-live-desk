@@ -95,6 +95,7 @@ h3 { font-size: 14px; color: var(--muted); margin-bottom: 8px; }
 .entry-card.long strong { color: var(--green); }
 .entry-card.wait strong { color: var(--amber); }
 .entry-card.avoid strong { color: var(--red); }
+.entry-card.short strong { color: var(--red); }
 .entry-card small { color: var(--muted); }
 .score-stack { display: grid; gap: 8px; }
 .score-row { display: grid; gap: 5px; }

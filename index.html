@@ -351,6 +351,7 @@
           <div class="section-head compact"><div><h2>Plano operacional</h2><p>Faixas calculadas por ATR, estrutura e invalidacao.</p></div><span id="tradePlanSide">--</span></div>
           <div id="tradePlanGrid" class="trade-plan-grid"></div>
           <p id="tradePlanRationale" class="mini-caption">--</p>
+          <p id="scenarioLines" class="mini-caption">--</p>
         </div>
       </section>
 
@@ -476,6 +477,30 @@
             </table>
           </div>
           <p class="mini-caption">Acerto: retorno 24h na direcao do score (>= +20 espera alta; <= -20 espera baixa; neutro espera |retorno| menor que 1,5%). Amostras pequenas nao validam o modelo.</p>
+        </div>
+        <div class="panel signals-panel">
+          <div class="section-head compact board-head">
+            <div><h2>Motor de sinais v2 (trades simulados)</h2><p>State machine por par+TF: entrada exige score, gatilho nomeado, gate HTF e ausencia de veto; saida por stop estrutural, alvo, reversao, deterioracao ou tempo.</p></div>
+            <div class="board-actions">
+              <button id="lagBacktestButton" class="chip-button" type="button">Backtest de lag (diario)</button>
+              <button id="clearTradesButton" class="chip-button" type="button">Limpar trades</button>
+            </div>
+          </div>
+          <p id="activeTradeLine" class="mini-caption">Sem posicao simulada aberta neste par/TF.</p>
+          <p id="lagBacktestLine" class="mini-caption">--</p>
+          <div class="explanation-table-wrap">
+            <table class="explanation-table">
+              <thead><tr><th>Fechado</th><th>Par</th><th>TF</th><th>Lado</th><th>Gatilho</th><th>Regime</th><th>P&L%</th><th>R</th><th>MAE/MFE</th><th>Barras</th><th>Saida</th></tr></thead>
+              <tbody id="tradeRows"><tr><td colspan="11">Nenhum trade simulado fechado nesta versao do modelo.</td></tr></tbody>
+            </table>
+          </div>
+          <div class="explanation-table-wrap">
+            <table class="explanation-table">
+              <thead><tr><th>Regime</th><th>Gatilho</th><th>Faixa</th><th>Trades</th><th>Acerto</th><th>R medio</th><th>Amostra</th></tr></thead>
+              <tbody id="tradeSummaryRows"><tr><td colspan="7">--</td></tr></tbody>
+            </table>
+          </div>
+          <p class="mini-caption">Base rates observadas; celulas com menos de 20 trades nao geram multiplicador de calibracao. Trades sao simulados no candle fechado, sem custos/slippage.</p>
         </div>
         <div class="panel alerts-panel">
           <div class="section-head compact"><h2>Alertas de transicao</h2><span id="alertsStatus">Desativados</span></div>

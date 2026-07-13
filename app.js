@@ -1,5 +1,5 @@
 (function () {
-  var MODEL_VERSION = '1.0.0-preview.4';
+  var MODEL_VERSION = '1.0.0-preview.5';
   var AnalyticsCore = window.CryptoAnalyticsCore;
   if (!AnalyticsCore) throw new Error('CryptoAnalyticsCore nao foi carregado.');
   var RULESET_HASH = AnalyticsCore.rulesetHash();
@@ -79,7 +79,7 @@
     ARBUSDT: { gecko: 'arbitrum', paprika: 'arb-arbitrum', chain: 'Arbitrum', kind: 'Ethereum L2', narrative: 'ARB depende de TVL, volume DEX, atividade de L2 e calendario de desbloqueios.' },
     OPUSDT: { gecko: 'optimism', paprika: 'op-optimism', chain: 'Optimism', kind: 'Ethereum L2', narrative: 'OP reage a atividade do Superchain, TVL, receitas de L2 e desbloqueios de tokens.' }
   };
-  var state = { symbol: 'BTCUSDT', interval: '5m', view: 'dashboard', assetTab: 'summary', live: true, refreshing: false, pendingRefresh: false, boardRefreshing: false, boardPendingRefresh: false, contextRefreshing: false, chainRefreshing: false, timer: null, klines: [], analysis: null, board: [], boardFetchedAt: 0, boardInterval: '', sort: 'score', chain: null, chainFetchedAt: 0, news: [], newsFetchedAt: 0, newsAttemptedAt: 0, newsMode: 'auto', newsSources: [], external: {}, externalFetchedAt: 0, derivativeCache: {}, mtfCache: {}, mtf: null, historyProfiles: {}, historyCandles: {}, historyLoading: {}, historySweepStarted: false, coinMetricsCache: {}, coinMetrics: null, optionsCache: {}, options: null, optionsFetchedAt: 0, institutionalCache: {}, institutional: null, institutionalFetchedAt: 0, liquidations: [], liquidationSocket: null, liquidationSymbol: '', liquidationConnected: false, liquidationReconnectTimer: null, apiHealth: {}, boardFailures: {}, quantChecks: null, chart: { ema9: true, ema21: true, ema50: true, ema200: false, bb: false, vwap: false, supertrend: false, levels: true, fib: false, patterns: true, candles: 120 } };
+  var state = { symbol: 'BTCUSDT', interval: '5m', view: 'dashboard', assetTab: 'summary', live: true, refreshing: false, pendingRefresh: false, boardRefreshing: false, boardPendingRefresh: false, contextRefreshing: false, chainRefreshing: false, timer: null, klines: [], analysis: null, board: [], boardFetchedAt: 0, boardInterval: '', sort: 'score', chain: null, chainFetchedAt: 0, news: [], newsFetchedAt: 0, newsAttemptedAt: 0, newsMode: 'auto', newsSources: [], external: {}, externalFetchedAt: 0, derivativeCache: {}, mtfCache: {}, mtf: null, historyProfiles: {}, historyCandles: {}, historyLoading: {}, historySweepStarted: false, coinMetricsCache: {}, coinMetrics: null, optionsCache: {}, options: null, optionsFetchedAt: 0, institutionalCache: {}, institutional: null, institutionalFetchedAt: 0, liquidations: [], liquidationSocket: null, liquidationSymbol: '', liquidationConnected: false, liquidationReconnectTimer: null, apiHealth: {}, boardFailures: {}, signalMachineEval: {}, quantChecks: null, chart: { ema9: true, ema21: true, ema50: true, ema200: false, bb: false, vwap: false, supertrend: false, levels: true, fib: false, patterns: true, candles: 120 } };
   var $ = function (id) { return document.getElementById(id); };
   function analysisMatchesSelection(analysis) {
     if (!analysis) return false;
@@ -272,14 +272,16 @@
     // so old data neither lingers nor eats into the localStorage quota.
     try {
       var keepHistoryPrefix = 'liveDesk.history.' + MODEL_VERSION + '.';
-      var keepJournalKey = 'cld-signal-journal:' + MODEL_VERSION;
+      var versionedPrefixes = ['cld-signal-journal:', 'cld-signal-machine:', 'cld-signal-trades:'];
       var stale = [];
       for (var i = 0; i < localStorage.length; i++) {
         var key = localStorage.key(i);
         if (!key) continue;
         var staleHistory = key.indexOf('liveDesk.history.') === 0 && key.indexOf(keepHistoryPrefix) !== 0;
-        var staleJournal = key.indexOf('cld-signal-journal:') === 0 && key !== keepJournalKey;
-        if (staleHistory || staleJournal) stale.push(key);
+        var staleVersioned = versionedPrefixes.some(function (prefix) {
+          return key.indexOf(prefix) === 0 && key !== prefix + MODEL_VERSION;
+        });
+        if (staleHistory || staleVersioned) stale.push(key);
       }
       stale.forEach(function (key) { try { localStorage.removeItem(key); } catch (removeError) { /* ignore */ } });
       return stale.length;
@@ -680,6 +682,20 @@
     var deltaSum = candleFlow.deltaSum;
     var avgVol = candleFlow.averageVolume;
     var lastVol = candleFlow.lastVolume;
+    // Ciclo B: deteccao rapida de virada — estrutura (CHoCH/BOS), divergencia RSI/OBV nos dois
+    // ultimos pivots, exaustao por climax de volume e squeeze BB/Keltner com liberacao.
+    var obvValues = AnalyticsCore.obvSeries(candles);
+    var structureShift = AnalyticsCore.detectStructureShift(candles, pv.highs, pv.lows);
+    var rsiDivergence = AnalyticsCore.detectDivergence(candles, rsiValues, pv.highs, pv.lows);
+    var obvDivergence = AnalyticsCore.detectDivergence(candles, obvValues, pv.highs, pv.lows);
+    var divergence = {
+      bearish: rsiDivergence.bearish || obvDivergence.bearish,
+      bullish: rsiDivergence.bullish || obvDivergence.bullish,
+      double: (rsiDivergence.bearish && obvDivergence.bearish) || (rsiDivergence.bullish && obvDivergence.bullish)
+    };
+    var divergenceScore = (divergence.bullish ? 5 : 0) + (divergence.bearish ? -5 : 0);
+    var volumeClimax = AnalyticsCore.detectVolumeClimax(candles, atr14);
+    var squeeze = AnalyticsCore.detectSqueeze(candles, { deltaSum: deltaSum });
     var funding = premium ? +premium.lastFundingRate : NaN;
     var basis = premium ? (+premium.markPrice - +premium.indexPrice) : NaN;
     var currentBar = last(candles);
@@ -689,14 +705,14 @@
     var trendScore = (Number.isFinite(ema9) ? (close > ema9 ? 6 : -6) : 0) + (Number.isFinite(ema21) ? (close > ema21 ? 8 : -8) : 0) + (Number.isFinite(ema50) ? (close > ema50 ? 10 : -10) : 0) + (Number.isFinite(ema21) && Number.isFinite(ema50) ? (ema21 > ema50 ? 8 : -8) : 0) + (adxNow.adx > 25 && adxNow.plus > adxNow.minus ? 4 : adxNow.adx > 25 && adxNow.minus > adxNow.plus ? -4 : 0);
     var momScore = (Number.isFinite(rsi14) ? (rsi14 > 52 && rsi14 < 70 ? 12 : rsi14 >= 78 ? -8 : rsi14 >= 70 ? 3 : rsi14 < 35 ? -10 : 0) : 0) + (Number.isFinite(macdNow.hist) ? (macdNow.hist > 0 ? 8 : -8) : 0) + (Number.isFinite(stochRsi14) ? (stochRsi14 > 80 ? -3 : stochRsi14 < 20 ? 3 : 0) : 0);
     var flowScore = candleFlow.score;
-    var derivScore = 0;
-    derivScore += AnalyticsCore.calculateFundingContribution(funding);
+    var fundingScore = AnalyticsCore.calculateFundingContribution(funding);
+    var derivScore = fundingScore;
     if (Number.isFinite(basis)) derivScore += basis > 0 ? 3 : -3;
     var chainScore = options.chainScore || 0;
     var bookScore = options.bookScore || 0;
-    var score = clamp(Math.round(trendScore + momScore + flowScore + derivScore + chainScore + bookScore), -100, 100);
+    var score = clamp(Math.round(trendScore + momScore + flowScore + derivScore + chainScore + bookScore + structureShift.score + divergenceScore + squeeze.score), -100, 100);
     var bias = biasFromScore(score);
-    return { modelVersion: MODEL_VERSION, close: close, ema9: ema9, ema21: ema21, ema20: ema20, ema50: ema50, ema200: ema200, rsi14: rsi14, rsiValues: rsiValues, stochRsi14: stochRsi14, mfi14: mfi14, atr14: atr14, macd: macdNow, macdData: macdData, bb: bb, bbPctB: bbPctB, bbWidth: bbWidth, vwap: vwapNow, adx: adxNow, supertrend: supertrendNow, keltner: keltnerNow, donchian: donchianNow, roc12: roc12, obv: obvNow, cmf20: cmf20, realizedVol30: realizedVol30, zScore20: zScore20, williams14: williams14, cci20: cci20, ichimoku: ichimokuNow, fvg: fvg, patterns: patterns, displacement: displacement, regime: regime, supports: supports, resistances: resistances, structure: structure, sweepDown: sweepDown, sweepUp: sweepUp, priorLow: priorLow, priorHigh: priorHigh, deltaSum: deltaSum, avgVol: avgVol, lastVol: lastVol, funding: funding, basis: basis, score: score, bias: bias, trendScore: trendScore, momScore: momScore, flowScore: flowScore, flowAvailable: candleFlow.available, flowCoverage: candleFlow.coverage, candleCount: candles.length, derivScore: derivScore, chainScore: chainScore, bookScore: bookScore, ticker: ticker };
+    return { modelVersion: MODEL_VERSION, close: close, ema9: ema9, ema21: ema21, ema20: ema20, ema50: ema50, ema200: ema200, rsi14: rsi14, rsiValues: rsiValues, stochRsi14: stochRsi14, mfi14: mfi14, atr14: atr14, macd: macdNow, macdData: macdData, bb: bb, bbPctB: bbPctB, bbWidth: bbWidth, vwap: vwapNow, adx: adxNow, supertrend: supertrendNow, keltner: keltnerNow, donchian: donchianNow, roc12: roc12, obv: obvNow, cmf20: cmf20, realizedVol30: realizedVol30, zScore20: zScore20, williams14: williams14, cci20: cci20, ichimoku: ichimokuNow, fvg: fvg, patterns: patterns, displacement: displacement, regime: regime, supports: supports, resistances: resistances, structure: structure, sweepDown: sweepDown, sweepUp: sweepUp, priorLow: priorLow, priorHigh: priorHigh, deltaSum: deltaSum, avgVol: avgVol, lastVol: lastVol, funding: funding, basis: basis, score: score, bias: bias, trendScore: trendScore, momScore: momScore, flowScore: flowScore, fundingScore: fundingScore, structureShift: structureShift, divergence: divergence, divergenceScore: divergenceScore, volumeClimax: volumeClimax, squeeze: squeeze, flowAvailable: candleFlow.available, flowCoverage: candleFlow.coverage, candleCount: candles.length, derivScore: derivScore, chainScore: chainScore, bookScore: bookScore, ticker: ticker };
   }
   function depthWindow(depth, mid, pct) {
     var bidQty = 0, askQty = 0, bidNotional = 0, askNotional = 0;
@@ -1141,11 +1157,12 @@
     }
     var finiteOr = function (value, fallback) { var parsed = AnalyticsCore.toFiniteNumber(value); return parsed === null ? fallback : parsed; };
     if (market) {
-      var d24 = finiteOr(market.price_change_percentage_24h_in_currency, finiteOr(market.price_change_percentage_24h, NaN));
+      // d24 fica fora: o momentum de 24h ja e componente proprio do radar (momentum24h) e
+      // entrava duplicado aqui; o bloco fundamental le posicionamento de medio prazo (7d/30d).
       var d7 = finiteOr(market.price_change_percentage_7d_in_currency, NaN);
       var d30 = finiteOr(market.price_change_percentage_30d_in_currency, NaN);
-      var assetRaw = (Number.isFinite(d24) ? d24 * 1.1 : 0) + (Number.isFinite(d7) ? d7 * 0.35 : 0) + (Number.isFinite(d30) ? d30 * 0.1 : 0);
-      asset = Number.isFinite(d24) || Number.isFinite(d7) || Number.isFinite(d30) ? clamp(Math.round(assetRaw), -12, 12) : 0;
+      var assetRaw = (Number.isFinite(d7) ? d7 * 0.45 : 0) + (Number.isFinite(d30) ? d30 * 0.15 : 0);
+      asset = Number.isFinite(d7) || Number.isFinite(d30) ? clamp(Math.round(assetRaw), -12, 12) : 0;
       if (finiteOr(market.market_cap_rank, Infinity) <= 10) asset += 1;
     }
     if (chain) {
@@ -1185,7 +1202,7 @@
     var macroChecks = [!!news.items.length || state.newsMode !== 'auto', fearGreedEligible(state.external), macroSourceAvailable(state.external.macro) || activeTradFiAssets(state.external.tradfi).length > 0];
     var fundamentalChecks = [!!ext.market, !!(ext.chain || ext.protocol)];
     var parts = [
-      { name: 'Tecnica', ruleId: 'radar.technical.v1', weight: 30, available: Number.isFinite(analysis.trendScore) && Number.isFinite(analysis.momScore), value: clamp(((analysis.trendScore + analysis.momScore) / 60) * 100, -100, 100), quality: Math.min(1, (analysis.candleCount || 0) / 220), raw: analysis.trendScore + analysis.momScore, scope: 'symbol', reason: 'EMAs, RSI, MACD, ADX e estrutura do timeframe' },
+      { name: 'Tecnica', ruleId: 'radar.technical.v2', weight: 30, available: Number.isFinite(analysis.trendScore) && Number.isFinite(analysis.momScore), value: clamp(((analysis.trendScore + analysis.momScore + (analysis.structureShift ? analysis.structureShift.score : 0) + (analysis.divergenceScore || 0) + (analysis.squeeze ? analysis.squeeze.score : 0)) / 60) * 100, -100, 100), quality: Math.min(1, (analysis.candleCount || 0) / 220), raw: analysis.trendScore + analysis.momScore + (analysis.structureShift ? analysis.structureShift.score : 0) + (analysis.divergenceScore || 0) + (analysis.squeeze ? analysis.squeeze.score : 0), scope: 'symbol', reason: 'EMAs, RSI, MACD, ADX, estrutura, CHoCH/BOS, divergencia e squeeze do timeframe' },
       { name: 'Fluxo', ruleId: 'radar.flow.v1', weight: 15, available: analysis.flowAvailable === true, value: clamp((analysis.flowScore / 18) * 100, -100, 100), quality: Number.isFinite(analysis.flowCoverage) ? analysis.flowCoverage : 0, raw: analysis.flowScore, scope: 'symbol', reason: 'Delta taker, volume relativo e CMF' },
       { name: 'Derivativos', ruleId: 'radar.derivatives.v1', weight: 10, available: Number.isFinite(analysis.funding) || Number.isFinite(analysis.basis), value: clamp((analysis.derivScore / 9) * 100, -100, 100), quality: ((Number.isFinite(analysis.funding) ? 1 : 0) + (Number.isFinite(analysis.basis) ? 1 : 0)) / 2, raw: analysis.derivScore, scope: 'symbol', reason: 'Funding e basis dos perpetuos Binance' },
       { name: 'Fundamental', ruleId: 'radar.fundamental.v1', weight: 15, available: extEligible && !!(ext.market || ext.chain || ext.protocol), value: clamp(((ext.asset + ext.defi) / 22) * 100, -100, 100), quality: fundamentalChecks.filter(Boolean).length / fundamentalChecks.length, raw: ext.asset + ext.defi, scope: 'symbol', reason: 'Mercado CoinGecko e TVL DeFiLlama mapeados' },
@@ -1235,10 +1252,13 @@
     var cross = (a.patterns || []).find(function (pattern) { return pattern.name === 'Golden cross' || pattern.name === 'Death cross'; });
     return { interval: interval, score: score, bias: score >= 12 ? 'Alta' : score <= -12 ? 'Baixa' : 'Neutro', close: a.close, closeTime: candles.length ? last(candles).closeTime : NaN, rsi: a.rsi14, adx: a.adx.adx, macd: a.macd.hist, structure: a.structure, regime: a.regime, cross: cross ? cross.name : (Number.isFinite(a.ema200) ? (a.ema50 >= a.ema200 ? 'EMA50 > EMA200' : 'EMA50 < EMA200') : 'sem EMA200'), patterns: (a.patterns || []).slice(0, 3) };
   }
-  function summarizeMultiTimeframe(rows) {
+  function summarizeMultiTimeframe(rows, selectedInterval) {
     // Aggregation (weights, directional alignment, bias) lives in the lib so it is tested and
     // covered by the ruleset registry; this wrapper only reattaches the rows for rendering.
-    return Object.assign({ rows: rows }, AnalyticsCore.aggregateMultiTimeframe(rows));
+    // The chart's own timeframe is EXCLUDED from the aggregate: it is already fully scored by
+    // the technical bucket, and the MTF block must measure INDEPENDENT confirmation.
+    var aggregationRows = rows.filter(function (row) { return row.interval !== selectedInterval; });
+    return Object.assign({ rows: rows }, AnalyticsCore.aggregateMultiTimeframe(aggregationRows));
   }
   async function loadMultiTimeframe(symbol, selectedInterval, force, selectedCandles) {
     var intervals = MTF_INTERVALS.concat([selectedInterval]).filter(function (value, index, array) { return array.indexOf(value) === index; });
@@ -1251,12 +1271,15 @@
         var path = '/api/v3/klines?symbol=' + encodeURIComponent(symbol) + '&interval=' + interval + '&limit=500';
         candles = selectClosedCandles(parseKlines(await fetchSpotJSON(path, 12000, 'Binance MTF')));
       }
-      if (!candles || candles.length < 60) return null;
+      // The weekly leg needs a lower floor: demanding 60 closed weekly candles (~14 months of
+      // listing) would deny the HTF gate — and thus 'Entrada favoravel' — to newer listings
+      // forever. 30 weekly candles still give EMA21/structure a meaningful read.
+      if (!candles || candles.length < (interval === '1w' ? 30 : 60)) return null;
       var snapshot = technicalSnapshot(candles, interval);
       state.mtfCache[key] = { value: snapshot, fetchedAt: Date.now() };
       return snapshot;
     }));
-    return summarizeMultiTimeframe(results.map(value).filter(Boolean));
+    return summarizeMultiTimeframe(results.map(value).filter(Boolean), selectedInterval);
   }
   function median(values) {
     if (!values.length) return NaN;
@@ -1269,36 +1292,73 @@
     var closes = candles.map(function (c) { return c.close; });
     var ema50Rows = emaSeries(closes, 50), ema200Rows = emaSeries(closes, 200), rsiRows = rsiSeries(closes, 14);
     var lastIndex = closes.length - 1;
-    var currentSignature = { above200: closes[lastIndex] > ema200Rows[lastIndex], bullCross: ema50Rows[lastIndex] > ema200Rows[lastIndex], rsi: rsiBucket(rsiRows[lastIndex]) };
+    // Tercil de volatilidade realizada (30d) na assinatura: o mesmo padrao tecnico em regime de
+    // vol baixa e de vol alta tem distribuicoes de retorno diferentes.
+    var volRows = closes.map(function (_, index) {
+      if (index < 31) return NaN;
+      return realizedVolatility(closes.slice(index - 31, index + 1), 30, '1d');
+    });
+    var sortedVol = volRows.filter(Number.isFinite).slice().sort(function (a, b) { return a - b; });
+    function volTercile(value) {
+      if (!Number.isFinite(value) || sortedVol.length < 30) return 1;
+      if (value <= sortedVol[Math.floor(sortedVol.length / 3)]) return 0;
+      if (value <= sortedVol[Math.floor(sortedVol.length * 2 / 3)]) return 1;
+      return 2;
+    }
+    var currentSignature = { above200: closes[lastIndex] > ema200Rows[lastIndex], bullCross: ema50Rows[lastIndex] > ema200Rows[lastIndex], rsi: rsiBucket(rsiRows[lastIndex]), vol: volTercile(volRows[lastIndex]) };
+    var HALF_LIFE_DAYS = 730;
     function collect(relaxed) {
       var matches = [];
+      var lastMatchIndex = -Infinity;
       for (var i = 200; i < candles.length - 30; i++) {
         if (!Number.isFinite(ema200Rows[i]) || !Number.isFinite(rsiRows[i])) continue;
+        // Espacamento minimo de 5 dias entre matches: dias consecutivos do mesmo regime sao a
+        // MESMA amostra com retornos sobrepostos, nao amostras independentes.
+        if (i - lastMatchIndex < 5) continue;
         var sameDirection = (closes[i] > ema200Rows[i]) === currentSignature.above200;
         var sameCross = (ema50Rows[i] > ema200Rows[i]) === currentSignature.bullCross;
         var sameRsi = Math.abs(rsiBucket(rsiRows[i]) - currentSignature.rsi) <= (relaxed ? 1 : 0);
-        if (sameDirection && sameCross && sameRsi) {
-          matches.push({ d1: ((closes[i + 1] - closes[i]) / closes[i]) * 100, d7: ((closes[i + 7] - closes[i]) / closes[i]) * 100, d30: ((closes[i + 30] - closes[i]) / closes[i]) * 100 });
+        var sameVol = relaxed || volTercile(volRows[i]) === currentSignature.vol;
+        if (sameDirection && sameCross && sameRsi && sameVol) {
+          lastMatchIndex = i;
+          var ageDays = lastIndex - i;
+          matches.push({
+            d1: ((closes[i + 1] - closes[i]) / closes[i]) * 100,
+            d7: ((closes[i + 7] - closes[i]) / closes[i]) * 100,
+            d30: ((closes[i + 30] - closes[i]) / closes[i]) * 100,
+            // Decay temporal: meia-vida ~2 anos; um match de 2018 nao vale o mesmo que um de 2026.
+            weight: Math.pow(0.5, ageDays / HALF_LIFE_DAYS)
+          });
         }
       }
       return matches;
     }
     var matches = collect(false);
-    if (matches.length < 20) matches = collect(true);
+    if (matches.length < 12) matches = collect(true);
+    var weights = matches.map(function (x) { return x.weight; });
     var d1 = matches.map(function (x) { return x.d1; }), d7 = matches.map(function (x) { return x.d7; }), d30 = matches.map(function (x) { return x.d30; });
+    // Base rate incondicional: mediana de TODOS os retornos de 7d do ativo. O historico so deve
+    // pontuar o EXCESSO do regime sobre a deriva natural do ativo (fix pro-ciclico).
+    var unconditional7 = [];
+    for (var u = 200; u < closes.length - 7; u++) unconditional7.push(((closes[u + 7] - closes[u]) / closes[u]) * 100);
+    var baseline7 = median(unconditional7);
+    var baselineWin7 = unconditional7.length ? unconditional7.filter(function (v) { return v > 0; }).length / unconditional7.length * 100 : 50;
     var peak = closes[0], maxDrawdown = 0;
     closes.forEach(function (close) { peak = Math.max(peak, close); maxDrawdown = Math.min(maxDrawdown, ((close - peak) / peak) * 100); });
     var winRate7 = d7.length ? d7.filter(function (value) { return value > 0; }).length / d7.length * 100 : NaN;
-    var median7 = median(d7), score = 0;
-    if (Number.isFinite(median7)) score += clamp(Math.round(median7 * 2.2), -8, 8);
-    if (Number.isFinite(winRate7)) score += clamp(Math.round((winRate7 - 50) / 4), -4, 4);
+    var median7 = AnalyticsCore.weightedMedian(d7, weights);
+    var excess7 = Number.isFinite(median7) && Number.isFinite(baseline7) ? median7 - baseline7 : NaN;
+    var score = 0;
+    if (Number.isFinite(excess7)) score += clamp(Math.round(excess7 * 2.2), -8, 8);
+    if (Number.isFinite(winRate7)) score += clamp(Math.round((winRate7 - baselineWin7) / 4), -4, 4);
     var latestCandle = last(candles);
     return {
       fetchedAt: Date.now(), observedAt: latestCandle.closeTime || latestCandle.time + 86400000, candles: candles.length, listingTime: candles[0].time, maxDrawdown: maxDrawdown,
       realizedVol30: realizedVolatility(closes, 30, '1d'), realizedVol90: realizedVolatility(closes, 90, '1d'),
-      samples: matches.length, winRate1: d1.length ? d1.filter(function (value) { return value > 0; }).length / d1.length * 100 : NaN,
+      samples: matches.length, independentSamples: true, volTercile: currentSignature.vol, baseline7: baseline7, excess7: excess7,
+      winRate1: d1.length ? d1.filter(function (value) { return value > 0; }).length / d1.length * 100 : NaN,
       winRate7: winRate7, winRate30: d30.length ? d30.filter(function (value) { return value > 0; }).length / d30.length * 100 : NaN,
-      median1: median(d1), median7: median7, median30: median(d30), score: clamp(score, -12, 12)
+      median1: AnalyticsCore.weightedMedian(d1, weights), median7: median7, median30: AnalyticsCore.weightedMedian(d30, weights), score: clamp(score, -12, 12)
     };
   }
   function historyFresh(profile) {
@@ -1463,7 +1523,12 @@
   function dataQuality(a) {
     var closedCount = selectClosedCandles(state.klines).length;
     var technicalQuality = Math.min(1, closedCount / 220);
-    var mtfQuality = Math.min(1, ((state.mtf && state.mtf.rows.length) || 0) / 5);
+    // Quality = coverage of the CANONICAL timeframes (the weekly leg matters most), not raw row
+    // count — the chart TF row used to inflate this while 1w was missing.
+    var mtfRows = (state.mtf && state.mtf.rows) || [];
+    var mtfQuality = MTF_INTERVALS.filter(function (interval) {
+      return mtfRows.some(function (row) { return row.interval === interval; });
+    }).length / MTF_INTERVALS.length;
     var historyQuality = historyFresh(a.history) ? Math.min(1, (a.history.samples || 0) / 20) : 0;
     var flowChecks = [Number.isFinite(a.deltaSum) && Number.isFinite(a.cmf20), Number.isFinite(a.spreadBps) && Number.isFinite(a.buySlipBps)];
     var flowQuality = flowChecks.filter(Boolean).length / flowChecks.length;
@@ -1508,13 +1573,46 @@
   function buildConfluence(a) {
     var news = scoreNews(state.symbol);
     var external = a.external && eligibleDataset(a.external) ? a.external : scoreExternalContext(state.symbol);
-    var technical = clamp(Math.round(a.trendScore * 0.32 + a.momScore * 0.42), -20, 20);
+    // CHoCH/BOS e divergencia entram no tecnico com peso integral (nao diluidos pelos fatores
+    // 0.32/0.42 dos scores continuos) — sao eventos discretos de virada.
+    var technical = clamp(Math.round(a.trendScore * 0.32 + a.momScore * 0.42 + (a.structureShift ? a.structureShift.score : 0) + (a.divergenceScore || 0)), -20, 20);
     var multi = state.mtf || { score: 0, alignment: 0, bias: 'Misto', rows: [] };
     var smart = smartMoneyAnalysis(a);
-    var flow = clamp(Math.round(a.flowScore * 0.48 + a.bookScore * 0.35 + smart.score * 0.55), -18, 18);
+    var trapScore = a.trap && a.trap.trap ? a.trap.score : 0;
+    var squeezeScore = a.squeeze ? a.squeeze.score : 0;
+    var flow = clamp(Math.round(a.flowScore * 0.48 + a.bookScore * 0.35 + smart.score * 0.55 + trapScore + squeezeScore), -18, 18);
     var optionsData = a.options || state.options;
-    var derivativeDetail = AnalyticsCore.calculateDerivativeDetailContribution({ detail: a.derivativeDetail, options: optionsData, close: a.close, vwap: a.vwap, oiPriceChangePct: a.oiPriceChangePct, asOf: Date.now() });
-    var derivatives = clamp(Math.round(a.derivScore * 1.25 + derivativeDetail), -12, 12);
+    var detailPercentiles = a.derivativeDetail && a.derivativeDetail.percentiles ? a.derivativeDetail.percentiles : {};
+    // Carry only scores from ELIGIBLE data — a stale cached fundingAvg must not keep injecting
+    // its carry read after the dataset was declared ineligible (same gate the detail scorer uses).
+    var confluenceAsOf = Date.now();
+    var detailFundingEligible = !!(a.derivativeDetail
+      && Number.isFinite(a.derivativeDetail.fundingAvg)
+      && AnalyticsCore.resolveDatasetFreshness(a.derivativeDetail, confluenceAsOf).eligibleForScore
+      && AnalyticsCore.isDatasetMetricEligible(a.derivativeDetail, 'fundingAvg', confluenceAsOf));
+    var carry = AnalyticsCore.calculateCarryRegime({
+      fundingAvg: detailFundingEligible ? a.derivativeDetail.fundingAvg : null,
+      oiPercentile: detailPercentiles.oi
+    });
+    var derivativeDetail = AnalyticsCore.calculateDerivativeDetailContribution({
+      detail: a.derivativeDetail,
+      options: optionsData,
+      close: a.close,
+      vwap: a.vwap,
+      oiPriceChangePct: a.oiPriceChangePct,
+      percentiles: detailPercentiles,
+      muteOiQuadrant: carry.muteBuildup,
+      priceChange7dPct: (function () {
+        var market = eligibleDataset(state.external.marketData) ? selectedMarket(state.symbol) : null;
+        return market ? AnalyticsCore.toFiniteNumber(market.price_change_percentage_7d_in_currency) : null;
+      })(),
+      asOf: Date.now()
+    });
+    // Funding no setup: a leitura RELATIVA (percentil/fundingAvg) vem do detail e a ancora
+    // ABSOLUTA (carry anualizado) vem do carry — lentes complementares. O fundingScore do
+    // premium so e subtraido quando o detail realmente pontuou funding; numa pane parcial do
+    // endpoint fundingRate, o funding ao vivo do premium volta a valer (nada de zerar o sinal).
+    var derivatives = clamp(Math.round((a.derivScore - (detailFundingEligible ? (a.fundingScore || 0) : 0)) * 1.25 + derivativeDetail + carry.carryScore), -12, 12);
     var scoreChain = eligibleDataset(a.coinMetrics) ? a.chainScore : (Number.isFinite(a.nativeChainScore) ? a.nativeChainScore : 0);
     var chain = clamp(Math.round(scoreChain + external.defi * 0.45 + external.asset * 0.2), -10, 10);
     var etfFlow = latestEtfFlow(a.institutional || state.institutional);
@@ -1530,42 +1628,71 @@
     if (Number.isFinite(a.bb.latestLower) && a.close < a.bb.latestLower && a.rsi14 <= 35) risk -= 6;
     if (a.sweepDown && a.close > a.vwap) risk += 5;
     if (a.sweepUp) risk -= 5;
-    if (volumeRatio > 1.45 && a.deltaSum > 0) risk += 4;
-    if (volumeRatio > 1.45 && a.deltaSum < 0) risk -= 4;
+    var climax = a.volumeClimax && a.volumeClimax.climax ? a.volumeClimax : null;
+    if (climax) {
+      // Volume climatico com fecho no terco oposto e exaustao: warning contra a tendencia,
+      // nunca o antigo bonus pro-tendencia por "volume alto".
+      risk += climax.direction === 'exhaustion-top' ? -5 : 5;
+    } else {
+      if (volumeRatio > 1.45 && a.deltaSum > 0) risk += 4;
+      if (volumeRatio > 1.45 && a.deltaSum < 0) risk -= 4;
+    }
     var liq = liquidationSummary();
     if (liq.total > 0 && liq.longValue > liq.shortValue * 2 && a.sweepDown) risk += 2;
     if (liq.total > 0 && liq.shortValue > liq.longValue * 2 && a.sweepUp) risk -= 2;
-    risk = clamp(risk, -10, 10);
+    risk = clamp(risk, -14, 14);
     var total = clamp(Math.round(technical + multi.score + flow + derivatives + chain + macro + historyScore + risk), -100, 100);
     var quality = dataQuality(a);
+    // Gate HTF: 1d e 1w precisam existir e nao podem estar ambos contra a direcao da entrada.
+    var htf1d = multi.rows ? multi.rows.find(function (row) { return row.interval === '1d'; }) : null;
+    var htf1w = multi.rows ? multi.rows.find(function (row) { return row.interval === '1w'; }) : null;
+    var htfGateAvailable = !!(htf1d && htf1w);
+    var htfVetoLong = htfGateAvailable && htf1d.bias === 'Baixa' && htf1w.bias === 'Baixa';
+    var htfVetoShort = htfGateAvailable && htf1d.bias === 'Alta' && htf1w.bias === 'Alta';
+    var trapVeto = activeTrapVeto(a);
     var decision = 'Sem entrada clara';
     var tone = 'wait';
-    if (total >= 60 && multi.bias === 'Alta' && multi.alignment >= 0.6 && quality >= 63) { decision = 'Entrada favoravel'; tone = 'long'; }
-    else if (total >= 42 && multi.score >= 0) { decision = 'Entrada com confirmacao'; tone = 'long'; }
+    // Ladder simetrico: o lado short existe com os MESMOS gates do lado long (o plano de trade e
+    // o motor v2 ja eram bidirecionais; o ladder dizia 'Evitar' enquanto o plano dizia short).
+    if (total >= 60 && multi.bias === 'Alta' && multi.alignment >= 0.6 && quality >= 63 && htfGateAvailable && !htfVetoLong) { decision = 'Entrada favoravel'; tone = 'long'; }
+    else if (total <= -60 && multi.bias === 'Baixa' && multi.alignment >= 0.6 && quality >= 63 && htfGateAvailable && !htfVetoShort) { decision = 'Entrada vendedora favoravel'; tone = 'short'; }
+    else if (total >= 42 && multi.score >= 0 && !htfVetoLong) { decision = 'Entrada com confirmacao'; tone = 'long'; }
+    else if (total <= -42 && multi.score <= 0 && !htfVetoShort) { decision = 'Entrada vendedora com confirmacao'; tone = 'short'; }
+    else if (total >= 42 && htfVetoLong) { decision = 'Gate HTF: 1d+1w baixistas vetam long'; tone = 'wait'; }
+    else if (total <= -42 && htfVetoShort) { decision = 'Gate HTF: 1d+1w altistas vetam short'; tone = 'wait'; }
     else if (total >= 20) { decision = 'Aguardar pullback'; tone = 'wait'; }
-    else if (total <= -45) { decision = 'Evitar / venda domina'; tone = 'avoid'; }
     else if (total <= -20) { decision = 'Cautela'; tone = 'avoid'; }
+    if (tone === 'long' && trapVeto === 'long') { decision = 'Veto pos-trap: aguardar ' + trapVetoBarsLeft(a) + ' barra(s)'; tone = 'wait'; }
+    if (tone === 'short' && trapVeto === 'short') { decision = 'Veto pos-trap: aguardar ' + trapVetoBarsLeft(a) + ' barra(s)'; tone = 'wait'; }
     if (quality < 40) { decision = 'Dados insuficientes'; tone = 'wait'; }
     var reasons = [
       { tone: technical > 7 ? 'good' : technical < -7 ? 'bad' : 'neutral', text: technical > 7 ? 'Tecnica do timeframe selecionado favorece compra.' : technical < -7 ? 'Tecnica do timeframe selecionado pesa contra.' : 'Tecnica local mista: falta rompimento ou reteste confirmado.' },
-      { tone: multi.score > 7 ? 'good' : multi.score < -7 ? 'bad' : 'neutral', text: multi.score > 7 ? 'Timeframes superiores confirmam tendencia de alta.' : multi.score < -7 ? 'Timeframes superiores divergem ou mantem tendencia de baixa.' : 'Multi-timeframe ainda sem alinhamento direcional forte.' },
+      { tone: multi.score > 5 ? 'good' : multi.score < -5 ? 'bad' : 'neutral', text: multi.score > 5 ? 'Demais timeframes confirmam tendencia de alta de forma independente.' : multi.score < -5 ? 'Demais timeframes divergem ou mantem tendencia de baixa.' : 'Multi-timeframe ainda sem alinhamento direcional forte.' },
       { tone: flow > 7 ? 'good' : flow < -7 ? 'bad' : 'neutral', text: flow > 7 ? 'Fluxo confirma: delta taker e livro mostram demanda no curto prazo.' : flow < -7 ? 'Fluxo pressiona: agressao vendedora ou ask dominando o livro.' : 'Fluxo equilibrado: livro e volume ainda nao confirmam direcao.' },
       { tone: derivatives > 4 ? 'good' : derivatives < -4 ? 'bad' : 'neutral', text: derivatives > 4 ? 'Derivativos dao apoio leve, sem excesso evidente no funding.' : derivatives < -4 ? 'Derivativos pedem cautela: funding/basis podem indicar trade lotado.' : 'Derivativos neutros, sem vantagem quantitativa clara.' },
       { tone: macro > 3 ? 'good' : macro < -3 ? 'bad' : 'neutral', text: macro > 3 ? 'Noticias e macro favorecem risco.' : macro < -3 ? 'Noticias e macro elevam risco negativo.' : 'Noticias e macro sem impulso dominante.' },
       { tone: historyScore > 3 ? 'good' : historyScore < -3 ? 'bad' : 'neutral', text: historyScore > 3 ? 'Ocorrencias historicas semelhantes tiveram expectativa positiva.' : historyScore < -3 ? 'Ocorrencias historicas semelhantes tiveram expectativa negativa.' : 'Historico semelhante neutro ou ainda com pouca amostra.' }
     ];
+    // Eventos discretos (trap/climax) entram na FRENTE das razoes continuas: sao eles que mudam a
+    // decisao (veto/warning) e nao podem ser cortados pelo slice final.
+    if (climax) {
+      reasons.unshift({ tone: 'bad', text: 'Climax de volume com fecho no terco oposto: exaustao provavel da perna ' + (climax.direction === 'exhaustion-top' ? 'de alta' : 'de baixa') + '; nao tratar volume como confirmacao.' });
+    }
+    if (a.trap && a.trap.trap) {
+      reasons.unshift({ tone: a.trap.score > 0 ? 'good' : 'bad', text: (a.trap.trap === 'bull' ? 'Bear trap: sweep de minima revertido com flip de delta' : 'Bull trap: sweep de maxima rejeitado com flip de delta') + (a.trap.confirmed ? ' e confirmacao de OI/liquidacao' : '') + '; entradas ' + (a.trap.vetoDirection === 'short' ? 'vendidas' : 'compradas') + ' vetadas por ' + a.trap.vetoBars + ' barras.' });
+    }
     if (risk !== 0) {
       reasons.push({ tone: risk > 0 ? 'good' : 'bad', text: risk > 0 ? 'Ajuste de risco melhora o setup por absorcao/volume.' : 'Ajuste de risco reduz o setup por esticamento, sweep contra ou volume vendedor.' });
     }
     var components = [
       { name: 'Tecnica', ruleId: 'setup.technical.v1', score: technical, max: 20, status: 'fresh', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines'], reason: 'trendScore*0.32 + momScore*0.42 do timeframe selecionado' },
-      { name: 'Multi-TF', ruleId: 'setup.mtf.v1', score: multi.score, max: 24, status: multi.rows && multi.rows.length ? 'fresh' : 'missing', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines'], reason: 'Confirmacao de tendencia em ' + ((multi.rows && multi.rows.length) || 0) + ' timeframes com candles fechados proprios' },
+      { name: 'Multi-TF', ruleId: 'setup.mtf.v2', score: multi.score, max: 16, status: multi.rows && multi.rows.length ? 'fresh' : 'missing', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines'], reason: 'Confirmacao INDEPENDENTE (TF do grafico excluido) + gate 1d/1w em ' + ((multi.rows && multi.rows.length) || 0) + ' timeframes' },
       { name: 'Smart/fluxo', ruleId: 'setup.flow.v1', score: flow, max: 18, status: a.flowAvailable ? 'fresh' : 'missing', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines', 'binance-spot-depth'], reason: 'flowScore*0.48 + book*0.35 + smart money*0.55' },
       { name: 'Derivativos', ruleId: 'setup.derivatives.v1', score: derivatives, max: 12, status: datasetStatus(a.derivativeDetail) || 'missing', scope: 'symbol', isProxy: false, sources: ['binance-futures', 'deribit-options'], reason: 'derivScore*1.25 + detalhe de OI/funding/taker/opcoes elegiveis' },
       { name: 'On-chain/fund.', ruleId: 'setup.chain.v1', score: chain, max: 10, status: eligibleDataset(a.coinMetrics) ? 'fresh' : a.coinMetrics ? datasetStatus(a.coinMetrics) : 'missing', scope: 'symbol', isProxy: !!(a.mempoolContext && a.mempoolContext.isProxy), sources: ['coinmetrics-community', 'defillama', 'mempool-space'], reason: 'chainScore + defi*0.45 + asset*0.2' },
       { name: 'Noticias/macro', ruleId: 'setup.macro.v1', score: macro, max: 10, status: news.items.length || state.newsMode !== 'auto' ? 'fresh' : 'missing', scope: 'market', isProxy: false, sources: ['rss-news', 'alternative-me', 'treasury-cboe', 'etf-flows'], reason: 'news*0.36 + sentimento*0.45 + global*0.45 + ETF' },
       { name: 'Historico', ruleId: 'setup.history.v1', score: historyScore, max: 12, status: history ? 'fresh' : historyCandidate ? 'stale' : 'missing', scope: 'symbol', isProxy: false, sources: ['binance-daily-history'], reason: history ? (history.samples || 0) + ' amostras de regimes semelhantes' : 'sem perfil historico fresco' },
-      { name: 'Risco', ruleId: 'setup.risk.v1', score: risk, max: 10, status: 'fresh', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines', 'binance-liquidations'], reason: 'Esticamento de bandas, sweeps, volume e liquidacoes' }
+      { name: 'Risco', ruleId: 'setup.risk.v2', score: risk, max: 14, status: 'fresh', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines', 'binance-liquidations'], reason: 'Esticamento de bandas, sweeps, climax de volume, traps e liquidacoes' }
     ];
     components.forEach(function (component) { component.contribution = component.score; });
     var reconciledTotal = components.reduce(function (sum, component) { return sum + component.score; }, 0);
@@ -1592,7 +1719,10 @@
       dataConfidence: quality,
       history: history,
       multi: multi,
-      reasons: reasons.slice(0, 6),
+      gates: { htfAvailable: htfGateAvailable, htfVetoLong: htfVetoLong, htfVetoShort: htfVetoShort, trapVeto: trapVeto },
+      trap: a.trap || null,
+      carry: carry,
+      reasons: reasons.slice(0, 8),
       components: components
     };
   }
@@ -1665,7 +1795,7 @@
     var detectedPatterns = (a.patterns || []).slice(0, 3).map(function (pattern) { return pattern.name; });
     var tradePlan = buildTradePlan(a);
     var operationalPlan = tradePlan.side === 'Aguardar' ? tradePlan.rationale + ' ' : 'Plano ' + tradePlan.side + ': ' + tradePlan.levels.map(function (level) { return level.label + ' ' + level.value; }).join(', ') + '. ';
-    var optionData = a.options || state.options, optionSentence = optionData && optionData.market && (optionData.isProxy || eligibleDataset(optionData)) ? (optionData.isProxy ? 'Como proxy BTC apenas informativo e fora do Setup Score, ' : 'Nas opcoes nativas ' + optionData.currency + ', ') + 'put/call OI esta em ' + num(+optionData.market.putCallOi, 2) + 'x, DVOL em ' + num(optionData.dvol && +optionData.dvol.latest, 1) + ' e IV ATM em ' + num(optionData.nearest && +optionData.nearest.atmIv, 1) + '%. ' : '';
+    var optionData = a.options || state.options, optionSentence = optionData && optionData.market && (optionData.isProxy || eligibleDataset(optionData)) ? (optionData.isProxy ? 'Como proxy BTC apenas informativo e fora do Setup Score, ' : 'Nas opcoes nativas ' + optionData.currency + ', ') + 'put/call OI esta em ' + num(+optionData.market.putCallOi, 2) + 'x' + (AnalyticsCore.toFiniteNumber(optionData.dvol && optionData.dvol.latest) !== null ? ', DVOL em ' + num(+optionData.dvol.latest, 1) : ', sem indice DVOL para esta moeda') + ' e IV ATM em ' + num(optionData.nearest && +optionData.nearest.atmIv, 1) + '%. ' : '';
     var exchangeFlow = eligibleDataset(a.coinMetrics) && a.coinMetrics.exchangeFlow, exchangeSentence = exchangeFlow && Number.isFinite(exchangeFlow.netflow7d) ? 'O netflow agregado de exchanges em ' + exchangeFlow.flowCoverageDays + ' de ' + exchangeFlow.flowWindowDays + ' dias cobertos e ' + compactMoney(exchangeFlow.netflow7d) + ' (positivo significa entrada liquida em exchanges). ' : '';
     var liqSummary = liquidationSummary(), liquidationSentence = liqSummary.total ? 'Nos ultimos 15 minutos, o stream observou ' + compactMoney(liqSummary.longValue) + ' em longs e ' + compactMoney(liqSummary.shortValue) + ' em shorts liquidados. ' : '';
     var etfValue = latestEtfFlow(a.institutional || state.institutional), etfSentence = Number.isFinite(etfValue) ? 'O ultimo ETF net flow disponivel e ' + compactMoney(etfValue) + '. ' : '';
@@ -1895,16 +2025,24 @@
     return Math.max(DERIVATIVES_REFRESH_MS * 3, unit * 2 * 60 * 1000);
   }
   function normalizeDerivativeDetail(oiHist, fundingRows, longShortRows, takerRows, topAccountRows, topPositionRows, basisRows) {
+    // oiChangePct keeps its ORIGINAL 30-period window (the quadrant, trap flush threshold and
+    // priceChangeOverWindow were all calibrated on it); the full 500-row series feeds ONLY the
+    // percentile engine — mirroring how fundingAvg kept its 12-settlement meaning.
+    var oiWindow = Array.isArray(oiHist) ? oiHist.slice(-30) : [];
     var oiChangePct = NaN, oiWindowStart = NaN, oiWindowEnd = NaN;
-    if (Array.isArray(oiHist) && oiHist.length > 1) {
-      var firstOi = +oiHist[0].sumOpenInterestValue || +oiHist[0].sumOpenInterest || 0;
-      var lastOi = +oiHist[oiHist.length - 1].sumOpenInterestValue || +oiHist[oiHist.length - 1].sumOpenInterest || 0;
+    if (oiWindow.length > 1) {
+      var firstOi = +oiWindow[0].sumOpenInterestValue || +oiWindow[0].sumOpenInterest || 0;
+      var lastOi = +oiWindow[oiWindow.length - 1].sumOpenInterestValue || +oiWindow[oiWindow.length - 1].sumOpenInterest || 0;
       oiChangePct = firstOi ? ((lastOi - firstOi) / firstOi) * 100 : NaN;
-      oiWindowStart = +oiHist[0].timestamp;
-      oiWindowEnd = +oiHist[oiHist.length - 1].timestamp;
+      oiWindowStart = +oiWindow[0].timestamp;
+      oiWindowEnd = +oiWindow[oiWindow.length - 1].timestamp;
     }
-    var fundingAvg = NaN;
-    if (Array.isArray(fundingRows) && fundingRows.length) fundingAvg = avg(fundingRows.map(function (row) { return +row.fundingRate; }).filter(Number.isFinite));
+    var fundingAvg = NaN, fundingSeries = [];
+    if (Array.isArray(fundingRows) && fundingRows.length) {
+      fundingSeries = fundingRows.map(function (row) { return +row.fundingRate; }).filter(Number.isFinite);
+      // fundingAvg keeps its original 12-settlement (~4d) meaning; the full series feeds percentiles.
+      fundingAvg = avg(fundingSeries.slice(-12));
+    }
     var latestLongShort = Array.isArray(longShortRows) && longShortRows.length ? longShortRows[longShortRows.length - 1] : null;
     var latestTaker = Array.isArray(takerRows) && takerRows.length ? takerRows[takerRows.length - 1] : null;
     var latestTopAccount = Array.isArray(topAccountRows) && topAccountRows.length ? topAccountRows[topAccountRows.length - 1] : null;
@@ -1920,10 +2058,40 @@
       basisRate: latestRowsObservedAt([basisRows])
     };
     var observedTimes = Object.keys(metricObservedAt).map(function (key) { return metricObservedAt[key]; }).filter(Number.isFinite);
+    // Percentile of the CURRENT reading within the asset's own fetched history. percentileRank
+    // returns null under 30 samples, which downstream treats as "use the fixed threshold".
+    var seriesOf = function (rows, selector) {
+      return Array.isArray(rows) ? rows.map(selector).filter(Number.isFinite) : [];
+    };
+    var oiSeries = seriesOf(oiHist, function (row) { return +row.sumOpenInterestValue || +row.sumOpenInterest; });
+    var longShortSeries = seriesOf(longShortRows, function (row) { return +row.longShortRatio; });
+    var takerSeries = seriesOf(takerRows, function (row) { return +row.buySellRatio; });
+    var topPositionSeries = seriesOf(topPositionRows, function (row) { return +row.longShortRatio; });
+    // Funding: ranks the ROLLING 12-settlement average within the series of rolling averages —
+    // the same quantity the fallback threshold reads (fundingAvg), far less noisy than ranking a
+    // single settlement, and immune to the "last print" jitter.
+    var fundingRolling = [];
+    for (var f = 11; f < fundingSeries.length; f++) {
+      var windowSum = 0;
+      for (var w = f - 11; w <= f; w++) windowSum += fundingSeries[w];
+      fundingRolling.push(windowSum / 12);
+    }
+    // The futures/data series span only what Binance retains at this period (~42h at 5m, ~30d at
+    // 1d) — a TF-dependent window. Demand 100+ samples so 1d (30 rows) falls back to the fixed
+    // thresholds instead of a 3.3%-granularity percentile; funding (8h settlements, ~333d) is
+    // TF-independent and keeps the default minimum.
+    var percentiles = {
+      funding: AnalyticsCore.percentileRank(fundingRolling, fundingRolling[fundingRolling.length - 1]),
+      longShort: AnalyticsCore.percentileRank(longShortSeries, longShortSeries[longShortSeries.length - 1], 100),
+      taker: AnalyticsCore.percentileRank(takerSeries, takerSeries[takerSeries.length - 1], 100),
+      topPosition: AnalyticsCore.percentileRank(topPositionSeries, topPositionSeries[topPositionSeries.length - 1], 100),
+      oi: AnalyticsCore.percentileRank(oiSeries, oiSeries[oiSeries.length - 1], 100)
+    };
     return {
       oiChangePct: oiChangePct,
       oiWindowStart: Number.isFinite(oiWindowStart) ? oiWindowStart : NaN,
       oiWindowEnd: Number.isFinite(oiWindowEnd) ? oiWindowEnd : NaN,
+      percentiles: percentiles,
       fundingAvg: fundingAvg,
       longShortRatio: latestLongShort ? +latestLongShort.longShortRatio : NaN,
       longAccount: latestLongShort ? +latestLongShort.longAccount : NaN,
@@ -1962,15 +2130,21 @@
     var key = symbol + ':' + period;
     var cached = state.derivativeCache[key];
     var staleAfterMs = derivativesStaleAfter(period);
-    if (!force && cached && Date.now() - cached.fetchedAt < DERIVATIVES_REFRESH_MS) return markDataset(cached.value, cached.fetchedAt, staleAfterMs);
+    // The 500-row series gain one point per period; refetching ~400KB every 15s buys nothing.
+    // Refresh at half the period (floor 15s) — staleness display is governed separately.
+    var unitMinutes = { '5m': 5, '15m': 15, '30m': 30, '1h': 60, '2h': 120, '4h': 240, '6h': 360, '12h': 720, '1d': 1440 }[period] || 5;
+    var refreshMs = Math.max(DERIVATIVES_REFRESH_MS, unitMinutes * 60 * 1000 / 2);
+    if (!force && cached && Date.now() - cached.fetchedAt < refreshMs) return markDataset(cached.value, cached.fetchedAt, staleAfterMs);
     var s = encodeURIComponent(symbol);
     var rows = await Promise.allSettled([
-      fetchJSON('https://fapi.binance.com/futures/data/openInterestHist?symbol=' + s + '&period=' + period + '&limit=30', 9000, 'Binance futuros'),
-      fetchJSON('https://fapi.binance.com/fapi/v1/fundingRate?symbol=' + s + '&limit=12', 9000, 'Binance futuros'),
-      fetchJSON('https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=' + s + '&period=' + period + '&limit=30', 9000, 'Binance futuros'),
-      fetchJSON('https://fapi.binance.com/futures/data/takerlongshortRatio?symbol=' + s + '&period=' + period + '&limit=30', 9000, 'Binance futuros'),
+      // Longer windows feed the percentile engine (positioning vs the asset's OWN history).
+      // fundingRate keeps ~333d of 8h settlements; the futures/data endpoints retain ~30d.
+      fetchJSON('https://fapi.binance.com/futures/data/openInterestHist?symbol=' + s + '&period=' + period + '&limit=500', 9000, 'Binance futuros'),
+      fetchJSON('https://fapi.binance.com/fapi/v1/fundingRate?symbol=' + s + '&limit=1000', 9000, 'Binance futuros'),
+      fetchJSON('https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=' + s + '&period=' + period + '&limit=500', 9000, 'Binance futuros'),
+      fetchJSON('https://fapi.binance.com/futures/data/takerlongshortRatio?symbol=' + s + '&period=' + period + '&limit=500', 9000, 'Binance futuros'),
       fetchJSON('https://fapi.binance.com/futures/data/topLongShortAccountRatio?symbol=' + s + '&period=' + period + '&limit=30', 9000, 'Binance futuros'),
-      fetchJSON('https://fapi.binance.com/futures/data/topLongShortPositionRatio?symbol=' + s + '&period=' + period + '&limit=30', 9000, 'Binance futuros'),
+      fetchJSON('https://fapi.binance.com/futures/data/topLongShortPositionRatio?symbol=' + s + '&period=' + period + '&limit=500', 9000, 'Binance futuros'),
       fetchJSON('https://fapi.binance.com/futures/data/basis?pair=' + s + '&contractType=PERPETUAL&period=' + period + '&limit=30', 9000, 'Binance futuros')
     ]);
     var detail = normalizeDerivativeDetail(value(rows[0]), value(rows[1]), value(rows[2]), value(rows[3]), value(rows[4]), value(rows[5]), value(rows[6]));
@@ -1990,6 +2164,43 @@
     if (!hasDerivativeData(markedDetail)) return markedDetail;
     state.derivativeCache[key] = { value: detail, fetchedAt: detail.fetchedAt };
     return markedDetail;
+  }
+  var INTERVAL_MS = { '1m': 60e3, '3m': 180e3, '5m': 300e3, '15m': 900e3, '30m': 1800e3, '1h': 3600e3, '2h': 7200e3, '4h': 14400e3, '6h': 21600e3, '8h': 28800e3, '12h': 43200e3, '1d': 86400e3, '3d': 259200e3, '1w': 604800e3, '1M': 2592000e3 };
+  function intervalToMs(interval) { return INTERVAL_MS[interval] || 300e3; }
+  /**
+   * Trap veto: after a confirmed trap, entries in the trapped direction stay blocked for
+   * vetoBars candles of the CURRENT timeframe. Keyed by symbol+interval; expires by close time.
+   */
+  function registerTrapVeto(symbol, interval, trap, lastCloseTime) {
+    if (!trap || !trap.trap || !Number.isFinite(lastCloseTime)) return;
+    var key = symbol + ':' + interval;
+    var direction = trap.vetoDirection === 'short' ? 'short' : 'long';
+    // A trap stays detectable while the sweep sits in the 5-bar lookback; re-registering on every
+    // refresh would slide the expiry to ~10-11 bars. An active same-direction veto keeps its
+    // original expiry; only a NEW direction (fresh opposite trap) replaces it.
+    var existing = state.trapVeto;
+    if (existing && existing.key === key && existing.direction === direction && lastCloseTime < existing.until) return;
+    state.trapVeto = { key: key, direction: direction, until: lastCloseTime + trap.vetoBars * intervalToMs(interval) };
+  }
+  function activeTrapVeto(a) {
+    var veto = state.trapVeto;
+    if (!veto || veto.key !== state.symbol + ':' + state.interval) return null;
+    var reference = a && a.signalCandle && Number.isFinite(a.signalCandle.closeTime) ? a.signalCandle.closeTime : Date.now();
+    return reference < veto.until ? veto.direction : null;
+  }
+  function trapVetoBarsLeft(a) {
+    var veto = state.trapVeto;
+    if (!veto) return 0;
+    var reference = a && a.signalCandle && Number.isFinite(a.signalCandle.closeTime) ? a.signalCandle.closeTime : Date.now();
+    return Math.max(0, Math.ceil((veto.until - reference) / intervalToMs(state.interval)));
+  }
+  function liquidationBiasFor() {
+    var summary = liquidationSummary();
+    if (!summary.total) return null;
+    // Long liquidations are forced sells; short liquidations are forced buys.
+    if (summary.longValue > summary.shortValue * 2) return 'sell';
+    if (summary.shortValue > summary.longValue * 2) return 'buy';
+    return null;
   }
   // Price change over the OI history window, so OIxprice quadrants read both in the same window.
   function priceChangeOverWindow(candles, startTs, endTs) {
@@ -2040,6 +2251,15 @@
     var analysis = mergeSelected(symbol, closedCandles, value(results[3]), value(results[1]), value(results[4]), value(results[2]), chain || {}, chainAdjustment);
     analysis.derivativeDetail = value(results[5]) || {};
     analysis.oiPriceChangePct = priceChangeOverWindow(closedCandles, analysis.derivativeDetail.oiWindowStart, analysis.derivativeDetail.oiWindowEnd);
+    // Trap engine: sweep+reclaim+flip de delta com confirmacao de OI/liquidacao; registra veto.
+    analysis.trap = AnalyticsCore.detectTrap(closedCandles, {
+      atr: analysis.atr14,
+      priorLow: analysis.priorLow,
+      priorHigh: analysis.priorHigh,
+      oiChangePct: analysis.derivativeDetail.oiChangePct,
+      liquidationBias: liquidationBiasFor()
+    });
+    if (analysis.trap && analysis.trap.trap) registerTrapVeto(symbol, interval, analysis.trap, last(closedCandles).closeTime);
     analysis.coinMetrics = coinMetrics;
     analysis.options = options;
     analysis.institutional = institutional;
@@ -2063,6 +2283,7 @@
     stampAnalysisSnapshot(analysis, 'selected-refresh', { symbol: symbol, interval: interval, requestId: requestId, signalCloseTime: analysis.signalCandle.closeTime });
     render(value(results[3]), value(results[4]), value(results[2]), chain || {}, value(results[1]));
     maybeRecordSignal(analysis, confluenceFor(analysis));
+    runSignalMachine(analysis);
     processAlerts(analysis, confluenceFor(analysis));
     connectLiquidationStream(symbol);
     ensureHistoricalProfile(symbol, true).then(function (profile) {
@@ -2162,7 +2383,8 @@
     var upTrigger = a.resistances[0], downTrigger = a.supports[0];
     text('triggerLine', (upTrigger ? 'Alta > ' + money(upTrigger) : '') + (downTrigger ? ' | Baixa < ' + money(downTrigger) : ''));
     var sweep = a.sweepDown ? 'Sweep de baixa absorvido' : a.sweepUp ? 'Sweep de topo rejeitado' : 'Sem sweep relevante';
-    text('structureLine', a.structure + ' | ' + sweep + ' | fechamento confirmado ' + money(a.close) + ' ' + (a.close > a.vwap ? 'acima' : 'abaixo') + ' do VWAP' + (a.hasOpenCandle ? ' | atual ' + money(livePrice) + ' em formacao' : ''));
+    var shiftLabel = a.structureShift && a.structureShift.event ? ' | ' + a.structureShift.event + ' ' + (a.structureShift.direction === 'bull' ? 'altista' : 'baixista') + ' em ' + money(a.structureShift.brokenLevel) : '';
+    text('structureLine', a.structure + shiftLabel + ' | ' + sweep + ' | fechamento confirmado ' + money(a.close) + ' ' + (a.close > a.vwap ? 'acima' : 'abaixo') + ' do VWAP' + (a.hasOpenCandle ? ' | atual ' + money(livePrice) + ' em formacao' : ''));
     text('ema9', money(a.ema9));
     text('ema21', money(a.ema21));
     text('ema50', money(a.ema50));
@@ -2175,7 +2397,8 @@
     text('bbLine', money(a.bb.latestLower) + ' / ' + money(a.bb.latestUpper));
     text('vwapLine', money(a.vwap));
     text('volumeRatio', Number.isFinite(a.avgVol) && a.avgVol ? num(a.lastVol / a.avgVol, 2) + 'x' : '--');
-    text('rsiState', a.rsi14 >= 70 ? 'Sobrecompra' : a.rsi14 <= 30 ? 'Sobrevenda' : 'Neutro');
+    var divergenceLabel = a.divergence && a.divergence.bearish ? ' | divergencia bearish (maturidade de tendencia)' : a.divergence && a.divergence.bullish ? ' | divergencia bullish (maturidade de tendencia)' : '';
+    text('rsiState', (a.rsi14 >= 70 ? 'Sobrecompra' : a.rsi14 <= 30 ? 'Sobrevenda' : 'Neutro') + divergenceLabel);
     text('macdState', a.macd.hist > 0 ? 'Acima do sinal' : 'Abaixo do sinal');
     text('volumeState', Number.isFinite(a.avgVol) && a.lastVol > a.avgVol * 1.35 ? 'Volume alto' : 'Normal');
     updateScore(a); updateBook(a); updateChain(chain); renderCoinMetrics(a); renderExternalContext(a); renderAdvancedIndicators(a); renderSetupQuality(a); renderLiquidity(a); renderDerivativesDetails(a); renderMultiTimeframe(a); renderHistoricalProfile(a); renderSmartMoney(a); renderConfluence(a); renderWrittenAnalysis(a); renderHistoricalLab(a); renderFuturesConsole(a); renderLiquidations(); renderOptions(); renderExchangeFlows(a); renderInstitutional(); renderMacroFlow(a); renderCorrelation(a); calculatePosition(); drawPriceChart(); drawRsiChart(); drawMacdChart(); drawVolumeChart(); drawFlowChart(); updateSelectedBoardCard(livePrice);
@@ -2358,7 +2581,14 @@
   }
   function buildTradePlan(a) {
     var c = confluenceFor(a), atrValue = Number.isFinite(a.atr14) ? a.atr14 : a.close * 0.02;
-    var side = c.dataConfidence >= 40 && c.total >= 42 && c.multi.score >= 0 ? 'long' : 'wait';
+    var gates = c.gates || {};
+    // Direcional nos DOIS lados, com os mesmos gates do motor: HTF disponivel/nao-contrario e
+    // sem veto pos-trap. Setup fortemente negativo agora autoriza plano SHORT (era long-only).
+    var side = 'wait';
+    if (c.dataConfidence >= 40 && gates.htfAvailable) {
+      if (c.total >= 42 && c.multi.score >= 0 && !gates.htfVetoLong && gates.trapVeto !== 'long') side = 'long';
+      else if (c.total <= -42 && c.multi.score <= 0 && !gates.htfVetoShort && gates.trapVeto !== 'short') side = 'short';
+    }
     if (side === 'wait') {
       return {
         side: 'Aguardar',
@@ -2369,26 +2599,51 @@
           { label: 'Take profits', value: 'Apos confirmacao', cls: 'target' },
           { label: 'Risco/retorno', value: 'Sem operacao' }
         ],
-        rationale: c.dataConfidence < 40 ? 'Data Confidence abaixo de 40%: nenhum plano direcional e liberado.' : 'Nao ha recomendacao direcional: o plano so e ativado depois de rompimento, reteste e alinhamento de fluxo. Setup negativo indica cautela, nao autoriza short.'
+        rationale: c.dataConfidence < 40 ? 'Data Confidence abaixo de 40%: nenhum plano direcional e liberado.'
+          : gates.trapVeto ? 'Veto pos-trap ativo: aguardar as barras de resfriamento antes de qualquer plano direcional.'
+            : !gates.htfAvailable ? 'Gate HTF indisponivel (1d/1w sem leitura): plano direcional exige o quadro completo.'
+              : 'Sem confluencia direcional suficiente: o plano e ativado por rompimento, reteste e alinhamento de fluxo.'
+      };
+    }
+    if (side === 'short') {
+      // Stop ESTRUTURAL atras da resistencia (nao ATR generico); invalidacao = reclaim do nivel.
+      var shortEntryHigh = Math.min(a.resistances[0] || a.close + atrValue * 0.5, a.close + atrValue * 0.55);
+      var shortEntryLow = a.close - atrValue * 0.12;
+      var shortStop = (a.resistances[0] || a.close + atrValue) + atrValue * 0.25;
+      var shortMid = (shortEntryLow + shortEntryHigh) / 2;
+      var shortRisk = shortStop - shortMid;
+      // Piso de sanidade: em ativo barato com ATR enorme, um multiplo de R poderia cruzar zero.
+      var shortTargets = [1.5, 2.2, 3].map(function (rr) { return Math.max(shortMid - shortRisk * rr, shortMid * 0.05); });
+      return {
+        side: 'Short condicional',
+        levels: [
+          { label: 'Entrada', value: money(shortEntryLow) + ' a ' + money(shortEntryHigh) },
+          { label: 'Stop / invalidacao', value: money(shortStop) + ' (reclaim da resistencia)', cls: 'stop' },
+          { label: 'TP1', value: money(shortTargets[0]), cls: 'target' },
+          { label: 'TP2', value: money(shortTargets[1]), cls: 'target' },
+          { label: 'TP3', value: money(shortTargets[2]), cls: 'target' }
+        ],
+        rationale: 'Plano vendedor: setup ' + signed(c.total) + ' com HTF nao-contrario. Stop estrutural atras da resistencia; invalidacao e o reclaim do nivel, nao uma porcentagem.'
       };
     }
     var entryLow = Math.max(a.supports[0] || a.close - atrValue * 0.5, a.close - atrValue * 0.55);
     var entryHigh = a.close + atrValue * 0.12;
-    var stopHigh = entryLow - atrValue * 0.85;
-    var stopLow = entryLow - atrValue * 1.15;
-    var risk = ((stopLow + stopHigh) / 2);
-    var longRisk = ((entryLow + entryHigh) / 2) - risk;
-    var targets = [1.5, 2.2, 3].map(function (rr) { return ((entryLow + entryHigh) / 2) + longRisk * rr; });
+    // Stop estrutural: atras do suporte (swing) com buffer de ATR — consistente com o motor v2.
+    var structuralStop = Math.max((a.supports[0] || a.close - atrValue) - atrValue * 0.25, a.close * 0.02);
+    var invalidation = a.structureShift && Number.isFinite(a.structureShift.brokenLevel) && a.structureShift.direction === 'bull' ? a.structureShift.brokenLevel : null;
+    var mid = (entryLow + entryHigh) / 2;
+    var longRisk = mid - structuralStop;
+    var targets = [1.5, 2.2, 3].map(function (rr) { return mid + longRisk * rr; });
     return {
       side: 'Long condicional',
       levels: [
         { label: 'Entrada', value: money(entryLow) + ' a ' + money(entryHigh) },
-        { label: 'Stop / invalidacao', value: money(Math.min(stopLow, stopHigh)) + ' a ' + money(Math.max(stopLow, stopHigh)), cls: 'stop' },
+        { label: 'Stop / invalidacao', value: money(structuralStop) + (invalidation ? ' (CHoCH em ' + money(invalidation) + ')' : ' (atras do swing)'), cls: 'stop' },
         { label: 'TP1', value: money(targets[0]), cls: 'target' },
         { label: 'TP2', value: money(targets[1]), cls: 'target' },
         { label: 'TP3', value: money(targets[2]), cls: 'target' }
       ],
-      rationale: 'Faixas baseadas em ATR 14, suporte/resistencia e Setup Score preview ' + signed(c.total) + '. Componentes tecnicos usam candles fechados; fluxo e derivativos usam o snapshot mais recente. Tamanho da posicao deve respeitar o risco por trade.'
+      rationale: 'Stop estrutural atras do suporte + Setup Score preview ' + signed(c.total) + '. Componentes tecnicos usam candles fechados; fluxo e derivativos usam o snapshot mais recente. Tamanho da posicao deve respeitar o risco por trade.'
     };
   }
   function renderHistoricalLab(a) {
@@ -2414,6 +2669,19 @@
     var planGrid = $('tradePlanGrid');
     if (planGrid) planGrid.innerHTML = plan.levels.map(function (level) { return '<div class="trade-level ' + (level.cls || '') + '"><span>' + escapeHTML(level.label) + '</span><strong>' + escapeHTML(level.value) + '</strong></div>'; }).join('');
     text('tradePlanRationale', plan.rationale);
+    // Cenarios base/alternativo/range com invalidacao ESTRUTURAL (nivel do CHoCH quando ha).
+    var structuralInvalidation = a.structureShift && Number.isFinite(a.structureShift.brokenLevel) ? a.structureShift.brokenLevel : null;
+    var scenarios = AnalyticsCore.buildScenarios({
+      close: a.close, atr: a.atr14, bias: a.bias,
+      supports: a.supports, resistances: a.resistances,
+      structuralInvalidation: structuralInvalidation
+    });
+    if (scenarios.length) {
+      var base = scenarios[0], alt = scenarios[1], range = scenarios[2];
+      text('scenarioLines', 'Cenario base (' + base.direction + '): gatilho ' + money(base.trigger) + ', alvo ' + money(base.target) + ', invalida em ' + money(base.invalidation) + '. Alternativo (' + alt.direction + '): gatilho ' + money(alt.trigger) + ', alvo ' + money(alt.target) + ', invalida em ' + money(alt.invalidation) + '. Range: ' + money(range.lower) + ' a ' + money(range.upper) + '.');
+    } else {
+      text('scenarioLines', '--');
+    }
   }
   function renderFuturesConsole(a) {
     var detail = scoreableDerivativeDetail(a.derivativeDetail), smart = smartMoneyAnalysis(a);
@@ -2432,7 +2700,10 @@
     if (Number.isFinite(detail.topPositionRatio) && detail.topPositionRatio > 1.7) { risk -= 2; reasons.push({ tone: 'bad', text: 'Posicoes dos top traders estao concentradas em long.' }); }
     text('futuresRegime', smart.oiPhase);
     text('futuresOi', a.oi && Number.isFinite(+a.oi.openInterest) ? compactNumber(+a.oi.openInterest) + ' | ' + percent(detail.oiChangePct, 2) : '--');
-    text('futuresFunding', (Number.isFinite(a.funding) ? percent(a.funding * 100, 4) : '--') + ' / ' + (Number.isFinite(detail.fundingAvg) ? percent(detail.fundingAvg * 100, 4) : '--'));
+    // percentiles vem do detail CRU (scoreableDerivativeDetail so copia as metricas pontuaveis).
+    var rawPercentiles = a.derivativeDetail && a.derivativeDetail.percentiles ? a.derivativeDetail.percentiles : {};
+    var carryInfo = AnalyticsCore.calculateCarryRegime({ fundingAvg: detail.fundingAvg, oiPercentile: rawPercentiles.oi });
+    text('futuresFunding', (Number.isFinite(a.funding) ? percent(a.funding * 100, 4) : '--') + ' / ' + (Number.isFinite(detail.fundingAvg) ? percent(detail.fundingAvg * 100, 4) : '--') + (Number.isFinite(carryInfo.annualizedCarryPct) ? ' | carry ' + percent(carryInfo.annualizedCarryPct, 1) + ' a.a.' + (carryInfo.deltaNeutral ? ' (delta-neutro)' : '') : ''));
     text('futuresBasis', Number.isFinite(detail.basisRate) ? percent(detail.basisRate * 100, 4) + ' | ' + money(a.basis) : Number.isFinite(a.basis) ? money(a.basis) : '--');
     text('futuresLongShort', Number.isFinite(detail.longShortRatio) ? 'global ' + num(detail.longShortRatio, 2) + 'x' + (Number.isFinite(detail.topPositionRatio) ? ' | top ' + num(detail.topPositionRatio, 2) + 'x' : '') : '--');
     text('futuresTaker', Number.isFinite(detail.takerRatio) ? num(detail.takerRatio, 2) + 'x' : '--');
@@ -2475,7 +2746,9 @@
   function renderOptions() {
     var data = state.options, nearest = data && data.nearest, market = data && data.market, dvol = data && data.dvol;
     text('optionsStatus', data ? data.currency + (data.isProxy ? ' proxy informativo | ' + datasetStatus(data) + ' | fora do Setup Score' : ' nativo | ' + datasetStatus(data) + (!eligibleDataset(data) ? ' | fora do score' : '')) : 'sem leitura');
-    text('dvolLine', dvol && Number.isFinite(+dvol.latest) ? num(+dvol.latest, 2) + ' | 7d ' + percent(+dvol.change7d, 1) : '--');
+    // toFiniteNumber: +null coage para 0 e o painel afirmaria "DVOL 0.00" quando o indice
+    // simplesmente nao existe (caso SOL na Deribit).
+    text('dvolLine', dvol && AnalyticsCore.toFiniteNumber(dvol.latest) !== null ? num(+dvol.latest, 2) + ' | 7d ' + (AnalyticsCore.toFiniteNumber(dvol.change7d) !== null ? percent(+dvol.change7d, 1) : '--') : '--');
     text('atmIvLine', nearest && Number.isFinite(+nearest.atmIv) ? num(+nearest.atmIv, 2) + '% @ ' + money(+nearest.atmStrike) : '--');
     text('putCallOiLine', market && Number.isFinite(+market.putCallOi) ? num(+market.putCallOi, 2) + 'x | OI ' + num((+market.putOi || 0), 1) + '/' + num((+market.callOi || 0), 1) : '--');
     text('putCallVolumeLine', market && Number.isFinite(+market.putCallVolume) ? num(+market.putCallVolume, 2) + 'x | ' + compactMoney(+market.putVolumeUsd || 0) + '/' + compactMoney(+market.callVolumeUsd || 0) : '--');
@@ -2999,6 +3272,106 @@
     select.value = state.symbol;
   }
   var SIGNAL_JOURNAL_KEY = 'cld-signal-journal:' + MODEL_VERSION;
+  // ===== Motor de sinais v2 (Ciclo C): state machine por par+TF, trades simulados =====
+  var SIGNAL_MACHINE_KEY = 'cld-signal-machine:' + MODEL_VERSION;
+  var TRADE_JOURNAL_KEY = 'cld-signal-trades:' + MODEL_VERSION;
+  var TRADE_JOURNAL_CAP = 500;
+  function loadMachineStates() { return safeStorageGet(SIGNAL_MACHINE_KEY) || {}; }
+  function saveMachineStates(map) { safeStorageSet(SIGNAL_MACHINE_KEY, map); }
+  function loadTradeJournal() {
+    var rows = safeStorageGet(TRADE_JOURNAL_KEY);
+    return Array.isArray(rows) ? rows.filter(function (row) { return row && Number.isFinite(+row.pnlPct); }) : [];
+  }
+  function saveTradeJournal(records) { safeStorageSet(TRADE_JOURNAL_KEY, records.slice(-TRADE_JOURNAL_CAP)); }
+  /**
+   * One evaluation per CLOSED candle per par+TF. The machine consumes the same confluence the
+   * panel shows (score, gates, veto) plus the closed candle OHLC — no intra-candle churn.
+   */
+  function runSignalMachine(analysis) {
+    if (!analysis || !analysis.signalCandle || !Number.isFinite(analysis.signalCandle.closeTime)) return;
+    var key = state.symbol + ':' + state.interval;
+    var closeTime = analysis.signalCandle.closeTime;
+    if (state.signalMachineEval[key] === closeTime) return;
+    var machines = loadMachineStates();
+    var persisted = machines[key] || null;
+    // Idempotencia PERSISTIDA: tanto o estado ACTIVE quanto o tombstone FLAT guardam o ultimo
+    // candle processado — reload/multi-aba nunca reavalia o mesmo candle (nem re-entra no
+    // candle que acabou de gerar um exit).
+    if (persisted && Number.isFinite(persisted.lastCloseTime) && closeTime <= persisted.lastCloseTime) return;
+    var activeState = persisted && persisted.phase === 'ACTIVE' ? persisted : null;
+    var confluence = confluenceFor(analysis);
+    // DC<40 bloqueia ENTRADAS; uma posicao ativa continua sendo gerida (stop/alvo/tempo sao
+    // leituras de preco do candle fechado — congelar exits distorceria as base rates).
+    if (!activeState && confluence.dataConfidence < 40) return;
+    var snapshot = {
+      symbol: state.symbol,
+      interval: state.interval,
+      total: confluence.total,
+      close: analysis.signalCandle.close,
+      high: analysis.signalCandle.high,
+      low: analysis.signalCandle.low,
+      closeTime: analysis.signalCandle.closeTime,
+      atr: analysis.atr14,
+      regime: analysis.regime,
+      supports: analysis.supports,
+      resistances: analysis.resistances,
+      structureShift: analysis.structureShift,
+      divergence: analysis.divergence,
+      trap: analysis.trap,
+      squeeze: analysis.squeeze,
+      gates: confluence.gates,
+      inputSnapshotId: analysis.snapshot ? analysis.snapshot.inputSnapshotId : null
+    };
+    var result = AnalyticsCore.evaluateSignalTransition(activeState, snapshot);
+    state.signalMachineEval[key] = closeTime;
+    // FLAT vira tombstone com o carimbo do candle (nunca delete: o marcador de idempotencia
+    // precisa sobreviver ao exit).
+    machines[key] = result.state || { phase: 'FLAT', lastCloseTime: closeTime };
+    saveMachineStates(machines);
+    if (result.event && result.event.type === 'exit') {
+      var journal = loadTradeJournal();
+      journal.push(result.event.record);
+      saveTradeJournal(journal);
+    }
+    renderTradeEngine();
+  }
+  function renderTradeEngine() {
+    var machines = loadMachineStates();
+    var slot = machines[state.symbol + ':' + state.interval];
+    var active = slot && slot.phase === 'ACTIVE' ? slot : null;
+    text('activeTradeLine', active
+      ? 'Posicao simulada ' + active.side.toUpperCase() + ' em ' + money(active.entryPrice) + ' (gatilho ' + active.trigger + ', score ' + signed(active.entryScore) + ') | stop ' + money(active.stopPrice) + ' | alvo ' + money(active.targetPrice) + ' | ' + active.barsHeld + '/' + active.maxBars + ' barras | MFE ' + percent(active.mfePct, 2) + ' MAE ' + percent(active.maePct, 2)
+      : 'Sem posicao simulada aberta neste par/TF.');
+    var journal = loadTradeJournal();
+    var rowsNode = $('tradeRows');
+    if (rowsNode) {
+      rowsNode.innerHTML = journal.length ? journal.slice(-25).reverse().map(function (row) {
+        return '<tr><td>' + escapeHTML(new Date(row.exitTime).toLocaleString('pt-BR')) + '</td><td>' + escapeHTML(baseAsset(row.symbol || '')) + '</td><td>' + escapeHTML(intervalLabel(row.interval || '--')) + '</td><td>' + escapeHTML(row.side || '--') + '</td><td>' + escapeHTML(row.trigger || '--') + '</td><td>' + escapeHTML(row.regime || '--') + '</td><td class="' + (+row.pnlPct >= 0 ? 'up' : 'down') + '">' + percent(+row.pnlPct, 2) + '</td><td>' + (Number.isFinite(+row.rMultiple) ? num(+row.rMultiple, 2) + 'R' : '--') + '</td><td>' + percent(+row.maePct, 1) + ' / ' + percent(+row.mfePct, 1) + '</td><td>' + (Number.isFinite(+row.durationBars) ? +row.durationBars : '--') + '</td><td>' + escapeHTML(row.exitReason || '--') + '</td></tr>';
+      }).join('') : '<tr><td colspan="11">Nenhum trade simulado fechado nesta versao do modelo.</td></tr>';
+    }
+    var summaryNode = $('tradeSummaryRows');
+    if (summaryNode) {
+      var summary = AnalyticsCore.summarizeTradeJournal(journal);
+      summaryNode.innerHTML = summary.cells.length ? summary.cells.slice(0, 12).map(function (cell) {
+        return '<tr><td>' + escapeHTML(cell.regime) + '</td><td>' + escapeHTML(cell.trigger) + '</td><td>' + escapeHTML(cell.band) + '</td><td>' + cell.count + '</td><td>' + cell.hitRate + '%</td><td>' + (Number.isFinite(cell.avgR) ? num(cell.avgR, 2) + 'R' : '--') + '</td><td>' + (cell.sufficient ? 'ok' : 'insuficiente') + '</td></tr>';
+      }).join('') : '<tr><td colspan="7">--</td></tr>';
+    }
+  }
+  async function runLagBacktest() {
+    // Captura o simbolo NO CLIQUE: trocar de ativo durante o await nao pode misturar dados/label.
+    var symbol = state.symbol;
+    text('lagBacktestLine', 'Rodando backtest de lag sobre o historico diario de ' + baseAsset(symbol) + '...');
+    await delay(30); // deixa o status pintar antes do loop sincrono
+    try {
+      await ensureHistoricalProfile(symbol, true);
+      var daily = state.historyCandles[symbol];
+      if (!daily || daily.length < 260) { text('lagBacktestLine', 'Historico diario insuficiente para o backtest de ' + baseAsset(symbol) + '.'); return; }
+      var lag = AnalyticsCore.backtestDetectorLag(daily);
+      text('lagBacktestLine', 'Lag do CHoCH em ' + baseAsset(symbol) + ' (diario): topos ' + lag.tops.detected + '/' + lag.tops.count + ' detectados, mediana ' + (Number.isFinite(lag.tops.medianLagBars) ? lag.tops.medianLagBars + ' barras' : '--') + ' | fundos ' + lag.bottoms.detected + '/' + lag.bottoms.count + ', mediana ' + (Number.isFinite(lag.bottoms.medianLagBars) ? lag.bottoms.medianLagBars + ' barras' : '--') + '.');
+    } catch (error) {
+      text('lagBacktestLine', 'Backtest indisponivel: ' + (error && error.message || 'erro'));
+    }
+  }
   var SIGNAL_JOURNAL_CAP = 500;
   function validSignalRecord(record) {
     return !!(record && typeof record === 'object'
@@ -3044,6 +3417,7 @@
   function renderSignals() {
     var rows = $('signalRows');
     if (!rows) return;
+    renderTradeEngine();
     var records = loadSignalJournal();
     var visible = records.slice(-40).reverse();
     var pct = function (value) { return value === null || value === undefined ? '--' : percent(+value, 2); };
@@ -3272,6 +3646,8 @@
     on('candleCountSelect', 'change', function (e) { state.chart.candles = +e.target.value || 120; drawPriceChart(); });
     on('evaluateSignalsButton', 'click', evaluateSignalOutcomes);
     on('clearSignalsButton', 'click', function () { saveSignalJournal([]); renderSignals(); });
+    on('lagBacktestButton', 'click', runLagBacktest);
+    on('clearTradesButton', 'click', function () { saveTradeJournal([]); saveMachineStates({}); renderTradeEngine(); });
     on('exportSnapshotButton', 'click', exportSnapshot);
     on('alertsEnabled', 'change', function (e) {
       if (!e.target.checked) { alertState.enabled = false; text('alertsStatus', 'Desativados'); return; }
