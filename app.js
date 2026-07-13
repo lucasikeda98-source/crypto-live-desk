@@ -1200,7 +1200,7 @@
     var macroChecks = [!!news.items.length || state.newsMode !== 'auto', fearGreedEligible(state.external), macroSourceAvailable(state.external.macro) || activeTradFiAssets(state.external.tradfi).length > 0];
     var fundamentalChecks = [!!ext.market, !!(ext.chain || ext.protocol)];
     var parts = [
-      { name: 'Tecnica', ruleId: 'radar.technical.v1', weight: 30, available: Number.isFinite(analysis.trendScore) && Number.isFinite(analysis.momScore), value: clamp(((analysis.trendScore + analysis.momScore) / 60) * 100, -100, 100), quality: Math.min(1, (analysis.candleCount || 0) / 220), raw: analysis.trendScore + analysis.momScore, scope: 'symbol', reason: 'EMAs, RSI, MACD, ADX e estrutura do timeframe' },
+      { name: 'Tecnica', ruleId: 'radar.technical.v2', weight: 30, available: Number.isFinite(analysis.trendScore) && Number.isFinite(analysis.momScore), value: clamp(((analysis.trendScore + analysis.momScore + (analysis.structureShift ? analysis.structureShift.score : 0) + (analysis.divergenceScore || 0) + (analysis.squeeze ? analysis.squeeze.score : 0)) / 60) * 100, -100, 100), quality: Math.min(1, (analysis.candleCount || 0) / 220), raw: analysis.trendScore + analysis.momScore + (analysis.structureShift ? analysis.structureShift.score : 0) + (analysis.divergenceScore || 0) + (analysis.squeeze ? analysis.squeeze.score : 0), scope: 'symbol', reason: 'EMAs, RSI, MACD, ADX, estrutura, CHoCH/BOS, divergencia e squeeze do timeframe' },
       { name: 'Fluxo', ruleId: 'radar.flow.v1', weight: 15, available: analysis.flowAvailable === true, value: clamp((analysis.flowScore / 18) * 100, -100, 100), quality: Number.isFinite(analysis.flowCoverage) ? analysis.flowCoverage : 0, raw: analysis.flowScore, scope: 'symbol', reason: 'Delta taker, volume relativo e CMF' },
       { name: 'Derivativos', ruleId: 'radar.derivatives.v1', weight: 10, available: Number.isFinite(analysis.funding) || Number.isFinite(analysis.basis), value: clamp((analysis.derivScore / 9) * 100, -100, 100), quality: ((Number.isFinite(analysis.funding) ? 1 : 0) + (Number.isFinite(analysis.basis) ? 1 : 0)) / 2, raw: analysis.derivScore, scope: 'symbol', reason: 'Funding e basis dos perpetuos Binance' },
       { name: 'Fundamental', ruleId: 'radar.fundamental.v1', weight: 15, available: extEligible && !!(ext.market || ext.chain || ext.protocol), value: clamp(((ext.asset + ext.defi) / 22) * 100, -100, 100), quality: fundamentalChecks.filter(Boolean).length / fundamentalChecks.length, raw: ext.asset + ext.defi, scope: 'symbol', reason: 'Mercado CoinGecko e TVL DeFiLlama mapeados' },
@@ -1269,7 +1269,10 @@
         var path = '/api/v3/klines?symbol=' + encodeURIComponent(symbol) + '&interval=' + interval + '&limit=500';
         candles = selectClosedCandles(parseKlines(await fetchSpotJSON(path, 12000, 'Binance MTF')));
       }
-      if (!candles || candles.length < 60) return null;
+      // The weekly leg needs a lower floor: demanding 60 closed weekly candles (~14 months of
+      // listing) would deny the HTF gate — and thus 'Entrada favoravel' — to newer listings
+      // forever. 30 weekly candles still give EMA21/structure a meaningful read.
+      if (!candles || candles.length < (interval === '1w' ? 30 : 60)) return null;
       var snapshot = technicalSnapshot(candles, interval);
       state.mtfCache[key] = { value: snapshot, fetchedAt: Date.now() };
       return snapshot;
@@ -1578,8 +1581,15 @@
     var flow = clamp(Math.round(a.flowScore * 0.48 + a.bookScore * 0.35 + smart.score * 0.55 + trapScore + squeezeScore), -18, 18);
     var optionsData = a.options || state.options;
     var detailPercentiles = a.derivativeDetail && a.derivativeDetail.percentiles ? a.derivativeDetail.percentiles : {};
+    // Carry only scores from ELIGIBLE data — a stale cached fundingAvg must not keep injecting
+    // its carry read after the dataset was declared ineligible (same gate the detail scorer uses).
+    var confluenceAsOf = Date.now();
+    var detailFundingEligible = !!(a.derivativeDetail
+      && Number.isFinite(a.derivativeDetail.fundingAvg)
+      && AnalyticsCore.resolveDatasetFreshness(a.derivativeDetail, confluenceAsOf).eligibleForScore
+      && AnalyticsCore.isDatasetMetricEligible(a.derivativeDetail, 'fundingAvg', confluenceAsOf));
     var carry = AnalyticsCore.calculateCarryRegime({
-      fundingAvg: a.derivativeDetail ? a.derivativeDetail.fundingAvg : null,
+      fundingAvg: detailFundingEligible ? a.derivativeDetail.fundingAvg : null,
       oiPercentile: detailPercentiles.oi
     });
     var derivativeDetail = AnalyticsCore.calculateDerivativeDetailContribution({
@@ -1596,9 +1606,11 @@
       })(),
       asOf: Date.now()
     });
-    // Funding scores ONCE in the setup: via the detail contribution (percentile or fundingAvg
-    // fallback). derivScore keeps it for the radar/board, so subtract it here.
-    var derivatives = clamp(Math.round((a.derivScore - (a.fundingScore || 0)) * 1.25 + derivativeDetail + carry.carryScore), -12, 12);
+    // Funding no setup: a leitura RELATIVA (percentil/fundingAvg) vem do detail e a ancora
+    // ABSOLUTA (carry anualizado) vem do carry — lentes complementares. O fundingScore do
+    // premium so e subtraido quando o detail realmente pontuou funding; numa pane parcial do
+    // endpoint fundingRate, o funding ao vivo do premium volta a valer (nada de zerar o sinal).
+    var derivatives = clamp(Math.round((a.derivScore - (detailFundingEligible ? (a.fundingScore || 0) : 0)) * 1.25 + derivativeDetail + carry.carryScore), -12, 12);
     var scoreChain = eligibleDataset(a.coinMetrics) ? a.chainScore : (Number.isFinite(a.nativeChainScore) ? a.nativeChainScore : 0);
     var chain = clamp(Math.round(scoreChain + external.defi * 0.45 + external.asset * 0.2), -10, 10);
     var etfFlow = latestEtfFlow(a.institutional || state.institutional);
@@ -1654,14 +1666,16 @@
       { tone: macro > 3 ? 'good' : macro < -3 ? 'bad' : 'neutral', text: macro > 3 ? 'Noticias e macro favorecem risco.' : macro < -3 ? 'Noticias e macro elevam risco negativo.' : 'Noticias e macro sem impulso dominante.' },
       { tone: historyScore > 3 ? 'good' : historyScore < -3 ? 'bad' : 'neutral', text: historyScore > 3 ? 'Ocorrencias historicas semelhantes tiveram expectativa positiva.' : historyScore < -3 ? 'Ocorrencias historicas semelhantes tiveram expectativa negativa.' : 'Historico semelhante neutro ou ainda com pouca amostra.' }
     ];
-    if (risk !== 0) {
-      reasons.push({ tone: risk > 0 ? 'good' : 'bad', text: risk > 0 ? 'Ajuste de risco melhora o setup por absorcao/volume.' : 'Ajuste de risco reduz o setup por esticamento, sweep contra ou volume vendedor.' });
-    }
+    // Eventos discretos (trap/climax) entram na FRENTE das razoes continuas: sao eles que mudam a
+    // decisao (veto/warning) e nao podem ser cortados pelo slice final.
     if (climax) {
-      reasons.push({ tone: 'bad', text: 'Climax de volume com fecho no terco oposto: exaustao provavel da perna ' + (climax.direction === 'exhaustion-top' ? 'de alta' : 'de baixa') + '; nao tratar volume como confirmacao.' });
+      reasons.unshift({ tone: 'bad', text: 'Climax de volume com fecho no terco oposto: exaustao provavel da perna ' + (climax.direction === 'exhaustion-top' ? 'de alta' : 'de baixa') + '; nao tratar volume como confirmacao.' });
     }
     if (a.trap && a.trap.trap) {
-      reasons.push({ tone: a.trap.score > 0 ? 'good' : 'bad', text: (a.trap.trap === 'bull' ? 'Bear trap: sweep de minima revertido com flip de delta' : 'Bull trap: sweep de maxima rejeitado com flip de delta') + (a.trap.confirmed ? ' e confirmacao de OI/liquidacao' : '') + '; entradas ' + (a.trap.vetoDirection === 'short' ? 'vendidas' : 'compradas') + ' vetadas por ' + a.trap.vetoBars + ' barras.' });
+      reasons.unshift({ tone: a.trap.score > 0 ? 'good' : 'bad', text: (a.trap.trap === 'bull' ? 'Bear trap: sweep de minima revertido com flip de delta' : 'Bull trap: sweep de maxima rejeitado com flip de delta') + (a.trap.confirmed ? ' e confirmacao de OI/liquidacao' : '') + '; entradas ' + (a.trap.vetoDirection === 'short' ? 'vendidas' : 'compradas') + ' vetadas por ' + a.trap.vetoBars + ' barras.' });
+    }
+    if (risk !== 0) {
+      reasons.push({ tone: risk > 0 ? 'good' : 'bad', text: risk > 0 ? 'Ajuste de risco melhora o setup por absorcao/volume.' : 'Ajuste de risco reduz o setup por esticamento, sweep contra ou volume vendedor.' });
     }
     var components = [
       { name: 'Tecnica', ruleId: 'setup.technical.v1', score: technical, max: 20, status: 'fresh', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines'], reason: 'trendScore*0.32 + momScore*0.42 do timeframe selecionado' },
@@ -1701,7 +1715,7 @@
       gates: { htfAvailable: htfGateAvailable, htfVetoLong: htfVetoLong, htfVetoShort: htfVetoShort, trapVeto: trapVeto },
       trap: a.trap || null,
       carry: carry,
-      reasons: reasons.slice(0, 7),
+      reasons: reasons.slice(0, 8),
       components: components
     };
   }
@@ -1774,7 +1788,7 @@
     var detectedPatterns = (a.patterns || []).slice(0, 3).map(function (pattern) { return pattern.name; });
     var tradePlan = buildTradePlan(a);
     var operationalPlan = tradePlan.side === 'Aguardar' ? tradePlan.rationale + ' ' : 'Plano ' + tradePlan.side + ': ' + tradePlan.levels.map(function (level) { return level.label + ' ' + level.value; }).join(', ') + '. ';
-    var optionData = a.options || state.options, optionSentence = optionData && optionData.market && (optionData.isProxy || eligibleDataset(optionData)) ? (optionData.isProxy ? 'Como proxy BTC apenas informativo e fora do Setup Score, ' : 'Nas opcoes nativas ' + optionData.currency + ', ') + 'put/call OI esta em ' + num(+optionData.market.putCallOi, 2) + 'x, DVOL em ' + num(optionData.dvol && +optionData.dvol.latest, 1) + ' e IV ATM em ' + num(optionData.nearest && +optionData.nearest.atmIv, 1) + '%. ' : '';
+    var optionData = a.options || state.options, optionSentence = optionData && optionData.market && (optionData.isProxy || eligibleDataset(optionData)) ? (optionData.isProxy ? 'Como proxy BTC apenas informativo e fora do Setup Score, ' : 'Nas opcoes nativas ' + optionData.currency + ', ') + 'put/call OI esta em ' + num(+optionData.market.putCallOi, 2) + 'x' + (AnalyticsCore.toFiniteNumber(optionData.dvol && optionData.dvol.latest) !== null ? ', DVOL em ' + num(+optionData.dvol.latest, 1) : ', sem indice DVOL para esta moeda') + ' e IV ATM em ' + num(optionData.nearest && +optionData.nearest.atmIv, 1) + '%. ' : '';
     var exchangeFlow = eligibleDataset(a.coinMetrics) && a.coinMetrics.exchangeFlow, exchangeSentence = exchangeFlow && Number.isFinite(exchangeFlow.netflow7d) ? 'O netflow agregado de exchanges em ' + exchangeFlow.flowCoverageDays + ' de ' + exchangeFlow.flowWindowDays + ' dias cobertos e ' + compactMoney(exchangeFlow.netflow7d) + ' (positivo significa entrada liquida em exchanges). ' : '';
     var liqSummary = liquidationSummary(), liquidationSentence = liqSummary.total ? 'Nos ultimos 15 minutos, o stream observou ' + compactMoney(liqSummary.longValue) + ' em longs e ' + compactMoney(liqSummary.shortValue) + ' em shorts liquidados. ' : '';
     var etfValue = latestEtfFlow(a.institutional || state.institutional), etfSentence = Number.isFinite(etfValue) ? 'O ultimo ETF net flow disponivel e ' + compactMoney(etfValue) + '. ' : '';
@@ -2004,13 +2018,17 @@
     return Math.max(DERIVATIVES_REFRESH_MS * 3, unit * 2 * 60 * 1000);
   }
   function normalizeDerivativeDetail(oiHist, fundingRows, longShortRows, takerRows, topAccountRows, topPositionRows, basisRows) {
+    // oiChangePct keeps its ORIGINAL 30-period window (the quadrant, trap flush threshold and
+    // priceChangeOverWindow were all calibrated on it); the full 500-row series feeds ONLY the
+    // percentile engine — mirroring how fundingAvg kept its 12-settlement meaning.
+    var oiWindow = Array.isArray(oiHist) ? oiHist.slice(-30) : [];
     var oiChangePct = NaN, oiWindowStart = NaN, oiWindowEnd = NaN;
-    if (Array.isArray(oiHist) && oiHist.length > 1) {
-      var firstOi = +oiHist[0].sumOpenInterestValue || +oiHist[0].sumOpenInterest || 0;
-      var lastOi = +oiHist[oiHist.length - 1].sumOpenInterestValue || +oiHist[oiHist.length - 1].sumOpenInterest || 0;
+    if (oiWindow.length > 1) {
+      var firstOi = +oiWindow[0].sumOpenInterestValue || +oiWindow[0].sumOpenInterest || 0;
+      var lastOi = +oiWindow[oiWindow.length - 1].sumOpenInterestValue || +oiWindow[oiWindow.length - 1].sumOpenInterest || 0;
       oiChangePct = firstOi ? ((lastOi - firstOi) / firstOi) * 100 : NaN;
-      oiWindowStart = +oiHist[0].timestamp;
-      oiWindowEnd = +oiHist[oiHist.length - 1].timestamp;
+      oiWindowStart = +oiWindow[0].timestamp;
+      oiWindowEnd = +oiWindow[oiWindow.length - 1].timestamp;
     }
     var fundingAvg = NaN, fundingSeries = [];
     if (Array.isArray(fundingRows) && fundingRows.length) {
@@ -2042,12 +2060,25 @@
     var longShortSeries = seriesOf(longShortRows, function (row) { return +row.longShortRatio; });
     var takerSeries = seriesOf(takerRows, function (row) { return +row.buySellRatio; });
     var topPositionSeries = seriesOf(topPositionRows, function (row) { return +row.longShortRatio; });
+    // Funding: ranks the ROLLING 12-settlement average within the series of rolling averages —
+    // the same quantity the fallback threshold reads (fundingAvg), far less noisy than ranking a
+    // single settlement, and immune to the "last print" jitter.
+    var fundingRolling = [];
+    for (var f = 11; f < fundingSeries.length; f++) {
+      var windowSum = 0;
+      for (var w = f - 11; w <= f; w++) windowSum += fundingSeries[w];
+      fundingRolling.push(windowSum / 12);
+    }
+    // The futures/data series span only what Binance retains at this period (~42h at 5m, ~30d at
+    // 1d) — a TF-dependent window. Demand 100+ samples so 1d (30 rows) falls back to the fixed
+    // thresholds instead of a 3.3%-granularity percentile; funding (8h settlements, ~333d) is
+    // TF-independent and keeps the default minimum.
     var percentiles = {
-      funding: AnalyticsCore.percentileRank(fundingSeries, fundingSeries[fundingSeries.length - 1]),
-      longShort: AnalyticsCore.percentileRank(longShortSeries, longShortSeries[longShortSeries.length - 1]),
-      taker: AnalyticsCore.percentileRank(takerSeries, takerSeries[takerSeries.length - 1]),
-      topPosition: AnalyticsCore.percentileRank(topPositionSeries, topPositionSeries[topPositionSeries.length - 1]),
-      oi: AnalyticsCore.percentileRank(oiSeries, oiSeries[oiSeries.length - 1])
+      funding: AnalyticsCore.percentileRank(fundingRolling, fundingRolling[fundingRolling.length - 1]),
+      longShort: AnalyticsCore.percentileRank(longShortSeries, longShortSeries[longShortSeries.length - 1], 100),
+      taker: AnalyticsCore.percentileRank(takerSeries, takerSeries[takerSeries.length - 1], 100),
+      topPosition: AnalyticsCore.percentileRank(topPositionSeries, topPositionSeries[topPositionSeries.length - 1], 100),
+      oi: AnalyticsCore.percentileRank(oiSeries, oiSeries[oiSeries.length - 1], 100)
     };
     return {
       oiChangePct: oiChangePct,
@@ -2092,7 +2123,11 @@
     var key = symbol + ':' + period;
     var cached = state.derivativeCache[key];
     var staleAfterMs = derivativesStaleAfter(period);
-    if (!force && cached && Date.now() - cached.fetchedAt < DERIVATIVES_REFRESH_MS) return markDataset(cached.value, cached.fetchedAt, staleAfterMs);
+    // The 500-row series gain one point per period; refetching ~400KB every 15s buys nothing.
+    // Refresh at half the period (floor 15s) — staleness display is governed separately.
+    var unitMinutes = { '5m': 5, '15m': 15, '30m': 30, '1h': 60, '2h': 120, '4h': 240, '6h': 360, '12h': 720, '1d': 1440 }[period] || 5;
+    var refreshMs = Math.max(DERIVATIVES_REFRESH_MS, unitMinutes * 60 * 1000 / 2);
+    if (!force && cached && Date.now() - cached.fetchedAt < refreshMs) return markDataset(cached.value, cached.fetchedAt, staleAfterMs);
     var s = encodeURIComponent(symbol);
     var rows = await Promise.allSettled([
       // Longer windows feed the percentile engine (positioning vs the asset's OWN history).
@@ -2131,11 +2166,14 @@
    */
   function registerTrapVeto(symbol, interval, trap, lastCloseTime) {
     if (!trap || !trap.trap || !Number.isFinite(lastCloseTime)) return;
-    state.trapVeto = {
-      key: symbol + ':' + interval,
-      direction: trap.vetoDirection === 'short' ? 'short' : 'long',
-      until: lastCloseTime + trap.vetoBars * intervalToMs(interval)
-    };
+    var key = symbol + ':' + interval;
+    var direction = trap.vetoDirection === 'short' ? 'short' : 'long';
+    // A trap stays detectable while the sweep sits in the 5-bar lookback; re-registering on every
+    // refresh would slide the expiry to ~10-11 bars. An active same-direction veto keeps its
+    // original expiry; only a NEW direction (fresh opposite trap) replaces it.
+    var existing = state.trapVeto;
+    if (existing && existing.key === key && existing.direction === direction && lastCloseTime < existing.until) return;
+    state.trapVeto = { key: key, direction: direction, until: lastCloseTime + trap.vetoBars * intervalToMs(interval) };
   }
   function activeTrapVeto(a) {
     var veto = state.trapVeto;
@@ -2609,7 +2647,9 @@
     if (Number.isFinite(detail.topPositionRatio) && detail.topPositionRatio > 1.7) { risk -= 2; reasons.push({ tone: 'bad', text: 'Posicoes dos top traders estao concentradas em long.' }); }
     text('futuresRegime', smart.oiPhase);
     text('futuresOi', a.oi && Number.isFinite(+a.oi.openInterest) ? compactNumber(+a.oi.openInterest) + ' | ' + percent(detail.oiChangePct, 2) : '--');
-    var carryInfo = AnalyticsCore.calculateCarryRegime({ fundingAvg: detail.fundingAvg, oiPercentile: detail.percentiles && detail.percentiles.oi });
+    // percentiles vem do detail CRU (scoreableDerivativeDetail so copia as metricas pontuaveis).
+    var rawPercentiles = a.derivativeDetail && a.derivativeDetail.percentiles ? a.derivativeDetail.percentiles : {};
+    var carryInfo = AnalyticsCore.calculateCarryRegime({ fundingAvg: detail.fundingAvg, oiPercentile: rawPercentiles.oi });
     text('futuresFunding', (Number.isFinite(a.funding) ? percent(a.funding * 100, 4) : '--') + ' / ' + (Number.isFinite(detail.fundingAvg) ? percent(detail.fundingAvg * 100, 4) : '--') + (Number.isFinite(carryInfo.annualizedCarryPct) ? ' | carry ' + percent(carryInfo.annualizedCarryPct, 1) + ' a.a.' + (carryInfo.deltaNeutral ? ' (delta-neutro)' : '') : ''));
     text('futuresBasis', Number.isFinite(detail.basisRate) ? percent(detail.basisRate * 100, 4) + ' | ' + money(a.basis) : Number.isFinite(a.basis) ? money(a.basis) : '--');
     text('futuresLongShort', Number.isFinite(detail.longShortRatio) ? 'global ' + num(detail.longShortRatio, 2) + 'x' + (Number.isFinite(detail.topPositionRatio) ? ' | top ' + num(detail.topPositionRatio, 2) + 'x' : '') : '--');
@@ -2653,7 +2693,9 @@
   function renderOptions() {
     var data = state.options, nearest = data && data.nearest, market = data && data.market, dvol = data && data.dvol;
     text('optionsStatus', data ? data.currency + (data.isProxy ? ' proxy informativo | ' + datasetStatus(data) + ' | fora do Setup Score' : ' nativo | ' + datasetStatus(data) + (!eligibleDataset(data) ? ' | fora do score' : '')) : 'sem leitura');
-    text('dvolLine', dvol && Number.isFinite(+dvol.latest) ? num(+dvol.latest, 2) + ' | 7d ' + percent(+dvol.change7d, 1) : '--');
+    // toFiniteNumber: +null coage para 0 e o painel afirmaria "DVOL 0.00" quando o indice
+    // simplesmente nao existe (caso SOL na Deribit).
+    text('dvolLine', dvol && AnalyticsCore.toFiniteNumber(dvol.latest) !== null ? num(+dvol.latest, 2) + ' | 7d ' + (AnalyticsCore.toFiniteNumber(dvol.change7d) !== null ? percent(+dvol.change7d, 1) : '--') : '--');
     text('atmIvLine', nearest && Number.isFinite(+nearest.atmIv) ? num(+nearest.atmIv, 2) + '% @ ' + money(+nearest.atmStrike) : '--');
     text('putCallOiLine', market && Number.isFinite(+market.putCallOi) ? num(+market.putCallOi, 2) + 'x | OI ' + num((+market.putOi || 0), 1) + '/' + num((+market.callOi || 0), 1) : '--');
     text('putCallVolumeLine', market && Number.isFinite(+market.putCallVolume) ? num(+market.putCallVolume, 2) + 'x | ' + compactMoney(+market.putVolumeUsd || 0) + '/' + compactMoney(+market.callVolumeUsd || 0) : '--');

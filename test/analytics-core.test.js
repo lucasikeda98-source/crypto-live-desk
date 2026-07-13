@@ -241,15 +241,29 @@ test('mempool BTC somente influencia o score nativo de Bitcoin', () => {
 
 // ===== Ciclo B: percentis, estrutura, divergencia, climax =====
 
-test('percentileRank: posicao do valor na propria distribuicao, com minimo de amostras', () => {
+test('percentileRank: midrank robusto a empates (funding pinado no baseline = neutro)', () => {
   const series = Array.from({ length: 100 }, (_, i) => i + 1); // 1..100
-  assert.equal(core.percentileRank(series, 100), 100);
-  assert.equal(core.percentileRank(series, 50), 50);
+  assert.equal(core.percentileRank(series, 100), 99.5);
+  assert.equal(core.percentileRank(series, 50), 49.5);
   assert.equal(core.percentileRank(series, 0.5), 0);
+  // Funding pinado em 0.0001 por semanas: valor igual a moda deve ler ~50, nunca extremo.
+  assert.equal(core.percentileRank(Array(40).fill(0.0001), 0.0001), 50);
+  // Caso misto: 700 no baseline, 250 abaixo, 50 acima -> midrank = (250+350)/1000 = 60, nao 95.
+  const pinned = [].concat(Array(250).fill(0.00005), Array(700).fill(0.0001), Array(50).fill(0.0002));
+  assert.equal(core.percentileRank(pinned, 0.0001), 60);
   // Serie insuficiente nao produz percentil (fallback para thresholds fixos).
   assert.equal(core.percentileRank([1, 2, 3], 2, 30), null);
   assert.equal(core.percentileRank(null, 2), null);
   assert.equal(core.percentileRank(series, NaN), null);
+});
+
+test('percentileExtremeContribution: rampa continua a partir do limiar da cauda (sem degrau)', () => {
+  assert.equal(core.percentileExtremeContribution(90, 6, false), 0, 'exatamente no limiar = 0');
+  closeTo(core.percentileExtremeContribution(90.01, 6, false), -0.006, 0.001);
+  closeTo(core.percentileExtremeContribution(95, 6, false), -3);
+  closeTo(core.percentileExtremeContribution(100, 6, false), -6);
+  closeTo(core.percentileExtremeContribution(5, 6, false), 3);
+  closeTo(core.percentileExtremeContribution(95, 4, true), 2, 1e-9);
 });
 
 test('percentis substituem thresholds fixos nos derivativos quando a serie e suficiente', () => {
@@ -259,7 +273,7 @@ test('percentis substituem thresholds fixos nos derivativos quando a serie e suf
   const crowded = core.calculateDerivativeDetailContribution({
     detail: detail({ fundingAvg: 0.0002 }), percentiles: { funding: 98 }, asOf
   });
-  assert.ok(crowded <= -5, `funding p98 deve pontuar <= -5, veio ${crowded}`);
+  assert.ok(crowded <= -4.5, `funding p98 deve pontuar <= -4.5, veio ${crowded}`);
   // Mesmo valor absoluto com percentil neutro = 0 (o threshold fixo de 0.0002 tambem daria 0).
   const typical = core.calculateDerivativeDetailContribution({
     detail: detail({ fundingAvg: 0.0002 }), percentiles: { funding: 55 }, asOf
@@ -269,7 +283,7 @@ test('percentis substituem thresholds fixos nos derivativos quando a serie e suf
   const fuel = core.calculateDerivativeDetailContribution({
     detail: detail({ fundingAvg: -0.00005 }), percentiles: { funding: 3 }, asOf
   });
-  assert.ok(fuel >= 5, `funding p3 deve pontuar >= +5, veio ${fuel}`);
+  assert.ok(fuel >= 4, `funding p3 deve pontuar >= +4, veio ${fuel}`);
   // Varejo (longShort) e contrarian; top traders (topPosition) sao seguidos.
   const retailCrowded = core.calculateDerivativeDetailContribution({
     detail: detail({ longShortRatio: 1.2 }), percentiles: { longShort: 95 }, asOf
