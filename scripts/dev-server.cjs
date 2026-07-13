@@ -19,7 +19,8 @@ const apiHandlers = {
   '/api/tradfi': '../api/tradfi',
   '/api/options': '../api/options',
   '/api/institutional': '../api/institutional',
-  '/api/market': '../api/market'
+  '/api/market': '../api/market',
+  '/api/defillama': '../api/defillama'
 };
 
 const server = http.createServer((request, response) => {

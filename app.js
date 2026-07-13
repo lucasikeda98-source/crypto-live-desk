@@ -916,7 +916,7 @@
       fetchJSON('https://api.alternative.me/fng/?limit=1', 9000, 'Alternative.me'),
       fetchJSON('/api/market', 22000, 'Market data'),
       fetchJSON('https://api.llama.fi/v2/chains', 11000, 'DefiLlama'),
-      fetchJSON('https://api.llama.fi/protocols', 12000, 'DefiLlama'),
+      fetchJSON('/api/defillama', 12000, 'DefiLlama'),
       fetchJSON('https://stablecoins.llama.fi/stablecoins?includePrices=true', 14000, 'DefiLlama stablecoins'),
       fetchJSON('https://api.llama.fi/overview/dexs', 11000, 'DefiLlama DEX'),
       fetchJSON('https://api.coinpaprika.com/v1/global', 9000, 'CoinPaprika'),
@@ -949,7 +949,9 @@
     var trending = marketBundle.trending;
     if (trending && trending.coins) external.trending = trending.coins.map(function (row) { return row.item || row; }).filter(Boolean).slice(0, 8);
     external.chains = Array.isArray(value(rows[2])) ? value(rows[2]) : [];
-    external.protocols = Array.isArray(value(rows[3])) ? value(rows[3]) : [];
+    var defiProtocols = value(rows[3]);
+    external.protocols = defiProtocols && Array.isArray(defiProtocols.protocols) ? defiProtocols.protocols
+      : Array.isArray(defiProtocols) ? defiProtocols : [];
     external.stablecoins = value(rows[4]);
     external.dex = value(rows[5]);
     external.paprikaGlobal = value(rows[6]);
@@ -1014,20 +1016,40 @@
     var protocols = Array.isArray(dex.protocols) ? dex.protocols : [];
     return protocols.reduce(function (sum, item) { return sum + (+item.total24h || +item.volume24h || 0); }, 0);
   }
+  // Memo keyed by external.fetchedAt so the board's 24 cards don't rescan the protocol/chain
+  // lists on every 3s tick; a new external snapshot resets the cache.
+  var contextMemo = { stamp: -1, chain: {}, protocol: {} };
+  function contextMemoBucket(kind) {
+    var stamp = (state.external && state.external.fetchedAt) || 0;
+    if (contextMemo.stamp !== stamp) contextMemo = { stamp: stamp, chain: {}, protocol: {} };
+    return contextMemo[kind];
+  }
   function findChainContext(symbol) {
+    var bucket = contextMemoBucket('chain');
+    if (Object.prototype.hasOwnProperty.call(bucket, symbol)) return bucket[symbol];
     var ctx = contextFor(symbol);
-    if (!ctx.chain || !state.external || !state.external.chains) return null;
-    var key = normKey(ctx.chain);
-    return state.external.chains.find(function (chain) {
-      return normKey(chain.name) === key || normKey(chain.tokenSymbol) === key || normKey(chain.name).indexOf(key) !== -1;
-    }) || null;
+    var result = null;
+    if (ctx.chain && state.external && state.external.chains) {
+      var key = normKey(ctx.chain);
+      result = state.external.chains.find(function (chain) {
+        return normKey(chain.name) === key || normKey(chain.tokenSymbol) === key || normKey(chain.name).indexOf(key) !== -1;
+      }) || null;
+    }
+    bucket[symbol] = result;
+    return result;
   }
   function findProtocolContext(symbol) {
+    var bucket = contextMemoBucket('protocol');
+    if (Object.prototype.hasOwnProperty.call(bucket, symbol)) return bucket[symbol];
     var ctx = contextFor(symbol);
-    if (!state.external || !state.external.protocols) return null;
-    var explicitKeys = ctx.protocol ? [ctx.protocol] : [];
-    var fallbackKeys = ctx.protocol ? [] : [ctx.gecko, baseAsset(symbol), ASSET_NAMES[symbol]];
-    return AnalyticsCore.findProtocolMatch(state.external.protocols, explicitKeys, fallbackKeys);
+    var result = null;
+    if (state.external && state.external.protocols) {
+      var explicitKeys = ctx.protocol ? [ctx.protocol] : [];
+      var fallbackKeys = ctx.protocol ? [] : [ctx.gecko, baseAsset(symbol), ASSET_NAMES[symbol]];
+      result = AnalyticsCore.findProtocolMatch(state.external.protocols, explicitKeys, fallbackKeys);
+    }
+    bucket[symbol] = result;
+    return result;
   }
   function selectedMarket(symbol) {
     var ctx = contextFor(symbol);
