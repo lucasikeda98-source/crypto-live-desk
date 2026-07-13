@@ -1,5 +1,9 @@
 # Registro de transicao Codex -> Claude Code
 
+> **Proxima sessao:** o plano de continuidade (itens em aberto + recomendacoes) esta em
+> `HANDOFF_PROXIMA_SESSAO.md`. As revisoes do Claude Code estao ao final deste arquivo
+> (RC-001, RC-002, RC-003).
+
 ## Objetivo
 
 Este arquivo evidencia as mudancas realizadas pelo Codex a partir do marco abaixo. Todas essas mudancas devem ser revisadas pelo Claude Code quando o acesso estiver disponivel novamente, antes de serem consideradas alinhadas definitivamente com a linha de raciocinio anterior do projeto.
