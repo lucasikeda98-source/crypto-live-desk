@@ -79,7 +79,7 @@
     ARBUSDT: { gecko: 'arbitrum', paprika: 'arb-arbitrum', chain: 'Arbitrum', kind: 'Ethereum L2', narrative: 'ARB depende de TVL, volume DEX, atividade de L2 e calendario de desbloqueios.' },
     OPUSDT: { gecko: 'optimism', paprika: 'op-optimism', chain: 'Optimism', kind: 'Ethereum L2', narrative: 'OP reage a atividade do Superchain, TVL, receitas de L2 e desbloqueios de tokens.' }
   };
-  var state = { symbol: 'BTCUSDT', interval: '5m', view: 'dashboard', assetTab: 'summary', live: true, refreshing: false, pendingRefresh: false, boardRefreshing: false, boardPendingRefresh: false, contextRefreshing: false, chainRefreshing: false, timer: null, klines: [], analysis: null, board: [], boardFetchedAt: 0, boardInterval: '', sort: 'score', chain: null, chainFetchedAt: 0, news: [], newsFetchedAt: 0, newsAttemptedAt: 0, newsMode: 'auto', newsSources: [], external: {}, externalFetchedAt: 0, derivativeCache: {}, mtfCache: {}, mtf: null, historyProfiles: {}, historyCandles: {}, historyLoading: {}, historySweepStarted: false, coinMetricsCache: {}, coinMetrics: null, optionsCache: {}, options: null, optionsFetchedAt: 0, institutionalCache: {}, institutional: null, institutionalFetchedAt: 0, liquidations: [], liquidationSocket: null, liquidationSymbol: '', liquidationConnected: false, liquidationReconnectTimer: null, apiHealth: {}, boardFailures: {}, quantChecks: null, chart: { ema9: true, ema21: true, ema50: true, ema200: false, bb: false, vwap: false, supertrend: false, levels: true, fib: false, patterns: true, candles: 120 } };
+  var state = { symbol: 'BTCUSDT', interval: '5m', view: 'dashboard', assetTab: 'summary', live: true, refreshing: false, pendingRefresh: false, boardRefreshing: false, boardPendingRefresh: false, contextRefreshing: false, chainRefreshing: false, timer: null, klines: [], analysis: null, board: [], boardFetchedAt: 0, boardInterval: '', sort: 'score', chain: null, chainFetchedAt: 0, news: [], newsFetchedAt: 0, newsAttemptedAt: 0, newsMode: 'auto', newsSources: [], external: {}, externalFetchedAt: 0, derivativeCache: {}, mtfCache: {}, mtf: null, historyProfiles: {}, historyCandles: {}, historyLoading: {}, historySweepStarted: false, coinMetricsCache: {}, coinMetrics: null, optionsCache: {}, options: null, optionsFetchedAt: 0, institutionalCache: {}, institutional: null, institutionalFetchedAt: 0, liquidations: [], liquidationSocket: null, liquidationSymbol: '', liquidationConnected: false, liquidationReconnectTimer: null, apiHealth: {}, boardFailures: {}, signalMachineEval: {}, quantChecks: null, chart: { ema9: true, ema21: true, ema50: true, ema200: false, bb: false, vwap: false, supertrend: false, levels: true, fib: false, patterns: true, candles: 120 } };
   var $ = function (id) { return document.getElementById(id); };
   function analysisMatchesSelection(analysis) {
     if (!analysis) return false;
@@ -272,14 +272,16 @@
     // so old data neither lingers nor eats into the localStorage quota.
     try {
       var keepHistoryPrefix = 'liveDesk.history.' + MODEL_VERSION + '.';
-      var keepJournalKey = 'cld-signal-journal:' + MODEL_VERSION;
+      var versionedPrefixes = ['cld-signal-journal:', 'cld-signal-machine:', 'cld-signal-trades:'];
       var stale = [];
       for (var i = 0; i < localStorage.length; i++) {
         var key = localStorage.key(i);
         if (!key) continue;
         var staleHistory = key.indexOf('liveDesk.history.') === 0 && key.indexOf(keepHistoryPrefix) !== 0;
-        var staleJournal = key.indexOf('cld-signal-journal:') === 0 && key !== keepJournalKey;
-        if (staleHistory || staleJournal) stale.push(key);
+        var staleVersioned = versionedPrefixes.some(function (prefix) {
+          return key.indexOf(prefix) === 0 && key !== prefix + MODEL_VERSION;
+        });
+        if (staleHistory || staleVersioned) stale.push(key);
       }
       stale.forEach(function (key) { try { localStorage.removeItem(key); } catch (removeError) { /* ignore */ } });
       return stale.length;
@@ -2276,6 +2278,7 @@
     stampAnalysisSnapshot(analysis, 'selected-refresh', { symbol: symbol, interval: interval, requestId: requestId, signalCloseTime: analysis.signalCandle.closeTime });
     render(value(results[3]), value(results[4]), value(results[2]), chain || {}, value(results[1]));
     maybeRecordSignal(analysis, confluenceFor(analysis));
+    runSignalMachine(analysis);
     processAlerts(analysis, confluenceFor(analysis));
     connectLiquidationStream(symbol);
     ensureHistoricalProfile(symbol, true).then(function (profile) {
@@ -2573,7 +2576,14 @@
   }
   function buildTradePlan(a) {
     var c = confluenceFor(a), atrValue = Number.isFinite(a.atr14) ? a.atr14 : a.close * 0.02;
-    var side = c.dataConfidence >= 40 && c.total >= 42 && c.multi.score >= 0 ? 'long' : 'wait';
+    var gates = c.gates || {};
+    // Direcional nos DOIS lados, com os mesmos gates do motor: HTF disponivel/nao-contrario e
+    // sem veto pos-trap. Setup fortemente negativo agora autoriza plano SHORT (era long-only).
+    var side = 'wait';
+    if (c.dataConfidence >= 40 && gates.htfAvailable) {
+      if (c.total >= 42 && c.multi.score >= 0 && !gates.htfVetoLong && gates.trapVeto !== 'long') side = 'long';
+      else if (c.total <= -42 && c.multi.score <= 0 && !gates.htfVetoShort && gates.trapVeto !== 'short') side = 'short';
+    }
     if (side === 'wait') {
       return {
         side: 'Aguardar',
@@ -2584,26 +2594,50 @@
           { label: 'Take profits', value: 'Apos confirmacao', cls: 'target' },
           { label: 'Risco/retorno', value: 'Sem operacao' }
         ],
-        rationale: c.dataConfidence < 40 ? 'Data Confidence abaixo de 40%: nenhum plano direcional e liberado.' : 'Nao ha recomendacao direcional: o plano so e ativado depois de rompimento, reteste e alinhamento de fluxo. Setup negativo indica cautela, nao autoriza short.'
+        rationale: c.dataConfidence < 40 ? 'Data Confidence abaixo de 40%: nenhum plano direcional e liberado.'
+          : gates.trapVeto ? 'Veto pos-trap ativo: aguardar as barras de resfriamento antes de qualquer plano direcional.'
+            : !gates.htfAvailable ? 'Gate HTF indisponivel (1d/1w sem leitura): plano direcional exige o quadro completo.'
+              : 'Sem confluencia direcional suficiente: o plano e ativado por rompimento, reteste e alinhamento de fluxo.'
+      };
+    }
+    if (side === 'short') {
+      // Stop ESTRUTURAL atras da resistencia (nao ATR generico); invalidacao = reclaim do nivel.
+      var shortEntryHigh = Math.min(a.resistances[0] || a.close + atrValue * 0.5, a.close + atrValue * 0.55);
+      var shortEntryLow = a.close - atrValue * 0.12;
+      var shortStop = (a.resistances[0] || a.close + atrValue) + atrValue * 0.25;
+      var shortMid = (shortEntryLow + shortEntryHigh) / 2;
+      var shortRisk = shortStop - shortMid;
+      var shortTargets = [1.5, 2.2, 3].map(function (rr) { return shortMid - shortRisk * rr; });
+      return {
+        side: 'Short condicional',
+        levels: [
+          { label: 'Entrada', value: money(shortEntryLow) + ' a ' + money(shortEntryHigh) },
+          { label: 'Stop / invalidacao', value: money(shortStop) + ' (reclaim da resistencia)', cls: 'stop' },
+          { label: 'TP1', value: money(shortTargets[0]), cls: 'target' },
+          { label: 'TP2', value: money(shortTargets[1]), cls: 'target' },
+          { label: 'TP3', value: money(shortTargets[2]), cls: 'target' }
+        ],
+        rationale: 'Plano vendedor: setup ' + signed(c.total) + ' com HTF nao-contrario. Stop estrutural atras da resistencia; invalidacao e o reclaim do nivel, nao uma porcentagem.'
       };
     }
     var entryLow = Math.max(a.supports[0] || a.close - atrValue * 0.5, a.close - atrValue * 0.55);
     var entryHigh = a.close + atrValue * 0.12;
-    var stopHigh = entryLow - atrValue * 0.85;
-    var stopLow = entryLow - atrValue * 1.15;
-    var risk = ((stopLow + stopHigh) / 2);
-    var longRisk = ((entryLow + entryHigh) / 2) - risk;
-    var targets = [1.5, 2.2, 3].map(function (rr) { return ((entryLow + entryHigh) / 2) + longRisk * rr; });
+    // Stop estrutural: atras do suporte (swing) com buffer de ATR — consistente com o motor v2.
+    var structuralStop = (a.supports[0] || a.close - atrValue) - atrValue * 0.25;
+    var invalidation = a.structureShift && Number.isFinite(a.structureShift.brokenLevel) && a.structureShift.direction === 'bull' ? a.structureShift.brokenLevel : null;
+    var mid = (entryLow + entryHigh) / 2;
+    var longRisk = mid - structuralStop;
+    var targets = [1.5, 2.2, 3].map(function (rr) { return mid + longRisk * rr; });
     return {
       side: 'Long condicional',
       levels: [
         { label: 'Entrada', value: money(entryLow) + ' a ' + money(entryHigh) },
-        { label: 'Stop / invalidacao', value: money(Math.min(stopLow, stopHigh)) + ' a ' + money(Math.max(stopLow, stopHigh)), cls: 'stop' },
+        { label: 'Stop / invalidacao', value: money(structuralStop) + (invalidation ? ' (CHoCH em ' + money(invalidation) + ')' : ' (atras do swing)'), cls: 'stop' },
         { label: 'TP1', value: money(targets[0]), cls: 'target' },
         { label: 'TP2', value: money(targets[1]), cls: 'target' },
         { label: 'TP3', value: money(targets[2]), cls: 'target' }
       ],
-      rationale: 'Faixas baseadas em ATR 14, suporte/resistencia e Setup Score preview ' + signed(c.total) + '. Componentes tecnicos usam candles fechados; fluxo e derivativos usam o snapshot mais recente. Tamanho da posicao deve respeitar o risco por trade.'
+      rationale: 'Stop estrutural atras do suporte + Setup Score preview ' + signed(c.total) + '. Componentes tecnicos usam candles fechados; fluxo e derivativos usam o snapshot mais recente. Tamanho da posicao deve respeitar o risco por trade.'
     };
   }
   function renderHistoricalLab(a) {
@@ -3219,6 +3253,91 @@
     select.value = state.symbol;
   }
   var SIGNAL_JOURNAL_KEY = 'cld-signal-journal:' + MODEL_VERSION;
+  // ===== Motor de sinais v2 (Ciclo C): state machine por par+TF, trades simulados =====
+  var SIGNAL_MACHINE_KEY = 'cld-signal-machine:' + MODEL_VERSION;
+  var TRADE_JOURNAL_KEY = 'cld-signal-trades:' + MODEL_VERSION;
+  var TRADE_JOURNAL_CAP = 500;
+  function loadMachineStates() { return safeStorageGet(SIGNAL_MACHINE_KEY) || {}; }
+  function saveMachineStates(map) { safeStorageSet(SIGNAL_MACHINE_KEY, map); }
+  function loadTradeJournal() {
+    var rows = safeStorageGet(TRADE_JOURNAL_KEY);
+    return Array.isArray(rows) ? rows.filter(function (row) { return row && Number.isFinite(+row.pnlPct); }) : [];
+  }
+  function saveTradeJournal(records) { safeStorageSet(TRADE_JOURNAL_KEY, records.slice(-TRADE_JOURNAL_CAP)); }
+  /**
+   * One evaluation per CLOSED candle per par+TF. The machine consumes the same confluence the
+   * panel shows (score, gates, veto) plus the closed candle OHLC — no intra-candle churn.
+   */
+  function runSignalMachine(analysis) {
+    if (!analysis || !analysis.signalCandle || !Number.isFinite(analysis.signalCandle.closeTime)) return;
+    var key = state.symbol + ':' + state.interval;
+    if (state.signalMachineEval[key] === analysis.signalCandle.closeTime) return;
+    var confluence = confluenceFor(analysis);
+    if (confluence.dataConfidence < 40) return;
+    var machines = loadMachineStates();
+    var snapshot = {
+      symbol: state.symbol,
+      interval: state.interval,
+      total: confluence.total,
+      close: analysis.signalCandle.close,
+      high: analysis.signalCandle.high,
+      low: analysis.signalCandle.low,
+      closeTime: analysis.signalCandle.closeTime,
+      atr: analysis.atr14,
+      regime: analysis.regime,
+      supports: analysis.supports,
+      resistances: analysis.resistances,
+      structureShift: analysis.structureShift,
+      divergence: analysis.divergence,
+      trap: analysis.trap,
+      squeeze: analysis.squeeze,
+      gates: confluence.gates,
+      inputSnapshotId: analysis.snapshot ? analysis.snapshot.inputSnapshotId : null
+    };
+    var result = AnalyticsCore.evaluateSignalTransition(machines[key] || null, snapshot);
+    state.signalMachineEval[key] = analysis.signalCandle.closeTime;
+    if (result.state) machines[key] = result.state; else delete machines[key];
+    saveMachineStates(machines);
+    if (result.event && result.event.type === 'exit') {
+      var journal = loadTradeJournal();
+      journal.push(result.event.record);
+      saveTradeJournal(journal);
+    }
+    renderTradeEngine();
+  }
+  function renderTradeEngine() {
+    var machines = loadMachineStates();
+    var active = machines[state.symbol + ':' + state.interval];
+    text('activeTradeLine', active
+      ? 'Posicao simulada ' + active.side.toUpperCase() + ' em ' + money(active.entryPrice) + ' (gatilho ' + active.trigger + ', score ' + signed(active.entryScore) + ') | stop ' + money(active.stopPrice) + ' | alvo ' + money(active.targetPrice) + ' | ' + active.barsHeld + '/' + active.maxBars + ' barras | MFE ' + percent(active.mfePct, 2) + ' MAE ' + percent(active.maePct, 2)
+      : 'Sem posicao simulada aberta neste par/TF.');
+    var journal = loadTradeJournal();
+    var rowsNode = $('tradeRows');
+    if (rowsNode) {
+      rowsNode.innerHTML = journal.length ? journal.slice(-25).reverse().map(function (row) {
+        return '<tr><td>' + escapeHTML(new Date(row.exitTime).toLocaleString('pt-BR')) + '</td><td>' + escapeHTML(baseAsset(row.symbol || '')) + '</td><td>' + escapeHTML(intervalLabel(row.interval || '--')) + '</td><td>' + escapeHTML(row.side || '--') + '</td><td>' + escapeHTML(row.trigger || '--') + '</td><td>' + escapeHTML(row.regime || '--') + '</td><td class="' + (+row.pnlPct >= 0 ? 'up' : 'down') + '">' + percent(+row.pnlPct, 2) + '</td><td>' + (Number.isFinite(+row.rMultiple) ? num(+row.rMultiple, 2) + 'R' : '--') + '</td><td>' + percent(+row.maePct, 1) + ' / ' + percent(+row.mfePct, 1) + '</td><td>' + (Number.isFinite(+row.durationBars) ? +row.durationBars : '--') + '</td><td>' + escapeHTML(row.exitReason || '--') + '</td></tr>';
+      }).join('') : '<tr><td colspan="11">Nenhum trade simulado fechado nesta versao do modelo.</td></tr>';
+    }
+    var summaryNode = $('tradeSummaryRows');
+    if (summaryNode) {
+      var summary = AnalyticsCore.summarizeTradeJournal(journal);
+      summaryNode.innerHTML = summary.cells.length ? summary.cells.slice(0, 12).map(function (cell) {
+        return '<tr><td>' + escapeHTML(cell.regime) + '</td><td>' + escapeHTML(cell.trigger) + '</td><td>' + escapeHTML(cell.band) + '</td><td>' + cell.count + '</td><td>' + cell.hitRate + '%</td><td>' + (Number.isFinite(cell.avgR) ? num(cell.avgR, 2) + 'R' : '--') + '</td><td>' + (cell.sufficient ? 'ok' : 'insuficiente') + '</td></tr>';
+      }).join('') : '<tr><td colspan="7">--</td></tr>';
+    }
+  }
+  async function runLagBacktest() {
+    text('lagBacktestLine', 'Rodando backtest de lag sobre o historico diario...');
+    try {
+      await ensureHistoricalProfile(state.symbol, true);
+      var daily = state.historyCandles[state.symbol];
+      if (!daily || daily.length < 260) { text('lagBacktestLine', 'Historico diario insuficiente para o backtest.'); return; }
+      var lag = AnalyticsCore.backtestDetectorLag(daily);
+      text('lagBacktestLine', 'Lag do CHoCH em ' + baseAsset(state.symbol) + ' (diario): topos ' + lag.tops.detected + '/' + lag.tops.count + ' detectados, mediana ' + (Number.isFinite(lag.tops.medianLagBars) ? lag.tops.medianLagBars + ' barras' : '--') + ' | fundos ' + lag.bottoms.detected + '/' + lag.bottoms.count + ', mediana ' + (Number.isFinite(lag.bottoms.medianLagBars) ? lag.bottoms.medianLagBars + ' barras' : '--') + '.');
+    } catch (error) {
+      text('lagBacktestLine', 'Backtest indisponivel: ' + (error && error.message || 'erro'));
+    }
+  }
   var SIGNAL_JOURNAL_CAP = 500;
   function validSignalRecord(record) {
     return !!(record && typeof record === 'object'
@@ -3264,6 +3383,7 @@
   function renderSignals() {
     var rows = $('signalRows');
     if (!rows) return;
+    renderTradeEngine();
     var records = loadSignalJournal();
     var visible = records.slice(-40).reverse();
     var pct = function (value) { return value === null || value === undefined ? '--' : percent(+value, 2); };
@@ -3492,6 +3612,8 @@
     on('candleCountSelect', 'change', function (e) { state.chart.candles = +e.target.value || 120; drawPriceChart(); });
     on('evaluateSignalsButton', 'click', evaluateSignalOutcomes);
     on('clearSignalsButton', 'click', function () { saveSignalJournal([]); renderSignals(); });
+    on('lagBacktestButton', 'click', runLagBacktest);
+    on('clearTradesButton', 'click', function () { saveTradeJournal([]); saveMachineStates({}); renderTradeEngine(); });
     on('exportSnapshotButton', 'click', exportSnapshot);
     on('alertsEnabled', 'change', function (e) {
       if (!e.target.checked) { alertState.enabled = false; text('alertsStatus', 'Desativados'); return; }
