@@ -1590,6 +1590,10 @@
       oiPriceChangePct: a.oiPriceChangePct,
       percentiles: detailPercentiles,
       muteOiQuadrant: carry.muteBuildup,
+      priceChange7dPct: (function () {
+        var market = eligibleDataset(state.external.marketData) ? selectedMarket(state.symbol) : null;
+        return market ? AnalyticsCore.toFiniteNumber(market.price_change_percentage_7d_in_currency) : null;
+      })(),
       asOf: Date.now()
     });
     // Funding scores ONCE in the setup: via the detail contribution (percentile or fundingAvg

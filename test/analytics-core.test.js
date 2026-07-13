@@ -469,6 +469,19 @@ test('weightedMedian pondera amostras por peso (decay temporal do historico)', (
   assert.ok(Number.isNaN(core.weightedMedian([1, 2], [0, 0])));
 });
 
+test('DVOL direcional: vol subindo so e medo quando o preco nao sobe junto', () => {
+  const asOf = 10_000;
+  const optionsWith = (change7d) => ({ observedAt: 9_000, staleAfterMs: 2_000, dataStatus: 'fresh', dvol: { change7d } });
+  // Vol +15% com preco caindo = stress -> -2.
+  assert.equal(core.calculateDerivativeDetailContribution({ options: optionsWith(15), priceChange7dPct: -4, asOf }), -2);
+  // Vol +15% com preco subindo = spot-vol positivo de rally (compra de calls), nao medo -> 0.
+  assert.equal(core.calculateDerivativeDetailContribution({ options: optionsWith(15), priceChange7dPct: 6, asOf }), 0);
+  // Sem leitura de preco, mantem a leitura conservadora de stress.
+  assert.equal(core.calculateDerivativeDetailContribution({ options: optionsWith(15), asOf }), -2);
+  // Vol crush continua construtivo.
+  assert.equal(core.calculateDerivativeDetailContribution({ options: optionsWith(-15), priceChange7dPct: 2, asOf }), 1);
+});
+
 test('regime delta-neutro muta o quadrante de OI no scorer de derivativos', () => {
   const asOf = 10_000;
   const detail = { observedAt: 9_000, staleAfterMs: 2_000, dataStatus: 'fresh', oiChangePct: 8 };

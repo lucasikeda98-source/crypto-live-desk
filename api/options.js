@@ -15,7 +15,9 @@ function parseInstrument(row) {
   const match = parts[1].match(/^(\d{1,2})([A-Z]{3})(\d{2})$/);
   if (!match || MONTHS[match[2]] === undefined) return null;
   const expiry = Date.UTC(2000 + Number(match[3]), MONTHS[match[2]], Number(match[1]), 8);
-  return { ...row, expiry, strike: Number(parts[2]), optionType: parts[3] };
+  // USDC-settled families (e.g. SOL_USDC-13JUL26-5d9-C) encode decimal strikes with 'd'.
+  const strike = Number(parts[2].replace('d', '.'));
+  return { ...row, expiry, strike, optionType: parts[3] };
 }
 
 function maxPain(options) {
@@ -64,11 +66,21 @@ module.exports = async function handler(request, response) {
   const now = Date.now();
   const start = now - 7 * 24 * 60 * 60 * 1000;
   try {
-    const [summaryPayload, dvolPayload] = await Promise.all([
-      getJson('https://www.deribit.com/api/v2/public/get_book_summary_by_currency?currency=' + currency + '&kind=option'),
+    // Deribit indexes SOL options under the USDC settlement currency (SOL_USDC-*); querying
+    // currency=SOL returns an empty book and used to 503 the whole block permanently.
+    const summaryCurrency = currency === 'SOL' ? 'USDC' : currency;
+    const instrumentPrefix = currency === 'SOL' ? 'SOL_USDC-' : null;
+    // allSettled: a DVOL outage must not take down put/call, max pain and IV (and SOL may not
+    // have a DVOL index at all) — the summary is the load-bearing payload.
+    const [summarySettled, dvolSettled] = await Promise.allSettled([
+      getJson('https://www.deribit.com/api/v2/public/get_book_summary_by_currency?currency=' + summaryCurrency + '&kind=option'),
       getJson('https://www.deribit.com/api/v2/public/get_volatility_index_data?currency=' + currency + '&start_timestamp=' + start + '&end_timestamp=' + now + '&resolution=3600'),
     ]);
-    const options = (summaryPayload.result || []).map(parseInstrument).filter((row) => row && row.expiry > now);
+    if (summarySettled.status !== 'fulfilled') throw new Error(String(summarySettled.reason && summarySettled.reason.message || 'Deribit indisponivel'));
+    const summaryPayload = summarySettled.value;
+    const dvolPayload = dvolSettled.status === 'fulfilled' ? dvolSettled.value : null;
+    const summaryRows = (summaryPayload.result || []).filter((row) => !instrumentPrefix || String(row.instrument_name || '').startsWith(instrumentPrefix));
+    const options = summaryRows.map(parseInstrument).filter((row) => row && Number.isFinite(row.strike) && row.expiry > now);
     if (!options.length) throw new Error('Sem opcoes ativas para ' + currency);
     const expiries = [...new Set(options.map((row) => row.expiry))].sort((a, b) => a - b);
     const nearestExpiry = expiries.find((expiry) => options.some((row) => row.expiry === expiry && Number(row.open_interest) > 0)) || expiries[0];
