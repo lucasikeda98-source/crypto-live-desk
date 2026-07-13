@@ -239,6 +239,72 @@ test('mempool BTC somente influencia o score nativo de Bitcoin', () => {
   assert.equal(altcoin.eligibleForScore, false);
 });
 
+test('formatUsd usa digitos significativos abaixo de $1 e 2 casas acima', () => {
+  // >= $1: duas casas, sem zeros a esquerda desnecessarios.
+  assert.equal(core.formatUsd(63780), '$63,780');
+  assert.equal(core.formatUsd(63780.5), '$63,780.5');
+  assert.equal(core.formatUsd(2.5), '$2.5');
+  // < $1: 4 digitos significativos (nao arredonda tudo para $0).
+  assert.equal(core.formatUsd(0.3812), '$0.3812');
+  assert.equal(core.formatUsd(0.0874563), '$0.08746');
+  assert.equal(core.formatUsd(0.000023419), '$0.00002342');
+  assert.equal(core.formatUsd(0.5), '$0.5');
+  // Zero e ruido numerico.
+  assert.equal(core.formatUsd(0), '$0');
+  assert.equal(core.formatUsd(1e-12), '$0');
+  // Ausencia nao vira zero.
+  assert.equal(core.formatUsd(null), '--');
+  assert.equal(core.formatUsd(NaN), '--');
+  assert.equal(core.formatUsd(''), '--');
+  // Numero de digitos significativos configuravel.
+  assert.equal(core.formatUsd(0.123456, 2), '$0.12');
+});
+
+test('classifyHttpError separa rate limit (429/418) de servidor e cliente', () => {
+  assert.equal(core.classifyHttpError(429), 'rateLimit');
+  assert.equal(core.classifyHttpError(418), 'rateLimit');
+  assert.equal(core.classifyHttpError(500), 'server');
+  assert.equal(core.classifyHttpError(503), 'server');
+  assert.equal(core.classifyHttpError(404), 'client');
+  assert.equal(core.classifyHttpError(400), 'client');
+  assert.equal(core.classifyHttpError(200), 'ok');
+});
+
+test('parseRetryAfter aceita segundos e data HTTP, nunca negativo', () => {
+  assert.equal(core.parseRetryAfter('30', 0), 30_000);
+  assert.equal(core.parseRetryAfter('0', 0), 0);
+  assert.equal(core.parseRetryAfter(null, 0), 0);
+  assert.equal(core.parseRetryAfter('lixo', 0), 0);
+  const future = new Date(60_000).toUTCString();
+  assert.equal(core.parseRetryAfter(future, 0), 60_000);
+  assert.equal(core.parseRetryAfter(new Date(1_000).toUTCString(), 60_000), 0, 'data no passado nao vira negativo');
+});
+
+test('source throttle bloqueia fonte apos 429/418 e faz backoff exponencial ate desbloquear', () => {
+  const throttle = core.createSourceThrottle({ baseCooldownMs: 1_000, maxCooldownMs: 60_000 });
+  assert.equal(throttle.isBlocked('Binance', 0), false, 'fonte nova nao esta bloqueada');
+
+  const wait1 = throttle.penalize('Binance', 0, 0);
+  assert.equal(wait1, 1_000, 'primeiro strike = cooldown base');
+  assert.equal(throttle.isBlocked('Binance', 500), true, 'bloqueada durante o cooldown');
+  assert.equal(throttle.isBlocked('Binance', 1_000), false, 'liberada apos o cooldown');
+
+  const wait2 = throttle.penalize('Binance', 0, 1_000);
+  assert.equal(wait2, 2_000, 'segundo strike dobra o cooldown');
+
+  // Retry-After maior que o backoff prevalece.
+  const wait3 = throttle.penalize('Binance', 30_000, 3_000);
+  assert.equal(wait3, 30_000);
+
+  // Outra fonte e independente.
+  assert.equal(throttle.isBlocked('Deribit', 3_000), false);
+
+  // Sucesso zera os strikes e desbloqueia.
+  throttle.succeed('Binance');
+  assert.equal(throttle.isBlocked('Binance', 3_001), false);
+  assert.equal(throttle.penalize('Binance', 0, 10_000), 1_000, 'apos sucesso o backoff reinicia da base');
+});
+
 test('request gate invalida respostas obsoletas', () => {
   const gate = core.createRequestGate();
   const first = gate.begin();
@@ -343,4 +409,81 @@ test('freshness por metrica impede serie nova de rejuvenescer serie antiga', () 
   assert.equal(core.isDatasetMetricEligible(detail, 'oiChangePct', 10_000), false);
   assert.equal(core.isDatasetMetricEligible(detail, 'takerRatio', 10_000), true);
   assert.equal(core.calculateDerivativeDetailContribution({ detail, close: 105, vwap: 100, asOf: 10_000 }), 3);
+});
+
+test('funding contribution segue a mecanica da Binance: banda neutra assimetrica e extremos contrarian', () => {
+  // Baseline Binance ~ +0,01%/8h. Levemente positivo (0,01-0,03%) e ~zero sao normais -> 0.
+  assert.equal(core.calculateFundingContribution(0.0001), 0, 'baseline +0,01% e neutro');
+  assert.equal(core.calculateFundingContribution(0.0003), 0, 'ate +0,03% ainda normal em bull');
+  assert.equal(core.calculateFundingContribution(0), 0, 'equilibrio');
+  assert.equal(core.calculateFundingContribution(-0.0001), 0, 'topo da banda neutra no lado negativo');
+  // Extremo positivo = longs sobrecomprados -> contrarian bearish.
+  assert.equal(core.calculateFundingContribution(0.0006), -6, 'acima de 0,05% e long lotado extremo');
+  assert.equal(core.calculateFundingContribution(0.0004), -2, 'entre 0,03% e 0,05% pede cautela');
+  // Negativo = shorts dominantes -> combustivel de short squeeze.
+  assert.equal(core.calculateFundingContribution(-0.0003), 2, 'shorts dominantes (-0,01 a -0,05%)');
+  assert.equal(core.calculateFundingContribution(-0.0006), 4, 'shorts lotados abaixo de -0,05%');
+  // A curva e monotonica nao-crescente no funding (mais positivo nunca pontua melhor).
+  assert.ok(core.calculateFundingContribution(-0.0006) >= core.calculateFundingContribution(-0.0002));
+  assert.ok(core.calculateFundingContribution(-0.0002) >= core.calculateFundingContribution(0.0001));
+  assert.ok(core.calculateFundingContribution(0.0001) >= core.calculateFundingContribution(0.0004));
+  assert.ok(core.calculateFundingContribution(0.0004) >= core.calculateFundingContribution(0.0006));
+  // Dado ausente nao vira vies.
+  assert.equal(core.calculateFundingContribution(NaN), 0);
+  assert.equal(core.calculateFundingContribution(null), 0);
+});
+
+function freshDerivative(overrides) {
+  return Object.assign({ observedAt: 9_000, staleAfterMs: 2_000, dataStatus: 'fresh' }, overrides);
+}
+
+test('long/short: varejo e contrarian (leve) e top traders sao seguidos', () => {
+  const asOf = 10_000;
+  // globalLongShortAccountRatio = varejo. Lotado em long = topo (contrarian bearish leve).
+  assert.equal(core.calculateDerivativeDetailContribution({ detail: freshDerivative({ longShortRatio: 2.0 }), asOf }), -1);
+  // Varejo lotado em short = combustivel de short squeeze (contrarian bullish leve).
+  assert.equal(core.calculateDerivativeDetailContribution({ detail: freshDerivative({ longShortRatio: 0.5 }), asOf }), 1);
+  // topLongShortPositionRatio = smart money. Long dos top traders = seguir (bullish).
+  assert.equal(core.calculateDerivativeDetailContribution({ detail: freshDerivative({ topPositionRatio: 2.0 }), asOf }), 2);
+  // Short dos top traders = seguir (bearish).
+  assert.equal(core.calculateDerivativeDetailContribution({ detail: freshDerivative({ topPositionRatio: 0.5 }), asOf }), -2);
+});
+
+test('quadrante OIxpreco: tabela unica de 4 estados, sem penalizar contracao incondicional', () => {
+  // OI sobe + preco sobe = dinheiro novo comprando (tendencia saudavel).
+  assert.deepEqual(core.calculateOiPriceQuadrant(5, 2), { score: 3, phase: 'Long buildup' });
+  // OI sobe + preco cai = shorts novos (queda saudavel).
+  assert.deepEqual(core.calculateOiPriceQuadrant(5, -2), { score: -3, phase: 'Short buildup' });
+  // OI cai + preco sobe = short covering (subida fragil, mas nao bearish).
+  assert.deepEqual(core.calculateOiPriceQuadrant(-5, 2), { score: 2, phase: 'Short covering' });
+  // OI cai + preco cai = longs liquidados (capitulacao).
+  assert.deepEqual(core.calculateOiPriceQuadrant(-5, -2), { score: -4, phase: 'Long liquidation' });
+  // Contracao de OI NAO e mais penalizada de forma incondicional: com preco subindo e positivo.
+  assert.ok(core.calculateOiPriceQuadrant(-8, 1).score > 0);
+  // Dentro do limiar de OI = neutro.
+  assert.deepEqual(core.calculateOiPriceQuadrant(1, 5), { score: 0, phase: 'OI neutro' });
+  assert.deepEqual(core.calculateOiPriceQuadrant(-1, -5), { score: 0, phase: 'OI neutro' });
+  // Sem direcao de preco ou dado ausente = neutro.
+  assert.equal(core.calculateOiPriceQuadrant(5, 0).score, 0);
+  assert.equal(core.calculateOiPriceQuadrant(NaN, 2).score, 0);
+  assert.equal(core.calculateOiPriceQuadrant(5, NaN).score, 0);
+});
+
+test('quadrante OIxpreco: limiar de OI configuravel', () => {
+  assert.equal(core.calculateOiPriceQuadrant(4, 2, 6).score, 0, 'abaixo do limiar 6 e neutro');
+  assert.equal(core.calculateOiPriceQuadrant(7, 2, 6).score, 3, 'acima do limiar 6 pontua');
+});
+
+test('long/short: divergencia varejo x top traders soma a favor do smart money', () => {
+  const asOf = 10_000;
+  // Classico: varejo vendido (0.5 -> +1) enquanto top traders comprados (2.0 -> +2) = +3 bullish.
+  const bullishDivergence = core.calculateDerivativeDetailContribution({
+    detail: freshDerivative({ longShortRatio: 0.5, topPositionRatio: 2.0 }), asOf
+  });
+  assert.equal(bullishDivergence, 3);
+  // Espelho bearish: varejo comprado (2.0 -> -1) e top vendidos (0.5 -> -2) = -3.
+  const bearishDivergence = core.calculateDerivativeDetailContribution({
+    detail: freshDerivative({ longShortRatio: 2.0, topPositionRatio: 0.5 }), asOf
+  });
+  assert.equal(bearishDivergence, -3);
 });

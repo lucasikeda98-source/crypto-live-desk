@@ -1,9 +1,10 @@
 (function () {
-  var MODEL_VERSION = '1.0.0-preview.2';
+  var MODEL_VERSION = '1.0.0-preview.3';
   var AnalyticsCore = window.CryptoAnalyticsCore;
   if (!AnalyticsCore) throw new Error('CryptoAnalyticsCore nao foi carregado.');
   var RULESET_HASH = AnalyticsCore.rulesetHash();
   var refreshGate = AnalyticsCore.createRequestGate();
+  var sourceThrottle = AnalyticsCore.createSourceThrottle({ baseCooldownMs: 5000, maxCooldownMs: 300000 });
   var REFRESH_MS = 3000;
   var BOARD_REFRESH_MS = 15000;
   var DERIVATIVES_REFRESH_MS = 15000;
@@ -78,7 +79,7 @@
     ARBUSDT: { gecko: 'arbitrum', paprika: 'arb-arbitrum', chain: 'Arbitrum', kind: 'Ethereum L2', narrative: 'ARB depende de TVL, volume DEX, atividade de L2 e calendario de desbloqueios.' },
     OPUSDT: { gecko: 'optimism', paprika: 'op-optimism', chain: 'Optimism', kind: 'Ethereum L2', narrative: 'OP reage a atividade do Superchain, TVL, receitas de L2 e desbloqueios de tokens.' }
   };
-  var state = { symbol: 'BTCUSDT', interval: '5m', view: 'dashboard', assetTab: 'summary', live: true, refreshing: false, pendingRefresh: false, boardRefreshing: false, boardPendingRefresh: false, contextRefreshing: false, chainRefreshing: false, timer: null, klines: [], analysis: null, board: [], boardFetchedAt: 0, boardInterval: '', sort: 'score', chain: null, chainFetchedAt: 0, news: [], newsFetchedAt: 0, newsAttemptedAt: 0, newsMode: 'auto', newsSources: [], external: {}, externalFetchedAt: 0, derivativeCache: {}, mtfCache: {}, mtf: null, historyProfiles: {}, historyCandles: {}, historyLoading: {}, historySweepStarted: false, coinMetricsCache: {}, coinMetrics: null, optionsCache: {}, options: null, optionsFetchedAt: 0, institutionalCache: {}, institutional: null, institutionalFetchedAt: 0, liquidations: [], liquidationSocket: null, liquidationSymbol: '', liquidationConnected: false, liquidationReconnectTimer: null, apiHealth: {}, quantChecks: null, chart: { ema9: true, ema21: true, ema50: true, ema200: false, bb: false, vwap: false, supertrend: false, levels: true, fib: false, patterns: true, candles: 120 } };
+  var state = { symbol: 'BTCUSDT', interval: '5m', view: 'dashboard', assetTab: 'summary', live: true, refreshing: false, pendingRefresh: false, boardRefreshing: false, boardPendingRefresh: false, contextRefreshing: false, chainRefreshing: false, timer: null, klines: [], analysis: null, board: [], boardFetchedAt: 0, boardInterval: '', sort: 'score', chain: null, chainFetchedAt: 0, news: [], newsFetchedAt: 0, newsAttemptedAt: 0, newsMode: 'auto', newsSources: [], external: {}, externalFetchedAt: 0, derivativeCache: {}, mtfCache: {}, mtf: null, historyProfiles: {}, historyCandles: {}, historyLoading: {}, historySweepStarted: false, coinMetricsCache: {}, coinMetrics: null, optionsCache: {}, options: null, optionsFetchedAt: 0, institutionalCache: {}, institutional: null, institutionalFetchedAt: 0, liquidations: [], liquidationSocket: null, liquidationSymbol: '', liquidationConnected: false, liquidationReconnectTimer: null, apiHealth: {}, boardFailures: {}, quantChecks: null, chart: { ema9: true, ema21: true, ema50: true, ema200: false, bb: false, vwap: false, supertrend: false, levels: true, fib: false, patterns: true, candles: 120 } };
   var $ = function (id) { return document.getElementById(id); };
   function analysisMatchesSelection(analysis) {
     if (!analysis) return false;
@@ -88,7 +89,7 @@
   var fmt = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
   var fmt0 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
   function cleanZero(n) { return Number.isFinite(n) && Math.abs(n) < 1e-9 ? 0 : n; }
-  function money(n) { n = cleanZero(n); return Number.isFinite(n) ? '$' + fmt.format(n) : '--'; }
+  function money(n) { return AnalyticsCore.formatUsd(n); }
   function compactMoney(n) { return Number.isFinite(n) ? '$' + new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 2 }).format(n) : '--'; }
   function num(n, d) { n = cleanZero(n); return Number.isFinite(n) ? new Intl.NumberFormat('en-US', { maximumFractionDigits: d == null ? 2 : d }).format(n) : '--'; }
   function percent(n, d) { n = cleanZero(n); return Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(d == null ? 2 : d) + '%' : '--'; }
@@ -201,16 +202,37 @@
     };
   }
   async function fetchJSON(url, timeout, source) {
+    // Circuit breaker: while a source is in rate-limit cooldown, fail fast without hitting the API.
+    if (source && sourceThrottle.isBlocked(source, Date.now())) {
+      var cooldownError = new Error('rate-limit cooldown');
+      cooldownError.category = 'rateLimit';
+      cooldownError.throttled = true;
+      health(source, false, 'cooldown de rate limit ate ' + new Date(sourceThrottle.retryAt(source)).toLocaleTimeString('pt-BR'));
+      throw cooldownError;
+    }
     var controller = new AbortController();
     var id = setTimeout(function () { controller.abort(); }, timeout || 9000);
     try {
       var res = await fetch(url, { signal: controller.signal, cache: 'no-store' });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
+      if (!res.ok) {
+        var httpError = new Error('HTTP ' + res.status);
+        httpError.status = res.status;
+        httpError.category = AnalyticsCore.classifyHttpError(res.status);
+        if (httpError.category === 'rateLimit') {
+          var retryAfterMs = AnalyticsCore.parseRetryAfter(res.headers.get('Retry-After'), Date.now());
+          var wait = sourceThrottle.penalize(source, retryAfterMs, Date.now());
+          health(source, false, 'rate limit ' + res.status + ' | cooldown ' + Math.round(wait / 1000) + 's');
+        } else {
+          health(source, false, 'HTTP ' + res.status);
+        }
+        throw httpError;
+      }
       var data = await res.json();
+      if (source) sourceThrottle.succeed(source);
       health(source, true, 'online');
       return data;
     } catch (error) {
-      health(source, false, error && error.name === 'AbortError' ? 'timeout' : (error.message || 'falhou'));
+      if (!error || !error.category) health(source, false, error && error.name === 'AbortError' ? 'timeout' : (error && error.message) || 'falhou');
       throw error;
     } finally { clearTimeout(id); }
   }
@@ -219,9 +241,13 @@
     for (var i = 0; i < BINANCE_SPOT_BASES.length; i++) {
       try {
         var data = await fetchJSON(BINANCE_SPOT_BASES[i] + path, timeout, source);
-        if (i > 0) health(source, true, 'fallback api.binance.com');
+        if (i > 0) health(source, true, 'fallback ' + BINANCE_SPOT_BASES[i]);
         return data;
-      } catch (error) { lastError = error; }
+      } catch (error) {
+        lastError = error;
+        // Rate limit / cooldown: never try another Binance host (spreads the IP ban further).
+        if (error && (error.category === 'rateLimit' || error.throttled)) break;
+      }
     }
     throw lastError || new Error('Binance spot indisponivel');
   }
@@ -230,7 +256,34 @@
     try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (error) { return null; }
   }
   function safeStorageSet(key, value) {
-    try { localStorage.setItem(key, JSON.stringify(value)); } catch (error) { /* cache opcional */ }
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+      return true;
+    } catch (error) {
+      // Surface a quota failure instead of silently dropping the journal/history write.
+      if (error && (error.name === 'QuotaExceededError' || error.code === 22 || /quota/i.test(error.message || ''))) {
+        health('Armazenamento local', false, 'quota excedida; journal/historico nao persistido');
+      }
+      return false;
+    }
+  }
+  function purgeStaleStorage() {
+    // On a MODEL_VERSION bump the previous version's journal/history keys are orphaned; drop them
+    // so old data neither lingers nor eats into the localStorage quota.
+    try {
+      var keepHistoryPrefix = 'liveDesk.history.' + MODEL_VERSION + '.';
+      var keepJournalKey = 'cld-signal-journal:' + MODEL_VERSION;
+      var stale = [];
+      for (var i = 0; i < localStorage.length; i++) {
+        var key = localStorage.key(i);
+        if (!key) continue;
+        var staleHistory = key.indexOf('liveDesk.history.') === 0 && key.indexOf(keepHistoryPrefix) !== 0;
+        var staleJournal = key.indexOf('cld-signal-journal:') === 0 && key !== keepJournalKey;
+        if (staleHistory || staleJournal) stale.push(key);
+      }
+      stale.forEach(function (key) { try { localStorage.removeItem(key); } catch (removeError) { /* ignore */ } });
+      return stale.length;
+    } catch (error) { return 0; }
   }
   function timestampMs(value) {
     if (value === null || value === undefined || typeof value === 'boolean') return NaN;
@@ -465,18 +518,6 @@
     var volatility = Number.isFinite(realizedVol) && realizedVol > 100 ? 'vol alta' : 'vol normal';
     return trend + ' / ' + strength + ' / ' + volatility;
   }
-  function volumeProfile(candles, bins) {
-    var rows = candles.slice(-120);
-    var highs = rows.map(function (c) { return c.high; }), lows = rows.map(function (c) { return c.low; });
-    var max = Math.max.apply(null, highs), min = Math.min.apply(null, lows), step = (max - min) / bins || 1;
-    var buckets = Array.from({ length: bins }, function (_, i) { return { price: min + step * (i + 0.5), volume: 0 }; });
-    rows.forEach(function (c) {
-      var idx = clamp(Math.floor(((c.high + c.low + c.close) / 3 - min) / step), 0, bins - 1);
-      buckets[idx].volume += c.volume;
-    });
-    buckets.sort(function (a, b) { return b.volume - a.volume; });
-    return buckets[0] || { price: NaN, volume: NaN };
-  }
   function macd(values) {
     var fast = emaSeries(values, 12), slow = emaSeries(values, 26);
     var line = values.map(function (_, i) { return fast[i] == null || slow[i] == null ? null : fast[i] - slow[i]; });
@@ -616,7 +657,6 @@
     var cci20 = cci(candles, 20);
     var ichimokuNow = ichimoku(candles);
     var fvg = findFairValueGap(candles);
-    var poc = volumeProfile(candles, 24);
     var patterns = detectPatterns(candles);
     var pv = pivots(candles);
     var lows = pv.lows.map(function (x) { return x.price; }).concat(candles.slice(-90).map(function (c) { return c.low; }).sort(function (a, b) { return a - b; }).slice(0, 2));
@@ -650,13 +690,13 @@
     var momScore = (Number.isFinite(rsi14) ? (rsi14 > 52 && rsi14 < 70 ? 12 : rsi14 >= 78 ? -8 : rsi14 >= 70 ? 3 : rsi14 < 35 ? -10 : 0) : 0) + (Number.isFinite(macdNow.hist) ? (macdNow.hist > 0 ? 8 : -8) : 0) + (Number.isFinite(stochRsi14) ? (stochRsi14 > 80 ? -3 : stochRsi14 < 20 ? 3 : 0) : 0);
     var flowScore = candleFlow.score;
     var derivScore = 0;
-    if (Number.isFinite(funding)) derivScore += funding > 0.0003 ? -6 : funding > 0 ? 3 : funding < -0.0001 ? 1 : -2;
+    derivScore += AnalyticsCore.calculateFundingContribution(funding);
     if (Number.isFinite(basis)) derivScore += basis > 0 ? 3 : -3;
     var chainScore = options.chainScore || 0;
     var bookScore = options.bookScore || 0;
     var score = clamp(Math.round(trendScore + momScore + flowScore + derivScore + chainScore + bookScore), -100, 100);
     var bias = biasFromScore(score);
-    return { modelVersion: MODEL_VERSION, close: close, ema9: ema9, ema21: ema21, ema20: ema20, ema50: ema50, ema200: ema200, rsi14: rsi14, rsiValues: rsiValues, stochRsi14: stochRsi14, mfi14: mfi14, atr14: atr14, macd: macdNow, macdData: macdData, bb: bb, bbPctB: bbPctB, bbWidth: bbWidth, vwap: vwapNow, adx: adxNow, supertrend: supertrendNow, keltner: keltnerNow, donchian: donchianNow, roc12: roc12, obv: obvNow, cmf20: cmf20, realizedVol30: realizedVol30, zScore20: zScore20, williams14: williams14, cci20: cci20, ichimoku: ichimokuNow, fvg: fvg, patterns: patterns, displacement: displacement, regime: regime, poc: poc, supports: supports, resistances: resistances, structure: structure, sweepDown: sweepDown, sweepUp: sweepUp, priorLow: priorLow, priorHigh: priorHigh, deltaSum: deltaSum, avgVol: avgVol, lastVol: lastVol, funding: funding, basis: basis, score: score, bias: bias, trendScore: trendScore, momScore: momScore, flowScore: flowScore, flowAvailable: candleFlow.available, flowCoverage: candleFlow.coverage, candleCount: candles.length, derivScore: derivScore, chainScore: chainScore, bookScore: bookScore, ticker: ticker };
+    return { modelVersion: MODEL_VERSION, close: close, ema9: ema9, ema21: ema21, ema20: ema20, ema50: ema50, ema200: ema200, rsi14: rsi14, rsiValues: rsiValues, stochRsi14: stochRsi14, mfi14: mfi14, atr14: atr14, macd: macdNow, macdData: macdData, bb: bb, bbPctB: bbPctB, bbWidth: bbWidth, vwap: vwapNow, adx: adxNow, supertrend: supertrendNow, keltner: keltnerNow, donchian: donchianNow, roc12: roc12, obv: obvNow, cmf20: cmf20, realizedVol30: realizedVol30, zScore20: zScore20, williams14: williams14, cci20: cci20, ichimoku: ichimokuNow, fvg: fvg, patterns: patterns, displacement: displacement, regime: regime, supports: supports, resistances: resistances, structure: structure, sweepDown: sweepDown, sweepUp: sweepUp, priorLow: priorLow, priorHigh: priorHigh, deltaSum: deltaSum, avgVol: avgVol, lastVol: lastVol, funding: funding, basis: basis, score: score, bias: bias, trendScore: trendScore, momScore: momScore, flowScore: flowScore, flowAvailable: candleFlow.available, flowCoverage: candleFlow.coverage, candleCount: candles.length, derivScore: derivScore, chainScore: chainScore, bookScore: bookScore, ticker: ticker };
   }
   function depthWindow(depth, mid, pct) {
     var bidQty = 0, askQty = 0, bidNotional = 0, askNotional = 0;
@@ -890,7 +930,9 @@
       fetchJSON('https://api.alternative.me/fng/?limit=1', 9000, 'Alternative.me'),
       fetchJSON('/api/market', 22000, 'Market data'),
       fetchJSON('https://api.llama.fi/v2/chains', 11000, 'DefiLlama'),
-      fetchJSON('https://api.llama.fi/protocols', 12000, 'DefiLlama'),
+      // Own throttle key: the same-origin proxy is never rate-limited by Llama, so a 429 on the
+      // direct chains call must not put the proxy in cooldown too.
+      fetchJSON('/api/defillama', 12000, 'DefiLlama protocolos'),
       fetchJSON('https://stablecoins.llama.fi/stablecoins?includePrices=true', 14000, 'DefiLlama stablecoins'),
       fetchJSON('https://api.llama.fi/overview/dexs', 11000, 'DefiLlama DEX'),
       fetchJSON('https://api.coinpaprika.com/v1/global', 9000, 'CoinPaprika'),
@@ -923,7 +965,9 @@
     var trending = marketBundle.trending;
     if (trending && trending.coins) external.trending = trending.coins.map(function (row) { return row.item || row; }).filter(Boolean).slice(0, 8);
     external.chains = Array.isArray(value(rows[2])) ? value(rows[2]) : [];
-    external.protocols = Array.isArray(value(rows[3])) ? value(rows[3]) : [];
+    var defiProtocols = value(rows[3]);
+    external.protocols = defiProtocols && Array.isArray(defiProtocols.protocols) ? defiProtocols.protocols
+      : Array.isArray(defiProtocols) ? defiProtocols : [];
     external.stablecoins = value(rows[4]);
     external.dex = value(rows[5]);
     external.paprikaGlobal = value(rows[6]);
@@ -988,20 +1032,40 @@
     var protocols = Array.isArray(dex.protocols) ? dex.protocols : [];
     return protocols.reduce(function (sum, item) { return sum + (+item.total24h || +item.volume24h || 0); }, 0);
   }
+  // Memo keyed by external.fetchedAt so the board's 24 cards don't rescan the protocol/chain
+  // lists on every 3s tick; a new external snapshot resets the cache.
+  var contextMemo = { stamp: -1, chain: {}, protocol: {} };
+  function contextMemoBucket(kind) {
+    var stamp = (state.external && state.external.fetchedAt) || 0;
+    if (contextMemo.stamp !== stamp) contextMemo = { stamp: stamp, chain: {}, protocol: {} };
+    return contextMemo[kind];
+  }
   function findChainContext(symbol) {
+    var bucket = contextMemoBucket('chain');
+    if (Object.prototype.hasOwnProperty.call(bucket, symbol)) return bucket[symbol];
     var ctx = contextFor(symbol);
-    if (!ctx.chain || !state.external || !state.external.chains) return null;
-    var key = normKey(ctx.chain);
-    return state.external.chains.find(function (chain) {
-      return normKey(chain.name) === key || normKey(chain.tokenSymbol) === key || normKey(chain.name).indexOf(key) !== -1;
-    }) || null;
+    var result = null;
+    if (ctx.chain && state.external && state.external.chains) {
+      var key = normKey(ctx.chain);
+      result = state.external.chains.find(function (chain) {
+        return normKey(chain.name) === key || normKey(chain.tokenSymbol) === key || normKey(chain.name).indexOf(key) !== -1;
+      }) || null;
+    }
+    bucket[symbol] = result;
+    return result;
   }
   function findProtocolContext(symbol) {
+    var bucket = contextMemoBucket('protocol');
+    if (Object.prototype.hasOwnProperty.call(bucket, symbol)) return bucket[symbol];
     var ctx = contextFor(symbol);
-    if (!state.external || !state.external.protocols) return null;
-    var explicitKeys = ctx.protocol ? [ctx.protocol] : [];
-    var fallbackKeys = ctx.protocol ? [] : [ctx.gecko, baseAsset(symbol), ASSET_NAMES[symbol]];
-    return AnalyticsCore.findProtocolMatch(state.external.protocols, explicitKeys, fallbackKeys);
+    var result = null;
+    if (state.external && state.external.protocols) {
+      var explicitKeys = ctx.protocol ? [ctx.protocol] : [];
+      var fallbackKeys = ctx.protocol ? [] : [ctx.gecko, baseAsset(symbol), ASSET_NAMES[symbol]];
+      result = AnalyticsCore.findProtocolMatch(state.external.protocols, explicitKeys, fallbackKeys);
+    }
+    bucket[symbol] = result;
+    return result;
   }
   function selectedMarket(symbol) {
     var ctx = contextFor(symbol);
@@ -1284,7 +1348,12 @@
         var profile = historicalProfile(candles);
         if (profile) {
           state.historyProfiles[symbol] = profile;
-          if (keepCandles) state.historyCandles[symbol] = candles;
+          if (keepCandles) {
+            // Only the selected symbol's full daily series is ever read; evict the others so the
+            // cache doesn't grow ~15MB across the 24 assets as the user browses.
+            Object.keys(state.historyCandles).forEach(function (key) { if (key !== symbol) delete state.historyCandles[key]; });
+            state.historyCandles[symbol] = candles;
+          }
           safeStorageSet(historyStorageKey, profile);
         }
         return profile;
@@ -1386,10 +1455,12 @@
     else if (a.deltaSum < 0 && a.cmf20 < -0.05) score -= 4;
     var detail = scoreableDerivativeDetail(a.derivativeDetail);
     if (Number.isFinite(detail.oiChangePct)) {
-      if (detail.oiChangePct > 3 && a.roc12 > 0) { oiPhase = 'Long buildup'; score += 3; }
-      else if (detail.oiChangePct > 3 && a.roc12 < 0) { oiPhase = 'Short buildup'; score -= 3; }
-      else if (detail.oiChangePct < -3 && a.roc12 > 0) { oiPhase = 'Short covering'; score += 2; }
-      else if (detail.oiChangePct < -3 && a.roc12 < 0) { oiPhase = 'Long liquidation'; score -= 4; }
+      // Same signal and fallback as calculateDerivativeDetailContribution so both read the same
+      // quadrant. Narrative label ONLY: the quadrant SCORES exclusively in the derivatives bucket
+      // (lib) — adding it here too double-counted it into flow via smart.score*0.55.
+      var oiPriceSignal = Number.isFinite(a.oiPriceChangePct) ? a.oiPriceChangePct
+        : Number.isFinite(a.close) && Number.isFinite(a.vwap) ? a.close - a.vwap : NaN;
+      oiPhase = AnalyticsCore.calculateOiPriceQuadrant(detail.oiChangePct, oiPriceSignal).phase;
     }
     return { score: clamp(Math.round(score), -18, 18), structure: a.structure, liquidity: liquidity, imbalance: imbalance, oiPhase: oiPhase };
   }
@@ -1419,18 +1490,23 @@
       { weight: 10, quality: riskQuality }
     ]);
   }
-  var confluenceMemo = { key: null, value: null };
+  var confluenceMemo = { key: null, value: null, computedAt: 0 };
+  var CONFLUENCE_MEMO_TTL_MS = 15000;
   /**
-   * Memoizes the confluence per snapshot so every panel rendered in the same
-   * pass (gauge, reasons, written analysis, trade plan) reads the exact same
-   * result: freshness is evaluated once per stamp, not once per panel.
+   * Memoizes the confluence per snapshot so every panel rendered in the same pass (gauge,
+   * reasons, written analysis, trade plan) reads the same result, AND so consecutive 3s render
+   * passes reuse it while inputs are unchanged. Keyed by inputSnapshotId only — calculatedAt and
+   * revision bumped on every re-stamp even when inputs were identical, defeating the memo. A short
+   * TTL still forces re-evaluation so a source that goes stale without a new snapshot id (its
+   * observedAt frozen) is re-scored within ~15s instead of serving a stale-eligible confluence.
    */
   function confluenceFor(a) {
     var snapshot = a && a.snapshot;
-    var key = snapshot ? snapshot.inputSnapshotId + '|' + snapshot.calculatedAt + '|' + snapshot.revision : null;
-    if (key && confluenceMemo.key === key) return confluenceMemo.value;
+    var key = snapshot ? snapshot.inputSnapshotId : null;
+    var now = Date.now();
+    if (key && confluenceMemo.key === key && (now - confluenceMemo.computedAt) < CONFLUENCE_MEMO_TTL_MS) return confluenceMemo.value;
     var value = buildConfluence(a);
-    if (key) { confluenceMemo.key = key; confluenceMemo.value = value; }
+    if (key) { confluenceMemo.key = key; confluenceMemo.value = value; confluenceMemo.computedAt = now; }
     return value;
   }
   function buildConfluence(a) {
@@ -1441,7 +1517,7 @@
     var smart = smartMoneyAnalysis(a);
     var flow = clamp(Math.round(a.flowScore * 0.48 + a.bookScore * 0.35 + smart.score * 0.55), -18, 18);
     var optionsData = a.options || state.options;
-    var derivativeDetail = AnalyticsCore.calculateDerivativeDetailContribution({ detail: a.derivativeDetail, options: optionsData, close: a.close, vwap: a.vwap, asOf: Date.now() });
+    var derivativeDetail = AnalyticsCore.calculateDerivativeDetailContribution({ detail: a.derivativeDetail, options: optionsData, close: a.close, vwap: a.vwap, oiPriceChangePct: a.oiPriceChangePct, asOf: Date.now() });
     var derivatives = clamp(Math.round(a.derivScore * 1.25 + derivativeDetail), -12, 12);
     var scoreChain = eligibleDataset(a.coinMetrics) ? a.chainScore : (Number.isFinite(a.nativeChainScore) ? a.nativeChainScore : 0);
     var chain = clamp(Math.round(scoreChain + external.defi * 0.45 + external.asset * 0.2), -10, 10);
@@ -1769,18 +1845,36 @@
     if (!clean.endsWith('USDT')) clean += 'USDT';
     return clean || 'BTCUSDT';
   }
+  var BOARD_FAIL_SKIP = 5, BOARD_FAIL_RETEST = 25;
   async function loadBoardAsset(symbol, ticker, premium, intervalChoice) {
-    var rows = await fetchSpotJSON('/api/v3/klines?symbol=' + encodeURIComponent(symbol) + '&interval=' + (intervalChoice || state.interval) + '&limit=260', 10000, 'Binance spot');
-    var candles = parseKlines(rows), closedCandles = selectClosedCandles(candles);
-    if (!closedCandles.length) return null;
-    var analysis = applyExternalToAnalysis(symbol, buildCoreAnalysis(closedCandles, ticker, premium, { interval: intervalChoice || state.interval }));
-    analysis.signalCandle = last(closedCandles);
-    analysis.liveCandle = last(candles) || analysis.signalCandle;
-    analysis.liveClose = analysis.liveCandle.close;
-    analysis.hasOpenCandle = !AnalyticsCore.isCandleClosed(analysis.liveCandle, Date.now());
-    attachHistory(analysis, state.historyProfiles[symbol]);
-    buildRadarScore(symbol, analysis);
-    return { symbol: symbol, interval: intervalChoice || state.interval, ticker: ticker, premium: premium, candles: candles, analysis: analysis };
+    // Track consecutive failures per symbol so a delisted pair stops silently hammering the API and
+    // flapping the shared 'Binance spot' health; re-test periodically in case it was transient.
+    var fails = state.boardFailures[symbol] || 0;
+    var isRetest = fails >= BOARD_FAIL_RETEST;
+    if (isRetest) fails = 0;
+    if (fails >= BOARD_FAIL_SKIP) { state.boardFailures[symbol] = fails + 1; return null; }
+    try {
+      var rows = await fetchSpotJSON('/api/v3/klines?symbol=' + encodeURIComponent(symbol) + '&interval=' + (intervalChoice || state.interval) + '&limit=260', 10000, 'Binance spot');
+      var candles = parseKlines(rows), closedCandles = selectClosedCandles(candles);
+      if (!closedCandles.length) throw new Error('sem candles fechados');
+      var analysis = applyExternalToAnalysis(symbol, buildCoreAnalysis(closedCandles, ticker, premium, { interval: intervalChoice || state.interval }));
+      analysis.signalCandle = last(closedCandles);
+      analysis.liveCandle = last(candles) || analysis.signalCandle;
+      analysis.liveClose = analysis.liveCandle.close;
+      analysis.hasOpenCandle = !AnalyticsCore.isCandleClosed(analysis.liveCandle, Date.now());
+      attachHistory(analysis, state.historyProfiles[symbol]);
+      buildRadarScore(symbol, analysis);
+      state.boardFailures[symbol] = 0;
+      return { symbol: symbol, interval: intervalChoice || state.interval, ticker: ticker, premium: premium, candles: candles, analysis: analysis };
+    } catch (error) {
+      // A failed retest jumps straight back into the skip band: one probe per retest window,
+      // not a fresh ramp of SKIP real fetches.
+      state.boardFailures[symbol] = isRetest ? BOARD_FAIL_SKIP : fails + 1;
+      return null;
+    }
+  }
+  function stalledBoardSymbols() {
+    return Object.keys(state.boardFailures).filter(function (symbol) { return (state.boardFailures[symbol] || 0) >= BOARD_FAIL_SKIP; });
   }
   function futuresPeriod(interval) {
     if (['5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h', '1d'].indexOf(interval) !== -1) return interval;
@@ -1805,11 +1899,13 @@
     return Math.max(DERIVATIVES_REFRESH_MS * 3, unit * 2 * 60 * 1000);
   }
   function normalizeDerivativeDetail(oiHist, fundingRows, longShortRows, takerRows, topAccountRows, topPositionRows, basisRows) {
-    var oiChangePct = NaN;
+    var oiChangePct = NaN, oiWindowStart = NaN, oiWindowEnd = NaN;
     if (Array.isArray(oiHist) && oiHist.length > 1) {
       var firstOi = +oiHist[0].sumOpenInterestValue || +oiHist[0].sumOpenInterest || 0;
       var lastOi = +oiHist[oiHist.length - 1].sumOpenInterestValue || +oiHist[oiHist.length - 1].sumOpenInterest || 0;
       oiChangePct = firstOi ? ((lastOi - firstOi) / firstOi) * 100 : NaN;
+      oiWindowStart = +oiHist[0].timestamp;
+      oiWindowEnd = +oiHist[oiHist.length - 1].timestamp;
     }
     var fundingAvg = NaN;
     if (Array.isArray(fundingRows) && fundingRows.length) fundingAvg = avg(fundingRows.map(function (row) { return +row.fundingRate; }).filter(Number.isFinite));
@@ -1830,6 +1926,8 @@
     var observedTimes = Object.keys(metricObservedAt).map(function (key) { return metricObservedAt[key]; }).filter(Number.isFinite);
     return {
       oiChangePct: oiChangePct,
+      oiWindowStart: Number.isFinite(oiWindowStart) ? oiWindowStart : NaN,
+      oiWindowEnd: Number.isFinite(oiWindowEnd) ? oiWindowEnd : NaN,
       fundingAvg: fundingAvg,
       longShortRatio: latestLongShort ? +latestLongShort.longShortRatio : NaN,
       longAccount: latestLongShort ? +latestLongShort.longAccount : NaN,
@@ -1897,6 +1995,23 @@
     state.derivativeCache[key] = { value: detail, fetchedAt: detail.fetchedAt };
     return markedDetail;
   }
+  // Price change over the OI history window, so OIxprice quadrants read both in the same window.
+  function priceChangeOverWindow(candles, startTs, endTs) {
+    if (!Array.isArray(candles) || candles.length < 2) return NaN;
+    var start = Number(startTs), end = Number(endTs);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return NaN;
+    var startCandle = null, endCandle = null;
+    for (var i = 0; i < candles.length; i++) {
+      var t = Number.isFinite(candles[i].closeTime) ? candles[i].closeTime : candles[i].time;
+      if (!Number.isFinite(t)) continue;
+      if (t <= start) startCandle = candles[i];
+      if (t <= end) endCandle = candles[i];
+    }
+    if (!startCandle) startCandle = candles[0];
+    if (!endCandle || endCandle === startCandle) return NaN;
+    if (!Number.isFinite(startCandle.close) || !startCandle.close) return NaN;
+    return (endCandle.close - startCandle.close) / startCandle.close * 100;
+  }
   async function refreshSelected(ticker, premium, chain, force, symbol, interval, requestId) {
     var s = encodeURIComponent(symbol);
     var p = futuresPeriod(interval);
@@ -1928,6 +2043,7 @@
     }
     var analysis = mergeSelected(symbol, closedCandles, value(results[3]), value(results[1]), value(results[4]), value(results[2]), chain || {}, chainAdjustment);
     analysis.derivativeDetail = value(results[5]) || {};
+    analysis.oiPriceChangePct = priceChangeOverWindow(closedCandles, analysis.derivativeDetail.oiWindowStart, analysis.derivativeDetail.oiWindowEnd);
     analysis.coinMetrics = coinMetrics;
     analysis.options = options;
     analysis.institutional = institutional;
@@ -1983,6 +2099,8 @@
     var boardOutdated = renderedInterval !== state.interval;
     var summary = bulls + ' compradores, ' + bears + ' vendedores, ' + (rows.length - bulls - bears) + ' neutros em ' + intervalLabel(renderedInterval) + '. ';
     if (boardOutdated || state.boardPendingRefresh) summary += 'Leitura anterior mantida; atualizando para ' + intervalLabel(state.interval) + '. ';
+    var stalled = stalledBoardSymbols();
+    if (stalled.length) summary += stalled.length + ' ativo(s) indisponivel(is) (' + stalled.map(baseAsset).join(', ') + '), possivel delist; re-teste periodico. ';
     text('boardSummary', summary + 'Radar Score preview: tecnica em candles fechados e contexto do snapshot atual.');
     rows.forEach(function (item) {
       var a = item.analysis, t = item.ticker || {};
@@ -2002,6 +2120,22 @@
       grid.appendChild(card);
     });
     renderOverviewDashboard();
+  }
+  // Light per-tick board update: the 24-card grid only changes on board refresh (15s), sort or
+  // interval change, so the 3s pass just moves the active highlight and shows the live price on the
+  // selected card instead of rebuilding every card + recomputing 24 radars.
+  function updateSelectedBoardCard(livePrice) {
+    var grid = $('assetGrid'); if (!grid) return;
+    var cards = grid.querySelectorAll('.asset-card');
+    for (var i = 0; i < cards.length; i++) {
+      var card = cards[i];
+      var isActive = card.dataset.symbol === state.symbol;
+      card.classList.toggle('active', isActive);
+      if (isActive && Number.isFinite(livePrice)) {
+        var priceEl = card.querySelector('.asset-row strong');
+        if (priceEl) priceEl.textContent = money(livePrice);
+      }
+    }
   }
   function scoreClass(bias) { return bias === 'Comprador' ? 'bull' : bias === 'Vendedor' ? 'bear' : 'neutral'; }
   function sparkline(candles) {
@@ -2048,7 +2182,7 @@
     text('rsiState', a.rsi14 >= 70 ? 'Sobrecompra' : a.rsi14 <= 30 ? 'Sobrevenda' : 'Neutro');
     text('macdState', a.macd.hist > 0 ? 'Acima do sinal' : 'Abaixo do sinal');
     text('volumeState', Number.isFinite(a.avgVol) && a.lastVol > a.avgVol * 1.35 ? 'Volume alto' : 'Normal');
-    updateScore(a); updateBook(a); updateChain(chain); renderCoinMetrics(a); renderExternalContext(a); renderAdvancedIndicators(a); renderSetupQuality(a); renderLiquidity(a); renderDerivativesDetails(a); renderMultiTimeframe(a); renderHistoricalProfile(a); renderSmartMoney(a); renderConfluence(a); renderWrittenAnalysis(a); renderHistoricalLab(a); renderFuturesConsole(a); renderLiquidations(); renderOptions(); renderExchangeFlows(a); renderInstitutional(); renderMacroFlow(a); renderCorrelation(a); calculatePosition(); drawPriceChart(); drawRsiChart(); drawMacdChart(); drawVolumeChart(); drawFlowChart(); renderBoard();
+    updateScore(a); updateBook(a); updateChain(chain); renderCoinMetrics(a); renderExternalContext(a); renderAdvancedIndicators(a); renderSetupQuality(a); renderLiquidity(a); renderDerivativesDetails(a); renderMultiTimeframe(a); renderHistoricalProfile(a); renderSmartMoney(a); renderConfluence(a); renderWrittenAnalysis(a); renderHistoricalLab(a); renderFuturesConsole(a); renderLiquidations(); renderOptions(); renderExchangeFlows(a); renderInstitutional(); renderMacroFlow(a); renderCorrelation(a); calculatePosition(); drawPriceChart(); drawRsiChart(); drawMacdChart(); drawVolumeChart(); drawFlowChart(); updateSelectedBoardCard(livePrice);
     renderSnapshotStamp(a);
     document.title = state.symbol + ' ' + money(a.close);
   }
@@ -2932,28 +3066,34 @@
     }
   }
   async function evaluateSignalOutcomes() {
-    var records = loadSignalJournal();
-    var pending = records.filter(function (record) { return AnalyticsCore.signalOutcomePending(record, Date.now()); }).slice(0, 10);
-    if (!pending.length) { text('signalsStatus', 'Nenhum sinal pendente: todos os horizontes ja decorridos foram avaliados.'); return; }
-    text('signalsStatus', 'Avaliando ' + pending.length + ' sinais...');
-    for (var index = 0; index < pending.length; index += 1) {
-      var record = pending[index];
-      try {
-        var rows = await fetchSpotJSON('/api/v3/klines?symbol=' + encodeURIComponent(record.symbol) + '&interval=1h&startTime=' + record.signalCloseTime + '&limit=200', 10000, 'Binance spot');
-        var candles = AnalyticsCore.selectClosedCandles(parseKlines(rows), Date.now());
-        var outcome = AnalyticsCore.evaluateSignalOutcome(record, candles);
-        if (outcome) {
-          var stored = loadSignalJournal();
-          var match = stored.find(function (row) { return row.inputSnapshotId === record.inputSnapshotId && row.signalCloseTime === record.signalCloseTime; });
-          if (match) {
-            match.outcome = AnalyticsCore.mergeSignalOutcome(match.outcome, outcome);
-            match.evaluatedAt = Date.now();
-            saveSignalJournal(stored);
+    try {
+      var records = loadSignalJournal();
+      var pending = records.filter(function (record) { return AnalyticsCore.signalOutcomePending(record, Date.now()); }).slice(0, 10);
+      if (!pending.length) { text('signalsStatus', 'Nenhum sinal pendente: todos os horizontes ja decorridos foram avaliados.'); return; }
+      text('signalsStatus', 'Avaliando ' + pending.length + ' sinais...');
+      var deferred = 0;
+      for (var index = 0; index < pending.length; index += 1) {
+        var record = pending[index];
+        try {
+          var rows = await fetchSpotJSON('/api/v3/klines?symbol=' + encodeURIComponent(record.symbol) + '&interval=1h&startTime=' + record.signalCloseTime + '&limit=200', 10000, 'Binance spot');
+          var candles = AnalyticsCore.selectClosedCandles(parseKlines(rows), Date.now());
+          var outcome = AnalyticsCore.evaluateSignalOutcome(record, candles);
+          if (outcome) {
+            var stored = loadSignalJournal();
+            var match = stored.find(function (row) { return row.inputSnapshotId === record.inputSnapshotId && row.signalCloseTime === record.signalCloseTime; });
+            if (match) {
+              match.outcome = AnalyticsCore.mergeSignalOutcome(match.outcome, outcome);
+              match.evaluatedAt = Date.now();
+              saveSignalJournal(stored);
+            }
           }
-        }
-      } catch (error) { /* fonte indisponivel; tenta na proxima avaliacao */ }
+        } catch (error) { deferred += 1; /* fonte indisponivel; tenta na proxima avaliacao */ }
+      }
+      renderSignals();
+      if (deferred) text('signalsStatus', deferred + ' de ' + pending.length + ' avaliacoes adiadas (fonte indisponivel); tente novamente em instantes.');
+    } catch (error) {
+      text('signalsStatus', 'Falha ao avaliar sinais: ' + (error && error.message || 'erro inesperado'));
     }
-    renderSignals();
   }
   var alertState = { enabled: false, lastBySymbol: {}, lastFiredAt: {} };
   function alertRulesConfig() {
@@ -3176,6 +3316,7 @@
     return { ok: checks.every(Boolean), passed: checks.filter(Boolean).length, total: checks.length };
   }
   state.quantChecks = runQuantSelfCheck();
+  purgeStaleStorage();
   bind(); refresh();
   setTimeout(warmHistoricalProfiles, 1800);
 })();
