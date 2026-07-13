@@ -457,6 +457,7 @@
             <div><h2>Registro de sinais</h2><p>Cada Setup Score confirmado por candle fechado e comparado com o preco 1h, 24h e 7d depois.</p></div>
             <div class="board-actions">
               <button id="evaluateSignalsButton" class="chip-button" type="button">Avaliar resultados</button>
+              <button id="exportSignalsButton" class="chip-button" type="button">Exportar sinais</button>
               <button id="clearSignalsButton" class="chip-button" type="button">Limpar registro</button>
             </div>
           </div>
@@ -472,8 +473,8 @@
           <div class="section-head compact"><h2>Acerto por faixa de score</h2><span id="signalSummaryCount">--</span></div>
           <div class="explanation-table-wrap">
             <table class="explanation-table">
-              <thead><tr><th>Faixa</th><th>Sinais</th><th>Avaliados</th><th>Acerto 24h</th><th>Mediana 24h</th></tr></thead>
-              <tbody id="signalSummaryRows"><tr><td colspan="5">--</td></tr></tbody>
+              <thead><tr><th>Faixa</th><th>Sinais</th><th>Avaliados</th><th>Acerto 24h</th><th>Mediana 24h</th><th>Amostra</th></tr></thead>
+              <tbody id="signalSummaryRows"><tr><td colspan="6">--</td></tr></tbody>
             </table>
           </div>
           <p class="mini-caption">Acerto: retorno 24h na direcao do score (>= +20 espera alta; <= -20 espera baixa; neutro espera |retorno| menor que 1,5%). Amostras pequenas nao validam o modelo.</p>
@@ -506,7 +507,7 @@
           <div class="section-head compact"><h2>Alertas de transicao</h2><span id="alertsStatus">Desativados</span></div>
           <div class="alert-toggles">
             <label><input type="checkbox" id="alertsEnabled" /> Ativar notificacoes do navegador</label>
-            <label><input type="checkbox" data-alert-rule="scoreCross" checked /> Setup Score cruza +42 / +60 / -45</label>
+            <label><input type="checkbox" data-alert-rule="scoreCross" checked /> Setup Score cruza +42 / +60 / -42 / -60</label>
             <label><input type="checkbox" data-alert-rule="biasChange" checked /> Mudanca de vies</label>
             <label><input type="checkbox" data-alert-rule="regimeChange" checked /> Mudanca de regime</label>
             <label><input type="checkbox" data-alert-rule="fundingExtreme" checked /> Funding extremo</label>

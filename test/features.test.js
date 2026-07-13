@@ -67,7 +67,9 @@ test('journal: resumo por faixa separa avaliados e acertos', () => {
     { setupScore: 65, outcome: { r24h: 2 } },
     { setupScore: 62, outcome: { r24h: -1 } },
     { setupScore: 45, outcome: null },
-    { setupScore: -30, outcome: { r24h: -3 } }
+    { setupScore: -30, outcome: { r24h: -3 } },
+    { setupScore: -50, outcome: { r24h: 4 } },
+    { setupScore: -70, outcome: { r24h: -6 } }
   ];
   const summary = core.summarizeSignalJournal(records);
   const top = summary.find((row) => row.band === '>= +60');
@@ -75,8 +77,31 @@ test('journal: resumo por faixa separa avaliados e acertos', () => {
   assert.equal(top.evaluated, 2);
   assert.equal(top.hits, 1);
   assert.equal(top.hitRate, 50);
-  const bear = summary.find((row) => row.band === '<= -20');
+  assert.equal(top.sufficient, false, 'menos de 20 avaliados = amostra insuficiente');
+  // Bandas negativas espelham a ladder bidirecional (+/-42, +/-60).
+  const bear = summary.find((row) => row.band === '-41 a -20');
   assert.equal(bear.hits, 1, 'score negativo acerta quando o retorno e negativo');
+  const bearConfirm = summary.find((row) => row.band === '-59 a -42');
+  assert.equal(bearConfirm.evaluated, 1);
+  assert.equal(bearConfirm.hits, 0, 'short com retorno positivo e erro');
+  const bearStrong = summary.find((row) => row.band === '<= -60');
+  assert.equal(bearStrong.hits, 1);
+});
+
+test('alertas: cruzamentos de score sao espelhados na ladder bidirecional (+/-42, +/-60)', () => {
+  const base = { symbol: 'BTCUSDT', interval: '5m', bias: 'Neutro', regime: 'Range', funding: 0.0001, liquidation15m: 0 };
+  const shortConfirm = core.evaluateAlertTransitions({ ...base, setupScore: -40 }, { ...base, setupScore: -45 }, {});
+  assert.equal(shortConfirm.length, 1);
+  assert.match(shortConfirm[0].message, /cruzou -42/);
+  assert.match(shortConfirm[0].message, /entrada vendedora com confirmacao/);
+  const shortStrong = core.evaluateAlertTransitions({ ...base, setupScore: -50 }, { ...base, setupScore: -65 }, {});
+  assert.equal(shortStrong.length, 1);
+  assert.match(shortStrong[0].message, /cruzou -60/);
+  assert.equal(core.evaluateAlertTransitions({ ...base, setupScore: -44 }, { ...base, setupScore: -46 }, {}).length, 0,
+    'permanecer dentro da zona (sem cruzar -42 nem -60) nao dispara');
+  const longStrong = core.evaluateAlertTransitions({ ...base, setupScore: 55 }, { ...base, setupScore: 62 }, {});
+  assert.equal(longStrong.length, 1);
+  assert.match(longStrong[0].message, /cruzou \+60/);
 });
 
 test('journal: avaliacao precoce nao congela horizontes futuros', () => {

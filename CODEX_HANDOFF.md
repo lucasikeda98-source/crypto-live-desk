@@ -259,3 +259,22 @@ Revisao pelo Claude Code significa revisao independente de codigo, regras analit
 - Arquivo: `app.js` (`setupQuality`)
 - Escopo: o card `setupQuality` e SOMENTE exibicao (retornado como campo `setup`, NAO entra no Setup Score, Radar Score, Data Confidence nem em qualquer decisao — nao e somado no `total` da confluencia). Para consistencia visual, as tres linhas com magnitude assimetrica foram igualadas: Momentum `+16/-14 -> +16/-16`, Volume `+10/-6 -> +10/-10`, Liquidez `+12/-10 -> +12/-12`. As demais (Tendencia +/-18, Fluxo +/-14, Derivativos +/-10, Contexto +/-12) ja eram simetricas.
 - Impacto: nenhum em score/DC/decisao (muda apenas os numeros exibidos do card). Sem bump de versao. `node --test` 94/94; nenhum teste referencia o card.
+
+### RC-006 — Aba Sinais: correcoes de consistencia e melhorias (sem impacto em score)
+
+- Data: 2026-07-13
+- Responsavel: Claude Code
+- Arquivos: `lib/analytics-core.js`, `app.js`, `index.html`, `ANALYTIC_CONTRACT_V1.md`, `test/features.test.js`
+- Metodo: leitura integral do pipeline de sinais (registro -> avaliacao de outcome -> resumo -> motor de trades -> alertas -> export) + verificacao adversarial independente das mudancas antes do commit.
+
+- Correcoes (inconsistencias reais):
+  1. **Alertas de score espelhados.** `evaluateAlertTransitions` cruzava apenas `+42/+60/-45`; o `-45` ("venda domina") era resquicio da era long-only e nao correspondia a nenhuma decisao do painel pos-Ciclo C. Agora os cruzamentos espelham a ladder bidirecional: `+42/+60/-42/-60`, com mensagens iguais as decisoes ("entrada vendedora com confirmacao/favoravel"). Label da aba atualizado.
+  2. **Bandas do resumo espelhadas.** `summarizeSignalJournal` tinha 3 bandas positivas e 1 negativa (`<= -20`), escondendo o lado short. Agora 7 bandas espelhadas (`+/-20..41`, `+/-42..59`, `+/-60`, neutro), com criterio de acerto inalterado. Adicionado `sufficient` (>= 20 avaliados), mesma regua da tabela de trades, exibido na nova coluna "Amostra".
+  3. **Contrato §7.3 reconciliado.** A tabela operacional provisoria ainda era unidirecional (`-44 a -20`, `<= -45`); atualizada para a ladder bidirecional implementada (com gates HTF/trap explicitos) e nota historica preservando os valores originais.
+  4. **Coluna "Quando" honesta.** A tabela de sinais mostrava `recordedAt` (hora em que o navegador gravou); agora mostra `signalCloseTime` (o candle fechado que confirmou o sinal — a identidade do registro), com fallback para `recordedAt` em registros antigos.
+- Melhorias:
+  5. **Avaliacao de outcomes em lote por simbolo.** Antes: 1 fetch por registro, maximo 10 por clique. Agora: 1 fetch por simbolo (1000 candles 1h ~ 41 dias a partir do sinal pendente mais antigo) cobrindo todos os pendentes do par, sem teto; sinais fora da janela permanecem pendentes (merge preserva horizontes ja preenchidos) e o status informa avaliados/adiados/restantes. Cliques sucessivos avancam a janela ate convergir.
+  6. **Exportar sinais.** Novo botao na aba baixa JSON auditavel com journal de sinais + trades da versao atual e os conjuntos ARQUIVADOS de versoes anteriores (RC-004), cada registro com `modelVersion`/`rulesetHash` para analise segmentada (§11). E a ponte para o backtesting walk-forward externo do roadmap.
+
+- Impacto DECLARADO: nenhuma mudanca em Setup Score, Radar Score ou Data Confidence (alertas, resumo, avaliacao de outcome, export e UI apenas). Sem bump de versao/ruleset. Efeitos visiveis: alertas de short agora disparam em -42/-60 (antes so -45); o resumo por faixa reagrupa scores negativos nas novas bandas espelhadas.
+- Validacao: `node --check` OK; `node --test` 96/96 (teste de bandas atualizado + novo teste de cruzamentos espelhados). Verificador adversarial independente sobre alertas/bandas/lote/export/contrato — conclusao registrada abaixo apos retorno.

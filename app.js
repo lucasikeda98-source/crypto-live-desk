@@ -3452,7 +3452,10 @@
     var visible = records.slice(-40).reverse();
     var pct = function (value) { return value === null || value === undefined ? '--' : percent(+value, 2); };
     rows.innerHTML = visible.length ? visible.map(function (record) {
-      return '<tr><td>' + new Date(record.recordedAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + '</td><td>' + escapeHTML(baseAsset(record.symbol)) + '</td><td>' + escapeHTML(intervalLabel(record.interval)) + '</td><td>' + (Number.isFinite(+record.setupScore) ? signed(+record.setupScore) : '--') + '</td><td>' + (Number.isFinite(+record.dataConfidence) ? num(+record.dataConfidence, 0) : '--') + '%</td><td>' + escapeHTML(record.decision) + '</td><td>' + money(record.price) + '</td><td>' + pct(record.outcome && record.outcome.r1h) + '</td><td>' + pct(record.outcome && record.outcome.r24h) + '</td><td>' + pct(record.outcome && record.outcome.r7d) + '</td></tr>';
+      // "Quando" e o fechamento do candle que confirmou o sinal (a identidade do sinal), nao a
+      // hora em que o navegador gravou o registro.
+      var when = Number.isFinite(+record.signalCloseTime) ? +record.signalCloseTime : record.recordedAt;
+      return '<tr><td>' + new Date(when).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + '</td><td>' + escapeHTML(baseAsset(record.symbol)) + '</td><td>' + escapeHTML(intervalLabel(record.interval)) + '</td><td>' + (Number.isFinite(+record.setupScore) ? signed(+record.setupScore) : '--') + '</td><td>' + (Number.isFinite(+record.dataConfidence) ? num(+record.dataConfidence, 0) : '--') + '%</td><td>' + escapeHTML(record.decision) + '</td><td>' + money(record.price) + '</td><td>' + pct(record.outcome && record.outcome.r1h) + '</td><td>' + pct(record.outcome && record.outcome.r24h) + '</td><td>' + pct(record.outcome && record.outcome.r7d) + '</td></tr>';
     }).join('') : '<tr><td colspan="10">Nenhum sinal registrado ainda nesta versao do modelo.</td></tr>';
     var pending = records.filter(function (record) { return AnalyticsCore.signalOutcomePending(record, Date.now()); }).length;
     text('signalsStatus', records.length + ' sinais registrados (' + MODEL_VERSION + ') | ' + pending + ' aguardando avaliacao | avaliacao busca candles 1h da Binance sob demanda.');
@@ -3460,7 +3463,7 @@
     if (summaryRows) {
       var summary = AnalyticsCore.summarizeSignalJournal(records);
       summaryRows.innerHTML = summary.map(function (row) {
-        return '<tr><td>' + escapeHTML(row.band) + '</td><td>' + row.total + '</td><td>' + row.evaluated + '</td><td>' + (row.hitRate === null ? '--' : num(row.hitRate, 0) + '%') + '</td><td>' + (row.median24h === null ? '--' : percent(row.median24h, 2)) + '</td></tr>';
+        return '<tr><td>' + escapeHTML(row.band) + '</td><td>' + row.total + '</td><td>' + row.evaluated + '</td><td>' + (row.hitRate === null ? '--' : num(row.hitRate, 0) + '%') + '</td><td>' + (row.median24h === null ? '--' : percent(row.median24h, 2)) + '</td><td>' + (row.evaluated ? (row.sufficient ? 'OK' : '&lt; 20') : '--') + '</td></tr>';
       }).join('');
       text('signalSummaryCount', records.length + ' sinais');
     }
@@ -3468,31 +3471,86 @@
   async function evaluateSignalOutcomes() {
     try {
       var records = loadSignalJournal();
-      var pending = records.filter(function (record) { return AnalyticsCore.signalOutcomePending(record, Date.now()); }).slice(0, 10);
+      var pending = records.filter(function (record) { return AnalyticsCore.signalOutcomePending(record, Date.now()); });
       if (!pending.length) { text('signalsStatus', 'Nenhum sinal pendente: todos os horizontes ja decorridos foram avaliados.'); return; }
-      text('signalsStatus', 'Avaliando ' + pending.length + ' sinais...');
-      var deferred = 0;
-      for (var index = 0; index < pending.length; index += 1) {
-        var record = pending[index];
+      // Um fetch por SIMBOLO cobre todos os pendentes daquele par (1000 candles 1h ~ 41 dias a
+      // partir do sinal mais antigo), em vez de um fetch por registro limitado a 10 por clique.
+      // Sinais fora da janela ficam com horizonte null, continuam pendentes e o status informa.
+      var bySymbol = {};
+      pending.forEach(function (record) { (bySymbol[record.symbol] = bySymbol[record.symbol] || []).push(record); });
+      var symbols = Object.keys(bySymbol);
+      text('signalsStatus', 'Avaliando ' + pending.length + ' sinais de ' + symbols.length + ' par(es)...');
+      var evaluatedCount = 0, deferred = 0;
+      for (var index = 0; index < symbols.length; index += 1) {
+        var symbol = symbols[index];
+        var group = bySymbol[symbol].slice().sort(function (a, b) { return a.signalCloseTime - b.signalCloseTime; });
         try {
-          var rows = await fetchSpotJSON('/api/v3/klines?symbol=' + encodeURIComponent(record.symbol) + '&interval=1h&startTime=' + record.signalCloseTime + '&limit=200', 10000, 'Binance spot');
+          var rows = await fetchSpotJSON('/api/v3/klines?symbol=' + encodeURIComponent(symbol) + '&interval=1h&startTime=' + group[0].signalCloseTime + '&limit=1000', 12000, 'Binance spot');
           var candles = AnalyticsCore.selectClosedCandles(parseKlines(rows), Date.now());
-          var outcome = AnalyticsCore.evaluateSignalOutcome(record, candles);
-          if (outcome) {
-            var stored = loadSignalJournal();
+          var stored = loadSignalJournal();
+          var changed = false;
+          group.forEach(function (record) {
+            var outcome = AnalyticsCore.evaluateSignalOutcome(record, candles);
+            if (!outcome) return;
             var match = stored.find(function (row) { return row.inputSnapshotId === record.inputSnapshotId && row.signalCloseTime === record.signalCloseTime; });
-            if (match) {
-              match.outcome = AnalyticsCore.mergeSignalOutcome(match.outcome, outcome);
-              match.evaluatedAt = Date.now();
-              saveSignalJournal(stored);
-            }
-          }
-        } catch (error) { deferred += 1; /* fonte indisponivel; tenta na proxima avaliacao */ }
+            if (!match) return;
+            match.outcome = AnalyticsCore.mergeSignalOutcome(match.outcome, outcome);
+            match.evaluatedAt = Date.now();
+            changed = true;
+            evaluatedCount += 1;
+          });
+          if (changed) saveSignalJournal(stored);
+        } catch (error) { deferred += group.length; /* fonte indisponivel; tenta na proxima avaliacao */ }
       }
       renderSignals();
-      if (deferred) text('signalsStatus', deferred + ' de ' + pending.length + ' avaliacoes adiadas (fonte indisponivel); tente novamente em instantes.');
+      var still = loadSignalJournal().filter(function (record) { return AnalyticsCore.signalOutcomePending(record, Date.now()); }).length;
+      text('signalsStatus', evaluatedCount + ' sinais avaliados'
+        + (deferred ? ' | ' + deferred + ' adiados (fonte indisponivel)' : '')
+        + (still ? ' | ' + still + ' ainda pendentes; clique novamente para a proxima janela' : ' | nenhum pendente'));
     } catch (error) {
       text('signalsStatus', 'Falha ao avaliar sinais: ' + (error && error.message || 'erro inesperado'));
+    }
+  }
+  function exportSignalsJournal() {
+    try {
+      // Conjuntos arquivados por versoes anteriores do modelo (purgeStaleStorage renomeia em vez
+      // de apagar); cada registro ja carrega modelVersion + rulesetHash, entao a analise externa
+      // consegue segmentar por versao sem misturar regras (contrato §11).
+      var archived = [];
+      for (var index = 0; index < localStorage.length; index += 1) {
+        var key = localStorage.key(index);
+        if (!key) continue;
+        var isJournal = key.indexOf('archived:cld-signal-journal:') === 0;
+        var isTrades = key.indexOf('archived:cld-signal-trades:') === 0;
+        if (!isJournal && !isTrades) continue;
+        var parsed = null;
+        try { parsed = JSON.parse(localStorage.getItem(key)); } catch (parseError) { /* conjunto ilegivel fica de fora */ }
+        if (Array.isArray(parsed) && parsed.length) {
+          archived.push({ modelVersion: key.slice(key.lastIndexOf(':') + 1), kind: isJournal ? 'signals' : 'trades', records: parsed });
+        }
+      }
+      var payload = {
+        exportedAt: Date.now(),
+        modelId: AnalyticsCore.RULESET.modelId,
+        modelVersion: MODEL_VERSION,
+        rulesetHash: RULESET_HASH,
+        disclaimer: 'Sinais e trades simulados, segmentados por versao do modelo; hit rates sao base rates observadas, nao probabilidade calibrada nem recomendacao.',
+        signals: loadSignalJournal(),
+        trades: loadTradeJournal(),
+        archived: archived
+      };
+      var json = JSON.stringify(payload, null, 2);
+      var blob = new Blob([json], { type: 'application/json' });
+      var link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'sinais-' + MODEL_VERSION + '-' + Date.now() + '.json';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(function () { URL.revokeObjectURL(link.href); }, 5000);
+      text('signalsStatus', payload.signals.length + ' sinais e ' + payload.trades.length + ' trades exportados' + (archived.length ? ' (+' + archived.length + ' conjunto(s) arquivado(s) de versoes anteriores)' : '') + '.');
+    } catch (error) {
+      text('signalsStatus', 'Falha ao exportar sinais: ' + (error && error.message || 'erro inesperado'));
     }
   }
   var alertState = { enabled: false, lastBySymbol: {}, lastFiredAt: {} };
@@ -3675,6 +3733,7 @@
     });
     on('candleCountSelect', 'change', function (e) { state.chart.candles = +e.target.value || 120; drawPriceChart(); });
     on('evaluateSignalsButton', 'click', evaluateSignalOutcomes);
+    on('exportSignalsButton', 'click', exportSignalsJournal);
     on('clearSignalsButton', 'click', function () { saveSignalJournal([]); renderSignals(); });
     on('lagBacktestButton', 'click', runLagBacktest);
     on('clearTradesButton', 'click', function () { saveTradeJournal([]); saveMachineStates({}); renderTradeEngine(); });

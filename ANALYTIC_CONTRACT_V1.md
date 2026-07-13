@@ -206,13 +206,16 @@ As faixas abaixo preservam a linguagem atual durante a migração. Elas são heu
 
 | Condição | Leitura |
 | --- | --- |
-| `score >= +60`, MTF de alta, alinhamento `>= 0,60` e Data Confidence `>= 63` | Entrada favorável |
-| `score >= +42` e MTF não negativo | Entrada com confirmação |
+| `score >= +60`, MTF de alta, alinhamento `>= 0,60`, Data Confidence `>= 63`, gate HTF disponível e sem veto | Entrada favorável |
+| `score >= +42`, MTF não negativo e sem veto HTF/trap | Entrada com confirmação |
 | `+20` a `+41` | Aguardar pullback/confirmação |
 | `-19` a `+19` | Sem entrada clara |
-| `-44` a `-20` | Cautela |
-| `<= -45` | Venda domina / evitar tese compradora |
+| `-41` a `-20` | Cautela |
+| `score <= -42`, MTF não positivo e sem veto HTF/trap | Entrada vendedora com confirmação |
+| `score <= -60`, MTF de baixa, alinhamento `>= 0,60`, Data Confidence `>= 63`, gate HTF disponível e sem veto | Entrada vendedora favorável |
 | `score = null` | Setup indisponível |
+
+> **Nota de revisão (preview.6):** a tabela original `1.0.0` era unidirecional no lado vendedor (`-44 a -20` = Cautela; `<= -45` = "Venda domina / evitar tese compradora"). O Ciclo C (preview.5) introduziu a ladder bidirecional espelhada — entradas vendedoras com os mesmos gates das compradoras (MTF, alinhamento, Data Confidence, gate HTF 1d/1w e veto pós-trap) — e esta tabela foi reconciliada com a implementação revisada. Os alertas de cruzamento de score seguem os mesmos níveis espelhados (`±42`/`±60`).
 
 Qualquer chamada operacional DEVE mostrar Data Confidence. Com Data Confidence abaixo de `40`, a interface DEVE substituir a chamada operacional por “dados insuficientes”, sem alterar o valor direcional calculado. A alteração futura dessas faixas exige nova versão de modelo e validação histórica.
 
