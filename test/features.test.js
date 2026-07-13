@@ -118,6 +118,39 @@ test('journal: avaliacao precoce nao congela horizontes futuros', () => {
   assert.equal(core.signalOutcomePending({ ...record, outcome: { r1h: 1, r24h: 2, r7d: 3 } }, 999 * hour), false);
 });
 
+test('wilson: intervalo 95% cobre a incerteza da amostra e degrada com poucos dados', () => {
+  const close = (value, expected, tolerance) => assert.ok(Math.abs(value - expected) <= tolerance, value + ' != ' + expected);
+  // 10/20 com z=1.96: intervalo classico [29.9%, 70.1%] — simetrico em p=0.5.
+  const half = core.wilsonInterval(10, 20);
+  close(half.lower, 29.93, 0.1);
+  close(half.upper, 70.07, 0.1);
+  // 20/20: taxa observada 100%, mas o intervalo NAO afirma certeza (lower ~83.9%).
+  const perfect = core.wilsonInterval(20, 20);
+  close(perfect.lower, 83.89, 0.15);
+  assert.equal(perfect.upper, 100);
+  // 3/4: "75% de acerto" vira honestamente [30%, 95%].
+  const tiny = core.wilsonInterval(3, 4);
+  assert.ok(tiny.lower < 31 && tiny.upper > 94, JSON.stringify(tiny));
+  // Amostra maior aperta o intervalo em torno da mesma taxa.
+  const big = core.wilsonInterval(75, 100);
+  assert.ok(big.lower > 65 && big.upper < 83, JSON.stringify(big));
+  // Bordas: sem tentativas -> null; entradas invalidas -> null.
+  assert.equal(core.wilsonInterval(0, 0), null);
+  assert.equal(core.wilsonInterval(5, 4), null);
+  assert.equal(core.wilsonInterval(null, 10), null);
+  // Propagacao: os resumos carregam o intervalo junto da taxa.
+  const signalSummary = core.summarizeSignalJournal([
+    { setupScore: 65, outcome: { r24h: 2 } },
+    { setupScore: 62, outcome: { r24h: -1 } }
+  ]).find((row) => row.band === '>= +60');
+  assert.ok(signalSummary.hitRateInterval && signalSummary.hitRateInterval.lower >= 0 && signalSummary.hitRateInterval.upper <= 100);
+  const tradeSummary = core.summarizeTradeJournal([
+    { pnlPct: 2, entryScore: 50, regime: 'Tendencia', trigger: 'bos', rMultiple: 1 },
+    { pnlPct: -1, entryScore: 50, regime: 'Tendencia', trigger: 'bos', rMultiple: -0.5 }
+  ]);
+  assert.ok(tradeSummary.cells[0].hitRateInterval && Number.isFinite(tradeSummary.cells[0].hitRateInterval.lower));
+});
+
 test('alertas: troca de timeframe nunca gera transicao', () => {
   const previous = { symbol: 'BTCUSDT', interval: '15m', setupScore: 30, bias: 'Neutro', regime: 'Range' };
   const current = { symbol: 'BTCUSDT', interval: '1d', setupScore: 65, bias: 'Comprador', regime: 'Tendencia' };

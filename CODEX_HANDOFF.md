@@ -311,3 +311,15 @@ Revisao pelo Claude Code significa revisao independente de codigo, regras analit
   - Par (sweep + skew de liquidacoes 15m 2x) le o mesmo evento no Risco (+/-2) e no upgrade de confirmacao do trap (6->8 em fluxo) — cross-bucket residual simetrico de baixa magnitude.
   - Testes das novas fiacoes do app.js (credito de DC do 12.7, carryScore pass-through, gate routing) sao por inspecao — consistente com a separacao motor-testavel vs orquestracao do projeto; os primitivos estao todos travados por teste.
   - `sufficient` das tabelas de acerto so tem caso negativo em teste; oscilacao de versao (6->5->6) sobrescreveria um arquivo `archived:` anterior (fluxo irreal pre-release); journal preview.6 local pre/pos RC-007 carrega dois rulesetHash (registros se autodescrevem; versao nao publicada).
+
+### RC-008 — Gate de navegador no CI + intervalos de Wilson (infra Bloco 3 + inicio Bloco 2)
+
+- Data: 2026-07-13
+- Responsavel: Claude Code
+- Arquivos: `scripts/browser-boot-check.cjs` (novo), `.github/workflows/quality.yml`, `package.json` (`npm run test:boot`), `README.md`, `lib/analytics-core.js`, `app.js`, `index.html`, `test/features.test.js`
+- Escopo:
+  1. **Boot-check de navegador BLOQUEANTE no CI** (job `browser-boot`, ubuntu + Playwright Chromium): valida boot sem excecao nao capturada mesmo com TODAS as fontes de rede fora (falhas de rede sao filtradas; erro do app reprova), DOM esperado e sem overflow em 390px. E o primeiro gate de navegador executavel em runner geo-restringido — o smoke completo do Edge continua informativo e o gate autoritativo segue local/contra o deploy. Validado neste ambiente: 8/8 sob falha total de rede.
+  2. **Intervalos de Wilson (95%)** nas duas tabelas de acerto (sinais por faixa e trades por regime x gatilho x faixa): `wilsonInterval()` no motor, propagado como `hitRateInterval` e exibido como `62% [45–70]` dentro da celula existente (sem coluna nova), com legenda explicando. E incerteza estatistica da FREQUENCIA OBSERVADA, nao calibracao de probabilidade do modelo (esta continua exigindo meses de dados — roadmap). Fundacao honesta do item "calibracao" do Bloco 2.
+- Impacto: nenhum em score/DC/decisao (exibicao + infra). Sem bump de versao.
+- Validacao: `node --test` 102/102 (teste de Wilson com valores classicos conferidos a mao: 10/20 -> [29.9, 70.1]; 20/20 -> lower ~83.9 e upper 100; propagacao nos dois resumos); boot-check 8/8 apos a mudanca das celulas.
+- Limitacao conhecida: o job de CI instala Playwright/Chromium por execucao (runner efemero); Binance segue inalcancavel do sandbox — o smoke autoritativo (`npm run test:browser`) permanece gate manual pre-release na maquina do proprietario.

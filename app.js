@@ -3392,7 +3392,7 @@
     if (summaryNode) {
       var summary = AnalyticsCore.summarizeTradeJournal(journal);
       summaryNode.innerHTML = summary.cells.length ? summary.cells.slice(0, 12).map(function (cell) {
-        return '<tr><td>' + escapeHTML(cell.regime) + '</td><td>' + escapeHTML(cell.trigger) + '</td><td>' + escapeHTML(cell.band) + '</td><td>' + cell.count + '</td><td>' + cell.hitRate + '%</td><td>' + (Number.isFinite(cell.avgR) ? num(cell.avgR, 2) + 'R' : '--') + '</td><td>' + (cell.sufficient ? 'ok' : 'insuficiente') + '</td></tr>';
+        return '<tr><td>' + escapeHTML(cell.regime) + '</td><td>' + escapeHTML(cell.trigger) + '</td><td>' + escapeHTML(cell.band) + '</td><td>' + cell.count + '</td><td>' + cell.hitRate + '%' + (cell.hitRateInterval ? ' <small>[' + num(cell.hitRateInterval.lower, 0) + '–' + num(cell.hitRateInterval.upper, 0) + ']</small>' : '') + '</td><td>' + (Number.isFinite(cell.avgR) ? num(cell.avgR, 2) + 'R' : '--') + '</td><td>' + (cell.sufficient ? 'ok' : 'insuficiente') + '</td></tr>';
       }).join('') : '<tr><td colspan="7">--</td></tr>';
     }
   }
@@ -3472,7 +3472,7 @@
     if (summaryRows) {
       var summary = AnalyticsCore.summarizeSignalJournal(records);
       summaryRows.innerHTML = summary.map(function (row) {
-        return '<tr><td>' + escapeHTML(row.band) + '</td><td>' + row.total + '</td><td>' + row.evaluated + '</td><td>' + (row.hitRate === null ? '--' : num(row.hitRate, 0) + '%') + '</td><td>' + (row.median24h === null ? '--' : percent(row.median24h, 2)) + '</td><td>' + (row.evaluated ? (row.sufficient ? 'OK' : '&lt; 20') : '--') + '</td></tr>';
+        return '<tr><td>' + escapeHTML(row.band) + '</td><td>' + row.total + '</td><td>' + row.evaluated + '</td><td>' + (row.hitRate === null ? '--' : num(row.hitRate, 0) + '%' + (row.hitRateInterval ? ' <small>[' + num(row.hitRateInterval.lower, 0) + '–' + num(row.hitRateInterval.upper, 0) + ']</small>' : '')) + '</td><td>' + (row.median24h === null ? '--' : percent(row.median24h, 2)) + '</td><td>' + (row.evaluated ? (row.sufficient ? 'OK' : '&lt; 20') : '--') + '</td></tr>';
       }).join('');
       text('signalSummaryCount', records.length + ' sinais');
     }

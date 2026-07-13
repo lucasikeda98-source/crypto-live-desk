@@ -48,7 +48,7 @@ node scripts/browser-smoke.cjs
 
 Os mesmos comandos estao disponiveis como `npm test` e `npm run test:browser` quando a politica do PowerShell permite executar `npm.ps1`.
 
-O workflow `.github/workflows/quality.yml` executa a suite deterministica em Node.js 22 (ubuntu) em cada pull request e push na `main`. O smoke do Edge headless roda como job informativo nao bloqueante: os runners hospedados do GitHub ficam em regiao geo-restringida pela Binance (HTTP 451), entao o gate autoritativo do smoke e executado localmente e contra o deploy antes de cada release.
+O workflow `.github/workflows/quality.yml` executa a suite deterministica em Node.js 22 (ubuntu) em cada pull request e push na `main`, e um **boot-check de navegador bloqueante** (`npm run test:boot`): Chromium headless valida que o app carrega sem excecao nao capturada mesmo com todas as fontes de rede indisponiveis, com o DOM esperado e sem overflow em 390 px — este gate independe da Binance e roda em runner geo-restringido. O smoke completo do Edge headless segue como job informativo nao bloqueante: os runners hospedados do GitHub ficam em regiao geo-restringida pela Binance (HTTP 451), entao o gate autoritativo do smoke e executado localmente e contra o deploy antes de cada release.
 
 ## Estrutura
 

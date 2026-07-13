@@ -477,7 +477,7 @@
               <tbody id="signalSummaryRows"><tr><td colspan="6">--</td></tr></tbody>
             </table>
           </div>
-          <p class="mini-caption">Acerto: retorno 24h na direcao do score (>= +20 espera alta; <= -20 espera baixa; neutro espera |retorno| menor que 1,5%). Amostras pequenas nao validam o modelo.</p>
+          <p class="mini-caption">Acerto: retorno 24h na direcao do score (>= +20 espera alta; <= -20 espera baixa; neutro espera |retorno| menor que 1,5%). Amostras pequenas nao validam o modelo; [x&ndash;y] e o intervalo de Wilson 95% da taxa observada.</p>
         </div>
         <div class="panel signals-panel">
           <div class="section-head compact board-head">
@@ -501,7 +501,7 @@
               <tbody id="tradeSummaryRows"><tr><td colspan="7">--</td></tr></tbody>
             </table>
           </div>
-          <p class="mini-caption">Base rates observadas; celulas com menos de 20 trades nao geram multiplicador de calibracao. Trades sao simulados no candle fechado, sem custos/slippage.</p>
+          <p class="mini-caption">Base rates observadas; celulas com menos de 20 trades nao geram multiplicador de calibracao. [x&ndash;y] e o intervalo de Wilson 95% da taxa observada. Trades sao simulados no candle fechado, sem custos/slippage.</p>
         </div>
         <div class="panel alerts-panel">
           <div class="section-head compact"><h2>Alertas de transicao</h2><span id="alertsStatus">Desativados</span></div>
