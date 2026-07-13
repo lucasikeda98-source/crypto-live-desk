@@ -239,6 +239,27 @@ test('mempool BTC somente influencia o score nativo de Bitcoin', () => {
   assert.equal(altcoin.eligibleForScore, false);
 });
 
+test('formatUsd usa digitos significativos abaixo de $1 e 2 casas acima', () => {
+  // >= $1: duas casas, sem zeros a esquerda desnecessarios.
+  assert.equal(core.formatUsd(63780), '$63,780');
+  assert.equal(core.formatUsd(63780.5), '$63,780.5');
+  assert.equal(core.formatUsd(2.5), '$2.5');
+  // < $1: 4 digitos significativos (nao arredonda tudo para $0).
+  assert.equal(core.formatUsd(0.3812), '$0.3812');
+  assert.equal(core.formatUsd(0.0874563), '$0.08746');
+  assert.equal(core.formatUsd(0.000023419), '$0.00002342');
+  assert.equal(core.formatUsd(0.5), '$0.5');
+  // Zero e ruido numerico.
+  assert.equal(core.formatUsd(0), '$0');
+  assert.equal(core.formatUsd(1e-12), '$0');
+  // Ausencia nao vira zero.
+  assert.equal(core.formatUsd(null), '--');
+  assert.equal(core.formatUsd(NaN), '--');
+  assert.equal(core.formatUsd(''), '--');
+  // Numero de digitos significativos configuravel.
+  assert.equal(core.formatUsd(0.123456, 2), '$0.12');
+});
+
 test('classifyHttpError separa rate limit (429/418) de servidor e cliente', () => {
   assert.equal(core.classifyHttpError(429), 'rateLimit');
   assert.equal(core.classifyHttpError(418), 'rateLimit');

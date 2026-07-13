@@ -79,7 +79,7 @@
     ARBUSDT: { gecko: 'arbitrum', paprika: 'arb-arbitrum', chain: 'Arbitrum', kind: 'Ethereum L2', narrative: 'ARB depende de TVL, volume DEX, atividade de L2 e calendario de desbloqueios.' },
     OPUSDT: { gecko: 'optimism', paprika: 'op-optimism', chain: 'Optimism', kind: 'Ethereum L2', narrative: 'OP reage a atividade do Superchain, TVL, receitas de L2 e desbloqueios de tokens.' }
   };
-  var state = { symbol: 'BTCUSDT', interval: '5m', view: 'dashboard', assetTab: 'summary', live: true, refreshing: false, pendingRefresh: false, boardRefreshing: false, boardPendingRefresh: false, contextRefreshing: false, chainRefreshing: false, timer: null, klines: [], analysis: null, board: [], boardFetchedAt: 0, boardInterval: '', sort: 'score', chain: null, chainFetchedAt: 0, news: [], newsFetchedAt: 0, newsAttemptedAt: 0, newsMode: 'auto', newsSources: [], external: {}, externalFetchedAt: 0, derivativeCache: {}, mtfCache: {}, mtf: null, historyProfiles: {}, historyCandles: {}, historyLoading: {}, historySweepStarted: false, coinMetricsCache: {}, coinMetrics: null, optionsCache: {}, options: null, optionsFetchedAt: 0, institutionalCache: {}, institutional: null, institutionalFetchedAt: 0, liquidations: [], liquidationSocket: null, liquidationSymbol: '', liquidationConnected: false, liquidationReconnectTimer: null, apiHealth: {}, quantChecks: null, chart: { ema9: true, ema21: true, ema50: true, ema200: false, bb: false, vwap: false, supertrend: false, levels: true, fib: false, patterns: true, candles: 120 } };
+  var state = { symbol: 'BTCUSDT', interval: '5m', view: 'dashboard', assetTab: 'summary', live: true, refreshing: false, pendingRefresh: false, boardRefreshing: false, boardPendingRefresh: false, contextRefreshing: false, chainRefreshing: false, timer: null, klines: [], analysis: null, board: [], boardFetchedAt: 0, boardInterval: '', sort: 'score', chain: null, chainFetchedAt: 0, news: [], newsFetchedAt: 0, newsAttemptedAt: 0, newsMode: 'auto', newsSources: [], external: {}, externalFetchedAt: 0, derivativeCache: {}, mtfCache: {}, mtf: null, historyProfiles: {}, historyCandles: {}, historyLoading: {}, historySweepStarted: false, coinMetricsCache: {}, coinMetrics: null, optionsCache: {}, options: null, optionsFetchedAt: 0, institutionalCache: {}, institutional: null, institutionalFetchedAt: 0, liquidations: [], liquidationSocket: null, liquidationSymbol: '', liquidationConnected: false, liquidationReconnectTimer: null, apiHealth: {}, boardFailures: {}, quantChecks: null, chart: { ema9: true, ema21: true, ema50: true, ema200: false, bb: false, vwap: false, supertrend: false, levels: true, fib: false, patterns: true, candles: 120 } };
   var $ = function (id) { return document.getElementById(id); };
   function analysisMatchesSelection(analysis) {
     if (!analysis) return false;
@@ -89,7 +89,7 @@
   var fmt = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
   var fmt0 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
   function cleanZero(n) { return Number.isFinite(n) && Math.abs(n) < 1e-9 ? 0 : n; }
-  function money(n) { n = cleanZero(n); return Number.isFinite(n) ? '$' + fmt.format(n) : '--'; }
+  function money(n) { return AnalyticsCore.formatUsd(n); }
   function compactMoney(n) { return Number.isFinite(n) ? '$' + new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 2 }).format(n) : '--'; }
   function num(n, d) { n = cleanZero(n); return Number.isFinite(n) ? new Intl.NumberFormat('en-US', { maximumFractionDigits: d == null ? 2 : d }).format(n) : '--'; }
   function percent(n, d) { n = cleanZero(n); return Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(d == null ? 2 : d) + '%' : '--'; }
@@ -256,7 +256,34 @@
     try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (error) { return null; }
   }
   function safeStorageSet(key, value) {
-    try { localStorage.setItem(key, JSON.stringify(value)); } catch (error) { /* cache opcional */ }
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+      return true;
+    } catch (error) {
+      // Surface a quota failure instead of silently dropping the journal/history write.
+      if (error && (error.name === 'QuotaExceededError' || error.code === 22 || /quota/i.test(error.message || ''))) {
+        health('Armazenamento local', false, 'quota excedida; journal/historico nao persistido');
+      }
+      return false;
+    }
+  }
+  function purgeStaleStorage() {
+    // On a MODEL_VERSION bump the previous version's journal/history keys are orphaned; drop them
+    // so old data neither lingers nor eats into the localStorage quota.
+    try {
+      var keepHistoryPrefix = 'liveDesk.history.' + MODEL_VERSION + '.';
+      var keepJournalKey = 'cld-signal-journal:' + MODEL_VERSION;
+      var stale = [];
+      for (var i = 0; i < localStorage.length; i++) {
+        var key = localStorage.key(i);
+        if (!key) continue;
+        var staleHistory = key.indexOf('liveDesk.history.') === 0 && key.indexOf(keepHistoryPrefix) !== 0;
+        var staleJournal = key.indexOf('cld-signal-journal:') === 0 && key !== keepJournalKey;
+        if (staleHistory || staleJournal) stale.push(key);
+      }
+      stale.forEach(function (key) { try { localStorage.removeItem(key); } catch (removeError) { /* ignore */ } });
+      return stale.length;
+    } catch (error) { return 0; }
   }
   function timestampMs(value) {
     if (value === null || value === undefined || typeof value === 'boolean') return NaN;
@@ -491,18 +518,6 @@
     var volatility = Number.isFinite(realizedVol) && realizedVol > 100 ? 'vol alta' : 'vol normal';
     return trend + ' / ' + strength + ' / ' + volatility;
   }
-  function volumeProfile(candles, bins) {
-    var rows = candles.slice(-120);
-    var highs = rows.map(function (c) { return c.high; }), lows = rows.map(function (c) { return c.low; });
-    var max = Math.max.apply(null, highs), min = Math.min.apply(null, lows), step = (max - min) / bins || 1;
-    var buckets = Array.from({ length: bins }, function (_, i) { return { price: min + step * (i + 0.5), volume: 0 }; });
-    rows.forEach(function (c) {
-      var idx = clamp(Math.floor(((c.high + c.low + c.close) / 3 - min) / step), 0, bins - 1);
-      buckets[idx].volume += c.volume;
-    });
-    buckets.sort(function (a, b) { return b.volume - a.volume; });
-    return buckets[0] || { price: NaN, volume: NaN };
-  }
   function macd(values) {
     var fast = emaSeries(values, 12), slow = emaSeries(values, 26);
     var line = values.map(function (_, i) { return fast[i] == null || slow[i] == null ? null : fast[i] - slow[i]; });
@@ -642,7 +657,6 @@
     var cci20 = cci(candles, 20);
     var ichimokuNow = ichimoku(candles);
     var fvg = findFairValueGap(candles);
-    var poc = volumeProfile(candles, 24);
     var patterns = detectPatterns(candles);
     var pv = pivots(candles);
     var lows = pv.lows.map(function (x) { return x.price; }).concat(candles.slice(-90).map(function (c) { return c.low; }).sort(function (a, b) { return a - b; }).slice(0, 2));
@@ -682,7 +696,7 @@
     var bookScore = options.bookScore || 0;
     var score = clamp(Math.round(trendScore + momScore + flowScore + derivScore + chainScore + bookScore), -100, 100);
     var bias = biasFromScore(score);
-    return { modelVersion: MODEL_VERSION, close: close, ema9: ema9, ema21: ema21, ema20: ema20, ema50: ema50, ema200: ema200, rsi14: rsi14, rsiValues: rsiValues, stochRsi14: stochRsi14, mfi14: mfi14, atr14: atr14, macd: macdNow, macdData: macdData, bb: bb, bbPctB: bbPctB, bbWidth: bbWidth, vwap: vwapNow, adx: adxNow, supertrend: supertrendNow, keltner: keltnerNow, donchian: donchianNow, roc12: roc12, obv: obvNow, cmf20: cmf20, realizedVol30: realizedVol30, zScore20: zScore20, williams14: williams14, cci20: cci20, ichimoku: ichimokuNow, fvg: fvg, patterns: patterns, displacement: displacement, regime: regime, poc: poc, supports: supports, resistances: resistances, structure: structure, sweepDown: sweepDown, sweepUp: sweepUp, priorLow: priorLow, priorHigh: priorHigh, deltaSum: deltaSum, avgVol: avgVol, lastVol: lastVol, funding: funding, basis: basis, score: score, bias: bias, trendScore: trendScore, momScore: momScore, flowScore: flowScore, flowAvailable: candleFlow.available, flowCoverage: candleFlow.coverage, candleCount: candles.length, derivScore: derivScore, chainScore: chainScore, bookScore: bookScore, ticker: ticker };
+    return { modelVersion: MODEL_VERSION, close: close, ema9: ema9, ema21: ema21, ema20: ema20, ema50: ema50, ema200: ema200, rsi14: rsi14, rsiValues: rsiValues, stochRsi14: stochRsi14, mfi14: mfi14, atr14: atr14, macd: macdNow, macdData: macdData, bb: bb, bbPctB: bbPctB, bbWidth: bbWidth, vwap: vwapNow, adx: adxNow, supertrend: supertrendNow, keltner: keltnerNow, donchian: donchianNow, roc12: roc12, obv: obvNow, cmf20: cmf20, realizedVol30: realizedVol30, zScore20: zScore20, williams14: williams14, cci20: cci20, ichimoku: ichimokuNow, fvg: fvg, patterns: patterns, displacement: displacement, regime: regime, supports: supports, resistances: resistances, structure: structure, sweepDown: sweepDown, sweepUp: sweepUp, priorLow: priorLow, priorHigh: priorHigh, deltaSum: deltaSum, avgVol: avgVol, lastVol: lastVol, funding: funding, basis: basis, score: score, bias: bias, trendScore: trendScore, momScore: momScore, flowScore: flowScore, flowAvailable: candleFlow.available, flowCoverage: candleFlow.coverage, candleCount: candles.length, derivScore: derivScore, chainScore: chainScore, bookScore: bookScore, ticker: ticker };
   }
   function depthWindow(depth, mid, pct) {
     var bidQty = 0, askQty = 0, bidNotional = 0, askNotional = 0;
@@ -1828,18 +1842,33 @@
     if (!clean.endsWith('USDT')) clean += 'USDT';
     return clean || 'BTCUSDT';
   }
+  var BOARD_FAIL_SKIP = 5, BOARD_FAIL_RETEST = 25;
   async function loadBoardAsset(symbol, ticker, premium, intervalChoice) {
-    var rows = await fetchSpotJSON('/api/v3/klines?symbol=' + encodeURIComponent(symbol) + '&interval=' + (intervalChoice || state.interval) + '&limit=260', 10000, 'Binance spot');
-    var candles = parseKlines(rows), closedCandles = selectClosedCandles(candles);
-    if (!closedCandles.length) return null;
-    var analysis = applyExternalToAnalysis(symbol, buildCoreAnalysis(closedCandles, ticker, premium, { interval: intervalChoice || state.interval }));
-    analysis.signalCandle = last(closedCandles);
-    analysis.liveCandle = last(candles) || analysis.signalCandle;
-    analysis.liveClose = analysis.liveCandle.close;
-    analysis.hasOpenCandle = !AnalyticsCore.isCandleClosed(analysis.liveCandle, Date.now());
-    attachHistory(analysis, state.historyProfiles[symbol]);
-    buildRadarScore(symbol, analysis);
-    return { symbol: symbol, interval: intervalChoice || state.interval, ticker: ticker, premium: premium, candles: candles, analysis: analysis };
+    // Track consecutive failures per symbol so a delisted pair stops silently hammering the API and
+    // flapping the shared 'Binance spot' health; re-test periodically in case it was transient.
+    var fails = state.boardFailures[symbol] || 0;
+    if (fails >= BOARD_FAIL_RETEST) fails = 0;
+    if (fails >= BOARD_FAIL_SKIP) { state.boardFailures[symbol] = fails + 1; return null; }
+    try {
+      var rows = await fetchSpotJSON('/api/v3/klines?symbol=' + encodeURIComponent(symbol) + '&interval=' + (intervalChoice || state.interval) + '&limit=260', 10000, 'Binance spot');
+      var candles = parseKlines(rows), closedCandles = selectClosedCandles(candles);
+      if (!closedCandles.length) throw new Error('sem candles fechados');
+      var analysis = applyExternalToAnalysis(symbol, buildCoreAnalysis(closedCandles, ticker, premium, { interval: intervalChoice || state.interval }));
+      analysis.signalCandle = last(closedCandles);
+      analysis.liveCandle = last(candles) || analysis.signalCandle;
+      analysis.liveClose = analysis.liveCandle.close;
+      analysis.hasOpenCandle = !AnalyticsCore.isCandleClosed(analysis.liveCandle, Date.now());
+      attachHistory(analysis, state.historyProfiles[symbol]);
+      buildRadarScore(symbol, analysis);
+      state.boardFailures[symbol] = 0;
+      return { symbol: symbol, interval: intervalChoice || state.interval, ticker: ticker, premium: premium, candles: candles, analysis: analysis };
+    } catch (error) {
+      state.boardFailures[symbol] = fails + 1;
+      return null;
+    }
+  }
+  function stalledBoardSymbols() {
+    return Object.keys(state.boardFailures).filter(function (symbol) { return (state.boardFailures[symbol] || 0) >= BOARD_FAIL_SKIP; });
   }
   function futuresPeriod(interval) {
     if (['5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h', '1d'].indexOf(interval) !== -1) return interval;
@@ -2064,6 +2093,8 @@
     var boardOutdated = renderedInterval !== state.interval;
     var summary = bulls + ' compradores, ' + bears + ' vendedores, ' + (rows.length - bulls - bears) + ' neutros em ' + intervalLabel(renderedInterval) + '. ';
     if (boardOutdated || state.boardPendingRefresh) summary += 'Leitura anterior mantida; atualizando para ' + intervalLabel(state.interval) + '. ';
+    var stalled = stalledBoardSymbols();
+    if (stalled.length) summary += stalled.length + ' ativo(s) indisponivel(is) (' + stalled.map(baseAsset).join(', ') + '), possivel delist; re-teste periodico. ';
     text('boardSummary', summary + 'Radar Score preview: tecnica em candles fechados e contexto do snapshot atual.');
     rows.forEach(function (item) {
       var a = item.analysis, t = item.ticker || {};
@@ -3029,28 +3060,34 @@
     }
   }
   async function evaluateSignalOutcomes() {
-    var records = loadSignalJournal();
-    var pending = records.filter(function (record) { return AnalyticsCore.signalOutcomePending(record, Date.now()); }).slice(0, 10);
-    if (!pending.length) { text('signalsStatus', 'Nenhum sinal pendente: todos os horizontes ja decorridos foram avaliados.'); return; }
-    text('signalsStatus', 'Avaliando ' + pending.length + ' sinais...');
-    for (var index = 0; index < pending.length; index += 1) {
-      var record = pending[index];
-      try {
-        var rows = await fetchSpotJSON('/api/v3/klines?symbol=' + encodeURIComponent(record.symbol) + '&interval=1h&startTime=' + record.signalCloseTime + '&limit=200', 10000, 'Binance spot');
-        var candles = AnalyticsCore.selectClosedCandles(parseKlines(rows), Date.now());
-        var outcome = AnalyticsCore.evaluateSignalOutcome(record, candles);
-        if (outcome) {
-          var stored = loadSignalJournal();
-          var match = stored.find(function (row) { return row.inputSnapshotId === record.inputSnapshotId && row.signalCloseTime === record.signalCloseTime; });
-          if (match) {
-            match.outcome = AnalyticsCore.mergeSignalOutcome(match.outcome, outcome);
-            match.evaluatedAt = Date.now();
-            saveSignalJournal(stored);
+    try {
+      var records = loadSignalJournal();
+      var pending = records.filter(function (record) { return AnalyticsCore.signalOutcomePending(record, Date.now()); }).slice(0, 10);
+      if (!pending.length) { text('signalsStatus', 'Nenhum sinal pendente: todos os horizontes ja decorridos foram avaliados.'); return; }
+      text('signalsStatus', 'Avaliando ' + pending.length + ' sinais...');
+      var deferred = 0;
+      for (var index = 0; index < pending.length; index += 1) {
+        var record = pending[index];
+        try {
+          var rows = await fetchSpotJSON('/api/v3/klines?symbol=' + encodeURIComponent(record.symbol) + '&interval=1h&startTime=' + record.signalCloseTime + '&limit=200', 10000, 'Binance spot');
+          var candles = AnalyticsCore.selectClosedCandles(parseKlines(rows), Date.now());
+          var outcome = AnalyticsCore.evaluateSignalOutcome(record, candles);
+          if (outcome) {
+            var stored = loadSignalJournal();
+            var match = stored.find(function (row) { return row.inputSnapshotId === record.inputSnapshotId && row.signalCloseTime === record.signalCloseTime; });
+            if (match) {
+              match.outcome = AnalyticsCore.mergeSignalOutcome(match.outcome, outcome);
+              match.evaluatedAt = Date.now();
+              saveSignalJournal(stored);
+            }
           }
-        }
-      } catch (error) { /* fonte indisponivel; tenta na proxima avaliacao */ }
+        } catch (error) { deferred += 1; /* fonte indisponivel; tenta na proxima avaliacao */ }
+      }
+      renderSignals();
+      if (deferred) text('signalsStatus', deferred + ' de ' + pending.length + ' avaliacoes adiadas (fonte indisponivel); tente novamente em instantes.');
+    } catch (error) {
+      text('signalsStatus', 'Falha ao avaliar sinais: ' + (error && error.message || 'erro inesperado'));
     }
-    renderSignals();
   }
   var alertState = { enabled: false, lastBySymbol: {}, lastFiredAt: {} };
   function alertRulesConfig() {
@@ -3273,6 +3310,7 @@
     return { ok: checks.every(Boolean), passed: checks.filter(Boolean).length, total: checks.length };
   }
   state.quantChecks = runQuantSelfCheck();
+  purgeStaleStorage();
   bind(); refresh();
   setTimeout(warmHistoricalProfiles, 1800);
 })();
