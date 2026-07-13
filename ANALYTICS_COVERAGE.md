@@ -1,6 +1,6 @@
 # Crypto Live Desk - cobertura analitica
 
-## Modelo analitico 1.0.0-preview.2
+## Modelo analitico 1.0.0-preview.5
 
 Esta e uma versao de migracao parcial. O contrato normativo completo esta em `ANALYTIC_CONTRACT_V1.md`. A interface distingue:
 
@@ -9,6 +9,15 @@ Esta e uma versao de migracao parcial. O contrato normativo completo esta em `AN
 - Data Confidence para cobertura dos dados, sem interpretar o valor como probabilidade de acerto.
 
 Indicadores e eventos confirmados usam apenas candles fechados. Opcoes e mempool BTC exibidos para altcoins sao proxies informativos e possuem contribuicao zero nos scores especificos e no Data Confidence do ativo.
+
+## Mudancas acumuladas do preview.3 ao preview.5
+
+1. Derivativos: semantica de funding, long/short e quadrante OI x preco reconciliada em uma unica regra, com percentis por ativo quando ha historico suficiente.
+2. Estrutura: detectores de CHoCH/BOS, divergencia, climax de volume, squeeze, carry e traps passam a alimentar gates e vetos direcionais.
+3. Multi-timeframe: alinhamento e gates HTF consideram explicitamente a direcao compradora ou vendedora, sem tratar disponibilidade como confirmacao.
+4. Historico: amostras independentes, excesso contra base rate, decay temporal e comparacao por tercil de volatilidade reduzem vies de selecao.
+5. Sinais v2: maquina de estados por par e timeframe, entradas com gatilho nomeado, stops/alvos estruturais, saidas conservadoras e journal local de trades simulados.
+6. Validacao: cenarios bidirecionais e estudo do lag do CHoCH foram adicionados como diagnosticos; eles nao constituem backtest de rentabilidade nem probabilidade calibrada.
 
 ## Mudancas do 1.0.0-preview.2 (podem alterar resultados vs preview.1)
 
