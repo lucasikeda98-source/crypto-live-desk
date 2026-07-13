@@ -1287,36 +1287,73 @@
     var closes = candles.map(function (c) { return c.close; });
     var ema50Rows = emaSeries(closes, 50), ema200Rows = emaSeries(closes, 200), rsiRows = rsiSeries(closes, 14);
     var lastIndex = closes.length - 1;
-    var currentSignature = { above200: closes[lastIndex] > ema200Rows[lastIndex], bullCross: ema50Rows[lastIndex] > ema200Rows[lastIndex], rsi: rsiBucket(rsiRows[lastIndex]) };
+    // Tercil de volatilidade realizada (30d) na assinatura: o mesmo padrao tecnico em regime de
+    // vol baixa e de vol alta tem distribuicoes de retorno diferentes.
+    var volRows = closes.map(function (_, index) {
+      if (index < 31) return NaN;
+      return realizedVolatility(closes.slice(index - 31, index + 1), 30, '1d');
+    });
+    var sortedVol = volRows.filter(Number.isFinite).slice().sort(function (a, b) { return a - b; });
+    function volTercile(value) {
+      if (!Number.isFinite(value) || sortedVol.length < 30) return 1;
+      if (value <= sortedVol[Math.floor(sortedVol.length / 3)]) return 0;
+      if (value <= sortedVol[Math.floor(sortedVol.length * 2 / 3)]) return 1;
+      return 2;
+    }
+    var currentSignature = { above200: closes[lastIndex] > ema200Rows[lastIndex], bullCross: ema50Rows[lastIndex] > ema200Rows[lastIndex], rsi: rsiBucket(rsiRows[lastIndex]), vol: volTercile(volRows[lastIndex]) };
+    var HALF_LIFE_DAYS = 730;
     function collect(relaxed) {
       var matches = [];
+      var lastMatchIndex = -Infinity;
       for (var i = 200; i < candles.length - 30; i++) {
         if (!Number.isFinite(ema200Rows[i]) || !Number.isFinite(rsiRows[i])) continue;
+        // Espacamento minimo de 5 dias entre matches: dias consecutivos do mesmo regime sao a
+        // MESMA amostra com retornos sobrepostos, nao amostras independentes.
+        if (i - lastMatchIndex < 5) continue;
         var sameDirection = (closes[i] > ema200Rows[i]) === currentSignature.above200;
         var sameCross = (ema50Rows[i] > ema200Rows[i]) === currentSignature.bullCross;
         var sameRsi = Math.abs(rsiBucket(rsiRows[i]) - currentSignature.rsi) <= (relaxed ? 1 : 0);
-        if (sameDirection && sameCross && sameRsi) {
-          matches.push({ d1: ((closes[i + 1] - closes[i]) / closes[i]) * 100, d7: ((closes[i + 7] - closes[i]) / closes[i]) * 100, d30: ((closes[i + 30] - closes[i]) / closes[i]) * 100 });
+        var sameVol = relaxed || volTercile(volRows[i]) === currentSignature.vol;
+        if (sameDirection && sameCross && sameRsi && sameVol) {
+          lastMatchIndex = i;
+          var ageDays = lastIndex - i;
+          matches.push({
+            d1: ((closes[i + 1] - closes[i]) / closes[i]) * 100,
+            d7: ((closes[i + 7] - closes[i]) / closes[i]) * 100,
+            d30: ((closes[i + 30] - closes[i]) / closes[i]) * 100,
+            // Decay temporal: meia-vida ~2 anos; um match de 2018 nao vale o mesmo que um de 2026.
+            weight: Math.pow(0.5, ageDays / HALF_LIFE_DAYS)
+          });
         }
       }
       return matches;
     }
     var matches = collect(false);
-    if (matches.length < 20) matches = collect(true);
+    if (matches.length < 12) matches = collect(true);
+    var weights = matches.map(function (x) { return x.weight; });
     var d1 = matches.map(function (x) { return x.d1; }), d7 = matches.map(function (x) { return x.d7; }), d30 = matches.map(function (x) { return x.d30; });
+    // Base rate incondicional: mediana de TODOS os retornos de 7d do ativo. O historico so deve
+    // pontuar o EXCESSO do regime sobre a deriva natural do ativo (fix pro-ciclico).
+    var unconditional7 = [];
+    for (var u = 200; u < closes.length - 7; u++) unconditional7.push(((closes[u + 7] - closes[u]) / closes[u]) * 100);
+    var baseline7 = median(unconditional7);
+    var baselineWin7 = unconditional7.length ? unconditional7.filter(function (v) { return v > 0; }).length / unconditional7.length * 100 : 50;
     var peak = closes[0], maxDrawdown = 0;
     closes.forEach(function (close) { peak = Math.max(peak, close); maxDrawdown = Math.min(maxDrawdown, ((close - peak) / peak) * 100); });
     var winRate7 = d7.length ? d7.filter(function (value) { return value > 0; }).length / d7.length * 100 : NaN;
-    var median7 = median(d7), score = 0;
-    if (Number.isFinite(median7)) score += clamp(Math.round(median7 * 2.2), -8, 8);
-    if (Number.isFinite(winRate7)) score += clamp(Math.round((winRate7 - 50) / 4), -4, 4);
+    var median7 = AnalyticsCore.weightedMedian(d7, weights);
+    var excess7 = Number.isFinite(median7) && Number.isFinite(baseline7) ? median7 - baseline7 : NaN;
+    var score = 0;
+    if (Number.isFinite(excess7)) score += clamp(Math.round(excess7 * 2.2), -8, 8);
+    if (Number.isFinite(winRate7)) score += clamp(Math.round((winRate7 - baselineWin7) / 4), -4, 4);
     var latestCandle = last(candles);
     return {
       fetchedAt: Date.now(), observedAt: latestCandle.closeTime || latestCandle.time + 86400000, candles: candles.length, listingTime: candles[0].time, maxDrawdown: maxDrawdown,
       realizedVol30: realizedVolatility(closes, 30, '1d'), realizedVol90: realizedVolatility(closes, 90, '1d'),
-      samples: matches.length, winRate1: d1.length ? d1.filter(function (value) { return value > 0; }).length / d1.length * 100 : NaN,
+      samples: matches.length, independentSamples: true, volTercile: currentSignature.vol, baseline7: baseline7, excess7: excess7,
+      winRate1: d1.length ? d1.filter(function (value) { return value > 0; }).length / d1.length * 100 : NaN,
       winRate7: winRate7, winRate30: d30.length ? d30.filter(function (value) { return value > 0; }).length / d30.length * 100 : NaN,
-      median1: median(d1), median7: median7, median30: median(d30), score: clamp(score, -12, 12)
+      median1: AnalyticsCore.weightedMedian(d1, weights), median7: median7, median30: AnalyticsCore.weightedMedian(d30, weights), score: clamp(score, -12, 12)
     };
   }
   function historyFresh(profile) {

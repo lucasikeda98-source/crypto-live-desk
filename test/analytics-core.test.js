@@ -459,6 +459,16 @@ test('trap engine: sem reclaim nao ha trap, e o espelho bearish veta longs', () 
   assert.equal(bullTrap.vetoDirection, 'long');
 });
 
+test('weightedMedian pondera amostras por peso (decay temporal do historico)', () => {
+  assert.equal(core.weightedMedian([1, 2, 3, 4, 5], [1, 1, 1, 1, 1]), 3);
+  // Peso esmagador numa amostra puxa a mediana para ela.
+  assert.equal(core.weightedMedian([1, 2, 10], [0.1, 0.1, 10]), 10);
+  // Ordem de entrada nao importa.
+  assert.equal(core.weightedMedian([10, 1, 2], [10, 0.1, 0.1]), 10);
+  assert.ok(Number.isNaN(core.weightedMedian([], [])));
+  assert.ok(Number.isNaN(core.weightedMedian([1, 2], [0, 0])));
+});
+
 test('regime delta-neutro muta o quadrante de OI no scorer de derivativos', () => {
   const asOf = 10_000;
   const detail = { observedAt: 9_000, staleAfterMs: 2_000, dataStatus: 'fresh', oiChangePct: 8 };
