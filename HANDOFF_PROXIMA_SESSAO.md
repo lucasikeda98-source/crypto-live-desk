@@ -20,12 +20,12 @@ Leia também, nesta ordem: `CODEX_HANDOFF.md` (REV-CC-01, CC-FIX-01 e RC-001..RC
 ### Fase A — Infra dos sinais duráveis (destrava o valor do ciclo D)
 O journal durável hoje degrada para local-only; nada disso é código novo.
 
-- [ ] A1. Provisionar Upstash Redis no projeto Vercel (env `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`).
-- [ ] A2. Definir `CRON_SECRET` no projeto Vercel (o worker rejeita chamadas sem ele).
-- [ ] A3. Ativar o cron do `api/signal-worker` (vercel.json/cron Hobby diário; avaliar upgrade se quiser cadência de 5m).
-- [ ] A4. Exercitar os 3 scripts Lua contra o Redis REAL (upsert concorrente, clear, compact) e registrar a evidência no handoff — a ressalva transversal da REV-CC-01 (seção C) só fecha aqui.
-- [ ] A5. Smoke de sincronização ponta-a-ponta: dois navegadores com o mesmo código privado, outcome do worker não regride com cliente atrasado (o cenário do ANL-027, agora contra produção).
-- [ ] A6. Confirmar rate-limit distribuído do api-guard ativo com Redis presente (hoje só o limite local está provado).
+- [x] A1. FEITO 2026-07-13 — integração Upstash via Marketplace criou credenciais `KV_*` (redis-runtime aceita ambos os nomes); produção responde `configured:true`.
+- [x] A2. FEITO 2026-07-13 — `CRON_SECRET` (>=24 chars) ativo; worker sem segredo responde 401 Unauthorized.
+- [x] A3. FEITO — cron diário 04:17 UTC já declarado no vercel.json; ativo com o deploy `5524110`. (Upgrade p/ cadência maior fica opcional.)
+- [x] A4. FEITO 2026-07-13 — sonda contra produção: upsert com outcome (`r1h:1.5`), escritor rival com `inputSnapshotId` diferente NÃO regrediu o registro (primeiro snapshot canônico preservado), DELETE limpou hash+índice due. Fecha a ressalva transversal da REV-CC-01 seção C.
+- [x] A5. FEITO 2026-07-13 — coberto pela mesma sonda (dois escritores concorrentes no mesmo journal id via API de produção); cenário ANL-027 validado contra Redis real.
+- [x] A6. FEITO 2026-07-13 — rajada de 40 GETs em /api/signals: ~24 aceitos, restante 429 (sliding window distribuído ativo).
 
 ### Fase B — Operação e CI
 - [ ] B1. Observar 1–2 execuções do workflow Quality em runner hospedado: confirmar se o `browser-smoke` sofre HTTP 451 (se sim, manter advisory; alternativa de longo prazo: proxyar klines pela camada /api com fixture de CI).
