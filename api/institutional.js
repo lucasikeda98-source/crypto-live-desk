@@ -47,7 +47,8 @@ function parseEtfMcpBody(body) {
   const envelope = envelopes.find((item) => item && item.result) || envelopes.find((item) => item && item.error);
   if (!envelope) throw new Error('ETF MCP sem payload JSON-RPC valido');
   if (envelope.error) throw new Error('ETF MCP: ' + String(envelope.error.message || envelope.error.code || 'erro semantico'));
-  const text = envelope && envelope.result && envelope.result.content && envelope.result.content.find((item) => item.type === 'text')?.text;
+  const contentItems = Array.isArray(envelope.result && envelope.result.content) ? envelope.result.content : [];
+  const text = contentItems.find((item) => item && typeof item === 'object' && item.type === 'text')?.text;
   if (!text) throw new Error('ETF MCP sem conteudo');
   return JSON.parse(text);
 }

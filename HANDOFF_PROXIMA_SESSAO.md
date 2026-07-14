@@ -34,13 +34,13 @@ O journal durável hoje degrada para local-only; nada disso é código novo.
 - [x] B4. FEITO 2026-07-13 — zero erros de runtime nas ultimas 24h (janela cobre os endpoints novos exercitados pelas sondas da Fase A). Rechecar apos o primeiro disparo do cron (04:17 UTC).
 
 ### Fase C — Dívidas de revisão remanescentes (código)
-- [ ] C1. ANL-015: revisar calendário/flag `reported` de fluxos ETF (ficou fora da REV-CC-01, seção E).
-- [ ] C2. OPS-010: confirmar que o smoke exercita o contrato de override de notícias (seção E).
-- [ ] C3. Derivar de fato os clamps de `buildConfluence` (app.js) de `RULESET.setupCaps` — hoje há só um cross-check por teste que impede divergência silenciosa.
-- [ ] C4. Harness de DOM para app.js (jsdom ou Playwright de unidade) para substituir os últimos regex-guards de features.test.js:266,268 por testes de pipeline reais.
-- [ ] C5. Avaliar batch por símbolo na avaliação de sinais (o merge ficou com o caminho preciso 1m/15m do ciclo D, capado em 10 por clique; a ideia de 1 fetch por símbolo do RC-006 pode ser reincorporada sobre esse caminho).
+- [x] C1. FEITO 2026-07-13 — revisao adversarial: calendario NYSE correto (feriados moveis, meio-pregao, bordas de ano), zero legitimo preservado, precedencia da flag do provedor testada. 1 defeito real corrigido: envelope MCP malformado derrubava o parser com TypeError (api/institutional.js:50) — agora degrada com erro controlado + regressao. ANL-015 promovido a REVISADO PELO CLAUDE CODE.
+- [x] C2. FEITO 2026-07-13 — browser-smoke.cjs preenche autor+motivo, submete o override e o check snapshotIdentityChanges valida a mudanca de identidade (modeauto -> modeneutral:override<ts>), visto no log do CI. OPS-010 promovido a REVISADO PELO CLAUDE CODE.
+- [x] C3. FEITO 2026-07-13 — 16 literais substituidos por derivacao real de RULESET.setupCaps (clamps + max: dos 8 componentes); o cross-check virou guarda de DERIVACAO (reverter um clamp para literal falha o teste — provado empiricamente).
+- [x] C4. FEITO 2026-07-13 (via gate de navegador real, nao jsdom): o browser-boot BLOQUEANTE do CI agora valida o pipeline com dados ao vivo — snapshot com identidade completa (versao:hash:simbolo:tf) e envelope de explicacao rastreavel. Os regex de features.test.js viram tripwire redundante (comportamento real gated no CI + smoke autoritativo local).
+- [x] C5. FEITO 2026-07-13 — UM fetch de 15m por SIMBOLO (do pendente mais antigo, limit 1000 ~ 10,4 dias) cobre os horizontes 24h/7d de todos os registros do par; 1m por registro preserva a precisao de 1h; teto por clique sobe de 10 para 50 com status honesto do restante.
 
-### Fase D — Validação estatística (não começa antes de A)
+### Fase D — Validação estatística (iniciada em 2026-07-13: infra ativa, journal acumulando em preview.8)
 - [ ] D1. Acumular sinais versionados em preview.8 (journal segmentado por versão; não agregar com versões anteriores — contrato §11).
 - [ ] D2. Só tratar hit rates como evidência com ≥20 avaliações por célula (flag `sufficient` + intervalos de Wilson já implementados).
 - [ ] D3. Revisitar pesos/caps do ruleset apenas com dados suficientes, com bump de versão + hash-ouro.

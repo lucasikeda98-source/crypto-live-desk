@@ -1828,16 +1828,19 @@
     return value;
   }
   function buildConfluence(a) {
+    // ANL-005: clamps e maximos derivam do ruleset — RULESET.setupCaps e a definicao
+    // normativa unica; nenhum literal duplicado pode divergir silenciosamente.
+    var setupCaps = AnalyticsCore.RULESET.setupCaps;
     var news = scoreNews(state.symbol);
     var external = a.external && eligibleDataset(a.external) ? a.external : scoreExternalContext(state.symbol);
     // CHoCH/BOS e divergencia entram no tecnico com peso integral (nao diluidos pelos fatores
     // 0.32/0.42 dos scores continuos) — sao eventos discretos de virada.
-    var technical = clamp(Math.round(a.trendScore * 0.32 + a.momScore * 0.42 + (a.structureShift ? a.structureShift.score : 0) + (a.divergenceScore || 0)), -20, 20);
+    var technical = clamp(Math.round(a.trendScore * 0.32 + a.momScore * 0.42 + (a.structureShift ? a.structureShift.score : 0) + (a.divergenceScore || 0)), -setupCaps.technical, setupCaps.technical);
     var multi = state.mtf || { score: 0, alignment: 0, bias: 'Misto', rows: [] };
     var smart = smartMoneyAnalysis(a);
     var trapScore = a.trap && a.trap.trap ? a.trap.score : 0;
     var squeezeScore = a.squeeze ? a.squeeze.score : 0;
-    var flow = clamp(Math.round(a.flowScore * 0.48 + a.bookScore * 0.35 + smart.score * 0.55 + trapScore + squeezeScore), -18, 18);
+    var flow = clamp(Math.round(a.flowScore * 0.48 + a.bookScore * 0.35 + smart.score * 0.55 + trapScore + squeezeScore), -setupCaps.smartFlow, setupCaps.smartFlow);
     var optionsData = a.options || state.options;
     var detailPercentiles = a.derivativeDetail && a.derivativeDetail.percentiles ? a.derivativeDetail.percentiles : {};
     // Carry only scores from ELIGIBLE data — a stale cached fundingAvg must not keep injecting
@@ -1871,15 +1874,15 @@
     // (+/-7) DENTRO de calculateDerivativeDetailContribution — por isso o carry nao e somado de novo
     // aqui. O fundingScore do premium so e subtraido quando o detail realmente pontuou funding; numa
     // pane parcial do endpoint fundingRate, o funding ao vivo do premium volta a valer.
-    var derivatives = clamp(Math.round((a.derivScore - (detailFundingEligible ? (a.fundingScore || 0) : 0)) * 1.25 + derivativeDetail), -12, 12);
+    var derivatives = clamp(Math.round((a.derivScore - (detailFundingEligible ? (a.fundingScore || 0) : 0)) * 1.25 + derivativeDetail), -setupCaps.derivatives, setupCaps.derivatives);
     var scoreChain = eligibleDataset(a.coinMetrics) ? a.chainScore : (Number.isFinite(a.nativeChainScore) ? a.nativeChainScore : 0);
-    var chain = clamp(Math.round(scoreChain + external.defi * 0.45 + external.asset * 0.2), -10, 10);
+    var chain = clamp(Math.round(scoreChain + external.defi * 0.45 + external.asset * 0.2), -setupCaps.chainFundamental, setupCaps.chainFundamental);
     var etfFlow = latestEtfFlow(a.institutional || state.institutional);
     var etfAdjustment = Number.isFinite(etfFlow) ? clamp(Math.round(etfFlow / 100000000), -3, 3) : 0;
-    var macro = clamp(Math.round(news.score * 0.36 + external.sentiment * 0.45 + external.global * 0.45 + etfAdjustment), -10, 10);
+    var macro = clamp(Math.round(news.score * 0.36 + external.sentiment * 0.45 + external.global * 0.45 + etfAdjustment), -setupCaps.newsMacro, setupCaps.newsMacro);
     var historyCandidate = a.history || state.historyProfiles[state.symbol] || null;
     var history = historyFresh(historyCandidate) ? historyCandidate : null;
-    var historyScore = history ? clamp(Math.round(history.score), -12, 12) : 0;
+    var historyScore = history ? clamp(Math.round(history.score), -setupCaps.history, setupCaps.history) : 0;
     var setup = setupQuality(a);
     var risk = 0;
     var volumeRatio = Number.isFinite(a.avgVol) && a.avgVol ? a.lastVol / a.avgVol : 1;
@@ -1904,7 +1907,7 @@
     var liq = liquidationSummary();
     if (liq.total > 0 && liq.longValue > liq.shortValue * 2 && a.sweepDown) risk += 2;
     if (liq.total > 0 && liq.shortValue > liq.longValue * 2 && a.sweepUp) risk -= 2;
-    risk = clamp(risk, -14, 14);
+    risk = clamp(risk, -setupCaps.risk, setupCaps.risk);
     var total = clamp(Math.round(technical + multi.score + flow + derivatives + chain + macro + historyScore + risk), -100, 100);
     var quality = dataQuality(a);
     // Gate HTF: 1d e 1w precisam existir e nao podem estar ambos contra a direcao da entrada.
@@ -1942,14 +1945,14 @@
     var macroStatus = state.newsMode !== 'auto' ? 'manual'
       : (news.items.length || fearGreedEligible(state.external) || macroSourceAvailable(state.external.macro) || activeTradFiAssets(state.external.tradfi).length || marketMacroContextAvailable(state.external)) ? 'fresh' : 'missing';
     var components = [
-      { name: 'Tecnica', ruleId: 'setup.technical.v1', score: technical, max: 20, status: 'fresh', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines'], reason: 'trendScore*0.32 + momScore*0.42 do timeframe selecionado' },
-      { name: 'Multi-TF', ruleId: 'setup.mtf.v2', score: multi.score, max: 16, status: mtfCoverage.available === mtfCoverage.expected ? 'fresh' : mtfCoverage.available ? 'partial' : 'missing', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines'], reason: 'Confirmacao INDEPENDENTE (TF do grafico excluido) + gate 1d/1w; cobertura ' + mtfCoverage.available + '/' + mtfCoverage.expected + ' timeframes canonicos' },
-      { name: 'Smart/fluxo', ruleId: 'setup.flow.v1', score: flow, max: 18, status: a.flowAvailable ? 'fresh' : 'missing', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines', 'binance-spot-depth'], reason: 'flowScore*0.48 + book*0.35 + smart money*0.55' },
-      { name: 'Derivativos', ruleId: 'setup.derivatives.v1', score: derivatives, max: 12, status: datasetStatus(a.derivativeDetail) || 'missing', scope: 'symbol', isProxy: false, sources: ['binance-futures', 'deribit-options'], reason: 'derivScore*1.25 + detalhe de OI/funding/taker/opcoes elegiveis' },
-      { name: 'On-chain/fund.', ruleId: 'setup.chain.v1', score: chain, max: 10, status: eligibleDataset(a.coinMetrics) || (a.mempoolContext && a.mempoolContext.eligibleForScore) ? 'fresh' : a.coinMetrics ? datasetStatus(a.coinMetrics) : 'missing', scope: 'symbol', isProxy: !!(a.mempoolContext && a.mempoolContext.isProxy), sources: ['coinmetrics-community', 'defillama', 'mempool-space'], reason: 'chainScore + defi*0.45 + asset*0.2' },
-      { name: 'Noticias/macro', ruleId: 'setup.macro.v1', score: macro, max: 10, status: macroStatus, scope: 'market', isProxy: false, sources: state.newsMode !== 'auto' ? ['manual-user-session', 'alternative-me', 'us-treasury-yields', 'cboe-vix', 'cryptoetf-public'] : ['rss-news', 'alternative-me', 'us-treasury-yields', 'cboe-vix', 'cryptoetf-public'], reason: newsOverrideAuditLabel() + 'news*0.36 + sentimento*0.45 + global*0.45 + ETF' },
-      { name: 'Historico', ruleId: 'setup.history.v1', score: historyScore, max: 12, status: history ? 'fresh' : historyCandidate ? 'stale' : 'missing', scope: 'symbol', isProxy: false, sources: ['binance-daily-history'], reason: history ? (history.samples || 0) + ' amostras de regimes semelhantes' : 'sem perfil historico fresco' },
-      { name: 'Risco', ruleId: 'setup.risk.v2', score: risk, max: 14, status: 'fresh', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines', 'binance-liquidations'], reason: 'Esticamento de bandas, climax de volume, volume x delta e sweeps confirmados por liquidacoes' }
+      { name: 'Tecnica', ruleId: 'setup.technical.v1', score: technical, max: setupCaps.technical, status: 'fresh', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines'], reason: 'trendScore*0.32 + momScore*0.42 do timeframe selecionado' },
+      { name: 'Multi-TF', ruleId: 'setup.mtf.v2', score: multi.score, max: setupCaps.multiTimeframe, status: mtfCoverage.available === mtfCoverage.expected ? 'fresh' : mtfCoverage.available ? 'partial' : 'missing', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines'], reason: 'Confirmacao INDEPENDENTE (TF do grafico excluido) + gate 1d/1w; cobertura ' + mtfCoverage.available + '/' + mtfCoverage.expected + ' timeframes canonicos' },
+      { name: 'Smart/fluxo', ruleId: 'setup.flow.v1', score: flow, max: setupCaps.smartFlow, status: a.flowAvailable ? 'fresh' : 'missing', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines', 'binance-spot-depth'], reason: 'flowScore*0.48 + book*0.35 + smart money*0.55' },
+      { name: 'Derivativos', ruleId: 'setup.derivatives.v1', score: derivatives, max: setupCaps.derivatives, status: datasetStatus(a.derivativeDetail) || 'missing', scope: 'symbol', isProxy: false, sources: ['binance-futures', 'deribit-options'], reason: 'derivScore*1.25 + detalhe de OI/funding/taker/opcoes elegiveis' },
+      { name: 'On-chain/fund.', ruleId: 'setup.chain.v1', score: chain, max: setupCaps.chainFundamental, status: eligibleDataset(a.coinMetrics) || (a.mempoolContext && a.mempoolContext.eligibleForScore) ? 'fresh' : a.coinMetrics ? datasetStatus(a.coinMetrics) : 'missing', scope: 'symbol', isProxy: !!(a.mempoolContext && a.mempoolContext.isProxy), sources: ['coinmetrics-community', 'defillama', 'mempool-space'], reason: 'chainScore + defi*0.45 + asset*0.2' },
+      { name: 'Noticias/macro', ruleId: 'setup.macro.v1', score: macro, max: setupCaps.newsMacro, status: macroStatus, scope: 'market', isProxy: false, sources: state.newsMode !== 'auto' ? ['manual-user-session', 'alternative-me', 'us-treasury-yields', 'cboe-vix', 'cryptoetf-public'] : ['rss-news', 'alternative-me', 'us-treasury-yields', 'cboe-vix', 'cryptoetf-public'], reason: newsOverrideAuditLabel() + 'news*0.36 + sentimento*0.45 + global*0.45 + ETF' },
+      { name: 'Historico', ruleId: 'setup.history.v1', score: historyScore, max: setupCaps.history, status: history ? 'fresh' : historyCandidate ? 'stale' : 'missing', scope: 'symbol', isProxy: false, sources: ['binance-daily-history'], reason: history ? (history.samples || 0) + ' amostras de regimes semelhantes' : 'sem perfil historico fresco' },
+      { name: 'Risco', ruleId: 'setup.risk.v2', score: risk, max: setupCaps.risk, status: 'fresh', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines', 'binance-liquidations'], reason: 'Esticamento de bandas, climax de volume, volume x delta e sweeps confirmados por liquidacoes' }
     ];
     components.forEach(function (component) { component.contribution = component.score; });
     var reconciledTotal = components.reduce(function (sum, component) { return sum + component.score; }, 0);
@@ -4007,43 +4010,66 @@
     try {
       var records = loadSignalJournal();
       var evaluationNow = Date.now();
-      var pending = records.filter(function (record) { return AnalyticsCore.signalOutcomePending(record, evaluationNow); }).slice(0, 10);
+      // C5: com o fetch de 15m compartilhado por simbolo o custo por sinal cai muito, entao o
+      // teto por clique sobe de 10 para 50 (o restante fica para o proximo clique/cron).
+      var pendingAll = records.filter(function (record) { return AnalyticsCore.signalOutcomePending(record, evaluationNow); });
+      var pending = pendingAll.slice(0, 50);
       if (!pending.length) {
         var waiting = records.filter(function (record) { return AnalyticsCore.signalOutcomeState(record, evaluationNow) === 'waiting'; }).length;
         text('signalsStatus', waiting ? 'Nenhum horizonte venceu ainda; ' + waiting + ' sinal(is) aguardando o tempo minimo.' : 'Nenhum sinal pendente: todos os horizontes decorridos foram avaliados.');
         return;
       }
-      text('signalsStatus', 'Avaliando ' + pending.length + ' sinais...');
+      text('signalsStatus', 'Avaliando ' + pending.length + ' sinais' + (pendingAll.length > pending.length ? ' (de ' + pendingAll.length + ' pendentes)' : '') + '...');
+      var needsLongHorizon = function (record) {
+        var outcome = record.outcome || {};
+        return (AnalyticsCore.toFiniteNumber(outcome.r24h) === null && record.signalCloseTime + 86400000 <= evaluationNow)
+          || (AnalyticsCore.toFiniteNumber(outcome.r7d) === null && record.signalCloseTime + 7 * 86400000 <= evaluationNow);
+      };
+      // C5 (ideia do RC-006 sobre o caminho preciso do ciclo D): UM fetch de 15m por SIMBOLO,
+      // a partir do pendente mais antigo do par, cobre os horizontes 24h/7d de todos os registros
+      // daquele simbolo (1000 x 15m ~ 10,4 dias >= horizonte de 7d). 15m mantem a marca de 24h/7d
+      // dentro de um quarto de hora; o 1m por registro preserva a precisao do horizonte de 1h.
+      var longStartBySymbol = {};
+      pending.forEach(function (record) {
+        if (!needsLongHorizon(record)) return;
+        var current = longStartBySymbol[record.symbol];
+        longStartBySymbol[record.symbol] = current === undefined ? record.signalCloseTime : Math.min(current, record.signalCloseTime);
+      });
+      var longSeriesBySymbol = {};
+      var longSymbols = Object.keys(longStartBySymbol);
+      for (var symbolIndex = 0; symbolIndex < longSymbols.length; symbolIndex += 1) {
+        var longSymbol = longSymbols[symbolIndex];
+        try {
+          var seriesRows = await fetchSpotJSON('/api/v3/klines?symbol=' + encodeURIComponent(longSymbol) + '&interval=15m&startTime=' + longStartBySymbol[longSymbol] + '&limit=1000', 12000, 'Binance spot');
+          longSeriesBySymbol[longSymbol] = AnalyticsCore.selectClosedCandles(parseKlines(seriesRows), Date.now());
+        } catch (seriesError) { longSeriesBySymbol[longSymbol] = null; }
+      }
       var deferred = 0;
       for (var index = 0; index < pending.length; index += 1) {
         var record = pending[index];
         var existing = record.outcome || {};
         var needs1h = AnalyticsCore.toFiniteNumber(existing.r1h) === null && record.signalCloseTime + 3600000 <= evaluationNow;
-        var needsLong = (AnalyticsCore.toFiniteNumber(existing.r24h) === null && record.signalCloseTime + 86400000 <= evaluationNow)
-          || (AnalyticsCore.toFiniteNumber(existing.r7d) === null && record.signalCloseTime + 7 * 86400000 <= evaluationNow);
-        var requests = [];
-        if (needs1h) {
-          var minuteStart = record.signalCloseTime + 3600000 - 60000;
-          requests.push({ interval: '1m', promise: fetchSpotJSON('/api/v3/klines?symbol=' + encodeURIComponent(record.symbol) + '&interval=1m&startTime=' + minuteStart + '&limit=3', 10000, 'Binance spot') });
-        }
-        // 15m keeps the 24h/7d marks within one quarter-hour while still fitting the full 7-day
-        // horizon in Binance's 1000-row limit (672 bars). The former 1h series could evaluate a
-        // horizon almost 60 minutes late solely because exchange candles are clock-aligned.
-        if (needsLong) requests.push({ interval: '15m', promise: fetchSpotJSON('/api/v3/klines?symbol=' + encodeURIComponent(record.symbol) + '&interval=15m&startTime=' + record.signalCloseTime + '&limit=700', 12000, 'Binance spot') });
-        var results = await Promise.allSettled(requests.map(function (request) { return request.promise; }));
+        var needsLong = needsLongHorizon(record);
         var outcome = existing;
         var signalDeferred = false;
-        results.forEach(function (result, resultIndex) {
-          if (result.status !== 'fulfilled') { signalDeferred = true; return; }
-          var candles = AnalyticsCore.selectClosedCandles(parseKlines(result.value), Date.now());
-          var request = requests[resultIndex];
-          var horizons = request.interval === '1m' ? ['r1h'] : ['r24h', 'r7d'];
-          var intervalMs = request.interval === '1m' ? 60000 : 15 * 60000;
-          outcome = AnalyticsCore.mergeSignalOutcome(outcome, AnalyticsCore.evaluateSignalOutcome(record, candles, {
-            horizons: horizons,
-            maxLagMs: intervalMs + AnalyticsCore.RULESET.clockSkewToleranceMs
+        if (needs1h) {
+          var minuteStart = record.signalCloseTime + 3600000 - 60000;
+          try {
+            var minuteRows = await fetchSpotJSON('/api/v3/klines?symbol=' + encodeURIComponent(record.symbol) + '&interval=1m&startTime=' + minuteStart + '&limit=3', 10000, 'Binance spot');
+            outcome = AnalyticsCore.mergeSignalOutcome(outcome, AnalyticsCore.evaluateSignalOutcome(record, AnalyticsCore.selectClosedCandles(parseKlines(minuteRows), Date.now()), {
+              horizons: ['r1h'],
+              maxLagMs: 60000 + AnalyticsCore.RULESET.clockSkewToleranceMs
+            }));
+          } catch (minuteError) { signalDeferred = true; }
+        }
+        if (needsLong) {
+          var sharedSeries = longSeriesBySymbol[record.symbol];
+          if (!sharedSeries) signalDeferred = true;
+          else outcome = AnalyticsCore.mergeSignalOutcome(outcome, AnalyticsCore.evaluateSignalOutcome(record, sharedSeries, {
+            horizons: ['r24h', 'r7d'],
+            maxLagMs: 15 * 60000 + AnalyticsCore.RULESET.clockSkewToleranceMs
           }));
-        });
+        }
         if (signalDeferred) deferred += 1;
         await withCrossTabLock(SIGNAL_JOURNAL_LOCK, function saveEvaluatedSignalExclusive() {
           var stored = loadSignalJournal();

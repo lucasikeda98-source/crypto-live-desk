@@ -62,6 +62,59 @@ test('ETF MCP aceita SSE multiline e ignora eventos auxiliares', () => {
   assert.throws(() => handler.parseEtfMcpBody('event: ping\ndata: {"ping":true}\n\n'), /payload JSON-RPC valido/);
 });
 
+test('ETF MCP degrada com erro controlado quando content tem formato inesperado', () => {
+  const nonArrayContent = JSON.stringify({ jsonrpc: '2.0', result: { content: { type: 'text', text: '{}' } } });
+  assert.throws(() => handler.parseEtfMcpBody(nonArrayContent), /sem conteudo/, 'content nao-array nao pode virar TypeError');
+  const nullItem = JSON.stringify({ jsonrpc: '2.0', result: { content: [null, { type: 'text', text: '{"ok":1}' }] } });
+  assert.deepEqual(handler.parseEtfMcpBody(nullItem), { ok: 1 }, 'item nulo no content nao pode derrubar o parser');
+  const textless = JSON.stringify({ jsonrpc: '2.0', result: { content: [{ type: 'image' }] } });
+  assert.throws(() => handler.parseEtfMcpBody(textless), /sem conteudo/);
+});
+
+test('calendario de sessoes cobre feriados moveis dos EUA sem apagar meio-dia de vespera', () => {
+  const zeroOn = (date) => ({ date, netFlowUsdM: 0 });
+  const normalized = handler.normalizeEtfFlows({ days: [
+    zeroOn('2026-01-01'), // New Year
+    zeroOn('2026-01-19'), // MLK (3a segunda)
+    zeroOn('2026-02-16'), // Washington (3a segunda)
+    zeroOn('2026-04-03'), // Good Friday
+    zeroOn('2026-05-25'), // Memorial Day (ultima segunda)
+    zeroOn('2026-09-07'), // Labor Day (1a segunda)
+    zeroOn('2026-11-26'), // Thanksgiving (4a quinta)
+    zeroOn('2026-12-25'), // Christmas
+    zeroOn('2027-01-01'), // New Year do ano seguinte (borda de ano)
+    zeroOn('2027-07-05'), // July 4 observado na segunda
+    zeroOn('2026-07-12'), // domingo
+  ] });
+  assert.deepEqual(normalized.days.map((row) => row.reported), new Array(11).fill(false), 'feriado/fim de semana nao pode cobrar fluxo');
+  assert.ok(normalized.days.every((row) => row.reportReason === 'market-closed-placeholder'));
+
+  const halfDays = handler.normalizeEtfFlows({ days: [zeroOn('2026-11-27'), zeroOn('2026-12-24')] });
+  assert.deepEqual(halfDays.days.map((row) => row.reported), [true, true], 'meio pregao (Black Friday/vespera de Natal) e dia de negociacao');
+  assert.equal(halfDays.days[0].reportReason, 'trading-day-zero');
+});
+
+test('flag do provedor tem precedencia sobre o calendario e valores invalidos nao viram zero', () => {
+  const normalized = handler.normalizeEtfFlows({ days: [
+    { date: '2026-07-10', netFlowUsdM: 55, reported: false },
+    { date: '2026-07-10', netFlowUsdM: 0, isReported: true },
+    { date: '2026-07-10', netFlowUsdM: 0, marketOpen: false },
+    { date: '2026-07-10', netFlowUsdM: 0, status: 'Not Reported' },
+    { date: '2026-07-10', netFlowUsdM: 0, reportStatus: 'final' },
+    { date: '2026-07-10', netFlowUsdM: 'abc' },
+    { date: 'nao-e-data', netFlowUsdM: 0 },
+  ] });
+  assert.deepEqual(normalized.days.map((row) => [row.reported, row.reportReason]), [
+    [false, 'provider-reported-flag'],
+    [true, 'provider-is-reported-flag'],
+    [false, 'provider-market-open-flag'],
+    [false, 'provider-status-not_reported'],
+    [true, 'provider-status-final'],
+    [false, 'invalid-flow'],
+    [false, 'invalid-date'],
+  ]);
+});
+
 test('rota institucional declara degradacao parcial de ETF/CFTC e bloqueia metodo', async () => {
   const originalFetch = global.fetch;
   const payload = { rows: [{ date: '2026-07-10', total: 12 }] };

@@ -350,44 +350,44 @@ test('ANL-005: aggregateMultiTimeframe deriva o clamp de RULESET.setupCaps.multi
   assert.ok(Math.abs(overflow.score) <= cap);
 });
 
-test('ANL-005: clamps e maximos declarados no app.js batem com RULESET.setupCaps (definicao normativa unica)', () => {
-  // Cross-check de consistencia: os literais duplicados vivem em app.js (fora do escopo
-  // de producao desta rodada). Este guarda compara CADA literal com o valor normativo do
-  // ruleset — divergir qualquer um dos dois lados faz o teste falhar.
+test('ANL-005: buildConfluence DERIVA clamps e maximos de RULESET.setupCaps (sem literais duplicados)', () => {
+  // Pos-C3: os literais foram substituidos por derivacao real. Este guarda verifica que
+  // (a) cada clamp e cada max: referencia setupCaps.<chave> e (b) nenhum literal numerico
+  // de cap voltou a aparecer nesses pontos — reverter a derivacao falha aqui.
   const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
-  const caps = core.RULESET.setupCaps;
-  const expectations = [
-    { name: 'technical', pattern: /var technical = clamp\([^;]*?, -(\d+), (\d+)\)/ },
-    { name: 'smartFlow', pattern: /var flow = clamp\([^;]*?, -(\d+), (\d+)\)/ },
-    { name: 'derivatives', pattern: /var derivatives = clamp\([^;]*?, -(\d+), (\d+)\)/ },
-    { name: 'chainFundamental', pattern: /var chain = clamp\([^;]*?, -(\d+), (\d+)\)/ },
-    { name: 'newsMacro', pattern: /var macro = clamp\([^;]*?, -(\d+), (\d+)\)/ },
-    { name: 'history', pattern: /var historyScore = history \? clamp\([^;]*?, -(\d+), (\d+)\)/ },
-    { name: 'risk', pattern: /risk = clamp\(risk, -(\d+), (\d+)\)/ }
+  const start = app.indexOf('function buildConfluence(');
+  assert.ok(start >= 0, 'buildConfluence nao encontrado');
+  const body = app.slice(start, app.indexOf('\n  function ', start + 10));
+  assert.match(body, /var setupCaps = AnalyticsCore\.RULESET\.setupCaps;/, 'derivacao do ruleset ausente');
+  const derivations = [
+    ['technical', /var technical = clamp\([^;]*?, -setupCaps\.technical, setupCaps\.technical\)/],
+    ['smartFlow', /var flow = clamp\([^;]*?, -setupCaps\.smartFlow, setupCaps\.smartFlow\)/],
+    ['derivatives', /var derivatives = clamp\([^;]*?, -setupCaps\.derivatives, setupCaps\.derivatives\)/],
+    ['chainFundamental', /var chain = clamp\([^;]*?, -setupCaps\.chainFundamental, setupCaps\.chainFundamental\)/],
+    ['newsMacro', /var macro = clamp\([^;]*?, -setupCaps\.newsMacro, setupCaps\.newsMacro\)/],
+    ['history', /var historyScore = history \? clamp\([^;]*?, -setupCaps\.history, setupCaps\.history\)/],
+    ['risk', /risk = clamp\(risk, -setupCaps\.risk, setupCaps\.risk\)/]
   ];
-  expectations.forEach((expectation) => {
-    const match = app.match(expectation.pattern);
-    assert.ok(match, 'clamp de ' + expectation.name + ' nao encontrado em app.js');
-    assert.equal(Number(match[1]), caps[expectation.name], 'clamp inferior de ' + expectation.name + ' divergiu do ruleset');
-    assert.equal(Number(match[2]), caps[expectation.name], 'clamp superior de ' + expectation.name + ' divergiu do ruleset');
+  derivations.forEach(([name, pattern]) => {
+    assert.match(body, pattern, 'clamp de ' + name + ' nao deriva do ruleset');
   });
-  // Os campos `max:` dos componentes exportados tambem precisam bater com o ruleset.
   const componentMax = {
-    'setup.technical.v1': caps.technical,
-    'setup.mtf.v2': caps.multiTimeframe,
-    'setup.flow.v1': caps.smartFlow,
-    'setup.derivatives.v1': caps.derivatives,
-    'setup.chain.v1': caps.chainFundamental,
-    'setup.macro.v1': caps.newsMacro,
-    'setup.history.v1': caps.history,
-    'setup.risk.v2': caps.risk
+    'setup.technical.v1': 'technical',
+    'setup.mtf.v2': 'multiTimeframe',
+    'setup.flow.v1': 'smartFlow',
+    'setup.derivatives.v1': 'derivatives',
+    'setup.chain.v1': 'chainFundamental',
+    'setup.macro.v1': 'newsMacro',
+    'setup.history.v1': 'history',
+    'setup.risk.v2': 'risk'
   };
   Object.keys(componentMax).forEach((ruleId) => {
-    const pattern = new RegExp("ruleId: '" + ruleId.replace(/\./g, '\\.') + "'[^\\n]*?max: (\\d+)");
-    const match = app.match(pattern);
-    assert.ok(match, 'componente ' + ruleId + ' nao encontrado em app.js');
-    assert.equal(Number(match[1]), componentMax[ruleId], 'max declarado de ' + ruleId + ' divergiu do ruleset');
+    const pattern = new RegExp("ruleId: '" + ruleId.replace(/\./g, '\.') + "'[^\n]*?max: setupCaps\." + componentMax[ruleId]);
+    assert.match(body, pattern, 'max de ' + ruleId + ' nao deriva do ruleset');
   });
+  // Nenhum clamp com literal de cap sobrou no corpo (o clamp final -100/100 e permitido).
+  const literalClamp = body.match(/clamp\([^;]*?, -(1[0-9]|20)[^;]*?\)/);
+  assert.equal(literalClamp, null, 'literal de cap reapareceu no buildConfluence: ' + (literalClamp && literalClamp[0]));
 });
 
 // ---------------------------------------------------------------------------

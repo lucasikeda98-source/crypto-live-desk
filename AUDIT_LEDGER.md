@@ -1,6 +1,6 @@
 # Ledger vivo da auditoria
 
-Estado geral: **CORRECOES DA REV-CC-01 APLICADAS (CC-FIX-01, 2026-07-13)** — ver `CODEX_HANDOFF.md` CC-FIX-01. Os 8 defeitos da secao A foram corrigidos com testes de regressao reais (incluindo execucao dos scripts Lua de producao em VM Lua) e os guardas fracos da secao B viraram testes de comportamento; suite 303/303, cobertura 97,95/81,46/96,54. Permanecem abertos: os 7 `CONFIRMADO` de infra, ANL-015 e OPS-010 (sem revisao), derivacao dos clamps de app.js e o teste de pipeline de features (documentados em CC-FIX-01).
+Estado geral: **CORRECOES DA REV-CC-01 APLICADAS (CC-FIX-01, 2026-07-13)** — ver `CODEX_HANDOFF.md` CC-FIX-01. Os 8 defeitos da secao A foram corrigidos com testes de regressao reais (incluindo execucao dos scripts Lua de producao em VM Lua) e os guardas fracos da secao B viraram testes de comportamento; suite 303/303, cobertura 97,95/81,46/96,54. Permanecem abertos: os 7 `CONFIRMADO` de infra, ANL-015 e OPS-010 (sem revisao), derivacao dos clamps de app.js e o teste de pipeline de features (documentados em CC-FIX-01). **Fase C (2026-07-13): ANL-015 e OPS-010 promovidos a REVISADO PELO CLAUDE CODE (ver CC-FIX-02 no CODEX_HANDOFF.md); clamps do app.js derivam do ruleset; pipeline gated no browser-boot bloqueante; batch por simbolo na avaliacao de sinais.**
 
 Este arquivo e o indice operacional dos achados. Detalhes, provas e decisoes devem permanecer rastreaveis mesmo quando a implementacao mudar. Nenhuma linha e removida para esconder historico; achados invalidados recebem justificativa.
 

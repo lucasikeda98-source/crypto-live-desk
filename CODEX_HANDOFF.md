@@ -685,3 +685,19 @@ Nao promover a producao. Ordem sugerida: (1) corrigir a secao A (P1 primeiro: me
 - `node --check` em todos os JS/CJS rastreados: limpo. `git diff --check`: limpo.
 - Navegador local (dev-server): app carregou com dados ao vivo, 24 cards, zero erro de console; painel de cobertura exibindo estado parcial honesto de derivativos.
 - `rulesetHash` mudou de `4445fcf0` para `b91fdb37` (adicoes conscientes ao core; nenhuma regra de score alterada); pin atualizado com justificativa em test/behavior-guards.test.js.
+
+### CC-FIX-02 — Fase C: dividas remanescentes da revisao
+
+- Data: 2026-07-13
+- Autor: Claude Code (Fable 5)
+- Escopo: itens C1-C5 do HANDOFF_PROXIMA_SESSAO.md.
+
+| Item | Resultado |
+| --- | --- |
+| ANL-015 | **REVISADO PELO CLAUDE CODE.** Revisao adversarial do calendario/flag `reported` de ETF: calendario NYSE correto (feriados moveis, observancia sab/dom, meio-pregao como dia de negociacao), zero legitimo preservado, precedencia da flag do provedor. 1 defeito real corrigido: envelope MCP de formato inesperado lancava TypeError nao controlado (api/institutional.js) — agora degrada com erro controlado; 3 testes novos em institutional-api.test.js (10/10). Risco residual documentado: timestamp datetime em ET (nao usado pelo provedor hoje) seria classificado pela data UTC. |
+| OPS-010 | **REVISADO PELO CLAUDE CODE.** browser-smoke.cjs exercita o contrato de override (autor+motivo+submit) e o check snapshotIdentityChanges valida a mudanca de identidade do snapshot; evidencia no log do proprio CI. |
+| C3 (ANL-005 residuo) | buildConfluence agora DERIVA clamps e max: de RULESET.setupCaps (16 substituicoes); o cross-check de literais virou guarda de derivacao com prova de revert. |
+| C4 | Pipeline gated por comportamento em navegador REAL no job bloqueante browser-boot: snapshot com identidade completa + envelope rastreavel quando ha dados ao vivo (condicional honesto: sem rede, o boot continua valido). |
+| C5 | Avaliacao de sinais com 1 fetch de 15m por simbolo (cobre todos os pendentes do par; 1000x15m ~ 10,4 dias), 1m por registro para o horizonte de 1h, teto por clique 10 -> 50. |
+
+Gate: 316/316 com cobertura acima dos pisos (3 execucoes estaveis), boot-check OK online e offline, node --check limpo. Hash de nivel app muda por design (implementacao do app.js e material do hash); pin do core (4efe8ce2) inalterado — nenhuma regra de score mudou.

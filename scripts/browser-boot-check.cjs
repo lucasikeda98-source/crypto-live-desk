@@ -67,6 +67,25 @@ const ROOT = path.join(__dirname, '..');
   ok('alertLog/explicacao/grid presentes', dom.alertLog && dom.scoreExplanation && dom.assetGrid);
   ok('sem overflow horizontal em 390px', !dom.horizontalOverflow);
 
+  // C4/REV-CC-01: pipeline gated por comportamento real (nao regex de fonte). Quando o runner
+  // tem dados spot (titulo com preco), o snapshot precisa existir com identidade completa e o
+  // envelope de explicacao precisa estar renderizado. Sem dados, o boot continua valido.
+  const hasLiveData = /USDT \$/.test(await page.title());
+  if (hasLiveData) {
+    await page.click('#viewAssetButton');
+    await page.waitForTimeout(3000);
+    const pipeline = await page.evaluate(() => ({
+      snapshotId: (document.getElementById('updatedAt') || { dataset: {} }).dataset.snapshotId || '',
+      envelope: (document.getElementById('explanationEnvelope') || {}).textContent || ''
+    }));
+    ok('snapshot com identidade completa (dados ao vivo)',
+      /^[0-9]+\.[0-9]+\.[0-9]+[^:]*:[0-9a-f]{8}:[A-Z0-9]+USDT:/.test(pipeline.snapshotId),
+      pipeline.snapshotId.slice(0, 60));
+    ok('envelope de explicacao rastreavel (modelo+regras+snapshot)',
+      /Modelo .+ \| regras [0-9a-f]{8} \| .*snapshot /.test(pipeline.envelope),
+      pipeline.envelope.slice(0, 80));
+  }
+
   const networkNoise = /(Failed to fetch|net::|ERR_|4\d\d|5\d\d|NetworkError|Load failed|fetch|Failed to load resource|Service Unavailable|WebSocket)/i;
   const appPageErrors = pageErrors.filter((message) => !networkNoise.test(message));
   const appConsoleErrors = consoleErrors.filter((message) => !networkNoise.test(message));
