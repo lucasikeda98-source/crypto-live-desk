@@ -79,6 +79,35 @@ test('spot nao aceita short e normaliza a direcao para compra', () => {
   assert.ok(result.breakEven > result.executionAverage);
 });
 
+test('calculadora aplica no core os limites declarados pela interface', () => {
+  const result = position({
+    currentQty: 1e200,
+    currentPrice: 1e200,
+    addMultiple: 1e200,
+    addPrice: 1e200,
+    leverage: 1_000,
+    entryFeePct: 150,
+    exitFeePct: 200,
+    maintenancePct: 500,
+    fundingRatePct: -500,
+    fundingPeriods: 2e6 + 0.9
+  });
+  assert.equal(result.currentQty, 1e15);
+  assert.equal(result.currentPrice, 1e15);
+  assert.equal(result.addMultiple, 1e6);
+  assert.equal(result.addPrice, 1e15);
+  assert.equal(result.leverage, 125);
+  assert.equal(result.entryFeePct, 99);
+  assert.equal(result.exitFeePct, 99);
+  assert.equal(result.maintenancePct, 99);
+  assert.equal(result.fundingRatePct, -100);
+  assert.equal(result.fundingPeriods, 1e6);
+  assert.ok(Number.isFinite(result.notional));
+  assert.ok(Number.isFinite(result.fundingPayment));
+  assert.ok(Number.isFinite(result.breakEven));
+  assert.ok(Number.isFinite(result.liquidationPrice));
+});
+
 function tradFiPayload({ timestamps, close, open, high, low, volume }) {
   return {
     chart: {
@@ -128,6 +157,19 @@ test('TradFi rejeita serie sem nenhuma cotacao valida', () => {
   );
 });
 
+test('TradFi ordena, deduplica e rejeita timestamp/preco/volume impossiveis', () => {
+  const payload = tradFiPayload({
+    timestamps: [1_700_086_400, -1, 1_700_000_000, 1_700_086_400],
+    open: [109, 1, 99, 110], high: [111, 1, 101, 112], low: [108, 1, 98, 109],
+    close: [110, 1, -100, 111], volume: [-5, 1, 10, 20],
+  });
+  const rows = core.normalizeTradFiRows(payload);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].close, 111, 'a ultima observacao valida para o timestamp vence');
+  assert.equal(rows[0].volume, 20);
+  assert.equal(core.normalizeTradFiChart(payload, { symbol: 'QQQ' }).close, 111);
+});
+
 test('normalizacao numerica preserva ausencia e aceita strings numericas', () => {
   assert.equal(core.toFiniteNumber(null), null);
   assert.equal(core.toFiniteNumber(''), null);
@@ -135,6 +177,66 @@ test('normalizacao numerica preserva ausencia e aceita strings numericas', () =>
   assert.equal(core.toFiniteNumber('123.45'), 123.45);
   assert.equal(core.percentageChange(0, 100), -100);
   assert.equal(core.percentageChange(100, 0), null);
+});
+
+test('timestamps Date e series vazias permanecem semanticamente validos/indisponiveis', () => {
+  assert.equal(core.toTimestampMs(new Date('2026-07-13T00:00:00Z')), Date.parse('2026-07-13T00:00:00Z'));
+  assert.equal(core.toTimestampMs(new Date('invalida')), null);
+  assert.equal(Number.isNaN(core.rsi([], 14)), true);
+});
+
+test('calendario ETF separa zero reportado de placeholder em fechamento dos EUA', () => {
+  assert.equal(core.isUsEquityTradingDay('2026-07-02'), true);
+  assert.equal(core.isUsEquityTradingDay('2026-07-03'), false, 'Independence Day observado');
+  assert.equal(core.isUsEquityTradingDay('2026-06-19'), false, 'Juneteenth');
+  assert.equal(core.isUsEquityTradingDay('2026-04-03'), false, 'Good Friday');
+  assert.equal(core.isUsEquityTradingDay('2026-07-11'), false, 'fim de semana');
+  assert.equal(core.isUsEquityTradingDay('2021-12-31'), false, 'Ano Novo de 2022 observado na sexta anterior');
+
+  assert.deepEqual(core.classifyEtfFlowObservation({ date: '2026-07-02' }, 0), { reported: true, reason: 'trading-day-zero', date: '2026-07-02' });
+  assert.deepEqual(core.classifyEtfFlowObservation({ date: '2026-07-03' }, 0), { reported: false, reason: 'market-closed-placeholder', date: '2026-07-03' });
+  assert.equal(core.classifyEtfFlowObservation({ date: '2026-07-11' }, 12).reported, true, 'valor nao zero explicito prevalece sobre calendario');
+  assert.equal(core.classifyEtfFlowObservation({ date: '2026-07-02', reported: false }, 12).reported, false, 'flag explicita do provedor prevalece');
+  assert.equal(core.classifyEtfFlowObservation({ date: '2026-07-02', status: 'pending' }, 0).reported, false);
+});
+
+test('linha temporal mais recente independe da ordem do upstream e rejeita datas invalidas', () => {
+  const newest = core.latestTimestampedRow([
+    { date: '2026-07-12', value: 12 },
+    { date: 'nao-e-data', value: 99 },
+    { date: '2026-07-10', value: 10 },
+    { timestamp: 1783987200, value: 13 },
+  ], ['date', 'timestamp']);
+  assert.equal(newest.value, 13);
+  assert.equal(core.toTimestampMs(''), null);
+  assert.equal(core.toTimestampMs(false), null);
+  assert.equal(core.toTimestampMs(1783987200), 1783987200000);
+  const asOf = Date.parse('2026-07-13T00:00:00Z');
+  const bounded = core.latestTimestampedRow([
+    { timestamp: -1, value: 'negativo' },
+    { date: '2026-07-12', value: 'valido' },
+    { date: '2099-01-01', value: 'futuro' },
+  ], ['date', 'timestamp'], asOf);
+  assert.equal(bounded.value, 'valido');
+});
+
+test('rank e tamanho sem variacao nao fabricam contexto direcional de mercado', () => {
+  assert.deepEqual(core.calculateMarketTrendContext({ market_cap_rank: 1 }), {
+    available: false, score: 0, quality: 0, change7d: null, change30d: null,
+  });
+  const partial = core.calculateMarketTrendContext({ market_cap_rank: 1, price_change_percentage_7d_in_currency: '10' });
+  assert.equal(partial.available, true);
+  assert.equal(partial.score, 5);
+  assert.equal(partial.quality, 0.5);
+});
+
+test('volatilidade realizada exige a janela inteira valida', () => {
+  const values = Array.from({ length: 31 }, (_, index) => 100 + index);
+  assert.ok(Number.isFinite(core.realizedVolatility(values, 30, 365)));
+  const missing = values.slice();
+  missing[15] = null;
+  assert.ok(Number.isNaN(core.realizedVolatility(missing, 30, 365)));
+  assert.ok(Number.isNaN(core.realizedVolatility(values.slice(1), 30, 365)));
 });
 
 test('somente candles cujo closeTime passou alimentam sinais confirmados', () => {
@@ -164,6 +266,35 @@ test('normalizacao de klines mantem closeTime e remove OHLC invalido', () => {
   assert.equal(candles.length, 1);
   assert.equal(candles[0].close, 102);
   assert.equal(candles[0].closeTime, 1_999);
+});
+
+test('normalizacao de klines rejeita invariantes impossiveis, ordena e deduplica', () => {
+  const validLate = [2_000, '102', '106', '101', '105', '12', 2_999, '1200', 10, '7'];
+  const validEarly = [1_000, '100', '105', '95', '102', '12', 1_999, '1200', 10, '7'];
+  const duplicateReplacement = [1_000, '101', '106', '96', '103', '13', 1_999, '1300', 11, '8'];
+  const malformed = [
+    [3_000, '100', '99', '95', '102', '12', 3_999, '1200', 10, '7'], // high abaixo do close
+    [4_000, '100', '105', '101', '102', '12', 4_999, '1200', 10, '7'], // low acima do open
+    [5_000, '100', '105', '95', '102', '-1', 5_999, '1200', 10, '0'],
+    [6_000, '100', '105', '95', '102', '4', 6_999, '1200', 10, '5'],
+    [7_000, '100', '105', '95', '102', '4', 6_999, '1200', 10, '2'],
+    [-1, '100', '105', '95', '102', '4', 999, '1200', 10, '2'],
+    [8_000, '100', '105', '95', '102', '4', -1, '1200', 10, '2'],
+  ];
+  const candles = core.normalizeKlines([validLate, validEarly, ...malformed, duplicateReplacement]);
+  assert.deepEqual(candles.map((row) => row.time), [1_000, 2_000]);
+  assert.equal(candles[0].close, 103, 'a ultima linha valida para o mesmo open time vence');
+});
+
+test('veto pos-trap usa duracao real de 1s e preserva chaves independentes', () => {
+  let registry = core.upsertTrapVeto({}, 'BTCUSDT:1s', 'short', 10_000, 6, '1s');
+  registry = core.upsertTrapVeto(registry, 'ETHUSDT:5m', 'long', 20_000, 4, '5m');
+  assert.equal(core.intervalToMilliseconds('1s'), 1_000);
+  assert.equal(core.activeTrapVeto(registry, 'BTCUSDT:1s', 15_999), 'short');
+  assert.equal(core.activeTrapVeto(registry, 'BTCUSDT:1s', 16_000), null);
+  assert.equal(core.activeTrapVeto(registry, 'ETHUSDT:5m', 20_001), 'long');
+  assert.equal(core.trapVetoBarsLeft(registry, 'ETHUSDT:5m', 20_000, '5m'), 4);
+  assert.equal(core.intervalToMilliseconds('desconhecido'), null);
 });
 
 test('RSI de Wilder reproduz a referencia classica de 14 periodos', () => {
@@ -346,6 +477,15 @@ test('CHoCH: fechar atraves do ultimo HL confirmado flipa a estrutura de alta', 
   assert.equal(shift.brokenLevel, 100);
 });
 
+test('CHoCH espelhado: fechar acima do ultimo LH confirmado flipa a estrutura de baixa', () => {
+  const candles = [10, 10, 10, 11, 13].map((close, time) => ({ time, open: close, high: close + 1, low: close - 1, close, volume: 1 }));
+  const highs = [{ time: 0, price: 15 }, { time: 2, price: 12 }];
+  const lows = [{ time: 0, price: 10 }, { time: 2, price: 8 }];
+  assert.deepEqual(core.detectStructureShift(candles, highs, lows), {
+    event: 'CHoCH', direction: 'bull', score: 6, brokenLevel: 12, barsAgo: 0,
+  });
+});
+
 test('BOS: rompimento a favor da tendencia pontua continuacao, sem evento em range', () => {
   // Uptrend: close rompe o ultimo pivot high (110) -> BOS bull +4.
   const pivotHighs = [{ price: 105, time: 5 }, { price: 110, time: 9 }];
@@ -378,6 +518,13 @@ test('divergencia: preco faz HH com indicador em LH (bearish) e espelho (bullish
   // Indicador confirmando (HH junto) nao e divergencia.
   const confirming = core.detectDivergence(candles, [50,55,60,65,70,66,60,58,61,64,75,70,65,60], pivotHighs, []);
   assert.equal(confirming.bearish, false);
+});
+
+test('divergencia ignora pivots que nao pertencem a serie causal', () => {
+  const candles = [{ time: 1, close: 10 }, { time: 2, close: 11 }];
+  assert.deepEqual(core.detectDivergence(candles, [40, 50], [{ time: 1, price: 10 }, { time: 999, price: 12 }], []), {
+    bearish: false, bullish: false,
+  });
 });
 
 test('climax de volume: 3 sigmas + range 2x ATR + fecho no terco oposto apos perna estendida = exaustao', () => {
@@ -424,6 +571,10 @@ test('squeeze: BB dentro do Keltner com bandwidth comprimido liga, e liberacao c
   const unconfirmed = core.detectSqueeze(compressed.concat(impulses), { deltaSum: -500 });
   assert.equal(unconfirmed.released, 'bull');
   assert.equal(unconfirmed.score, 0, 'delta contra a liberacao nao pontua');
+  const ordinary = Array.from({ length: 80 }, (_, index) => ({
+    time: index, open: 100 + index, high: 102 + index, low: 98 + index, close: 100 + index, volume: 100, takerBuy: 50,
+  }));
+  assert.equal(core.detectSqueeze(ordinary).released, null, 'sem transicao recente nao fabrica liberacao');
 });
 
 test('carry: funding anualizado ancora euforia/estresse em termos absolutos e detecta regime delta-neutro', () => {
@@ -499,6 +650,19 @@ test('trap engine: sem reclaim nao ha trap, e o espelho bearish veta longs', () 
   assert.equal(bullTrap.trap, 'bear');
   assert.equal(bullTrap.score, -8, 'liq spike do lado oposto confirma');
   assert.equal(bullTrap.vetoDirection, 'long');
+
+  const doubleSweep = [
+    { time: 0, high: 105, low: 101, close: 103, volume: 100, takerBuy: 50 },
+    { time: 1, high: 105, low: 101, close: 103, volume: 100, takerBuy: 50 },
+    { time: 2, high: 107, low: 99, close: 103, volume: 100, takerBuy: 50 },
+    { time: 3, high: 105, low: 101, close: 103, volume: 100, takerBuy: 50 },
+  ];
+  assert.equal(core.detectTrap(doubleSweep, { atr: 2, priorLow: 100, priorHigh: 106, oiChangePct: -4 }).trap, null, 'double sweep simultaneo e chop ambiguo');
+
+  const orderedSweeps = doubleSweep.map((row) => ({ ...row }));
+  orderedSweeps[1] = { ...orderedSweeps[1], low: 99 };
+  orderedSweeps[2] = { ...orderedSweeps[2], low: 101, high: 107 };
+  assert.equal(core.detectTrap(orderedSweeps, { atr: 2, priorLow: 100, priorHigh: 106, oiChangePct: -4 }).trap, 'bear', 'o sweep mais recente prevalece');
 });
 
 test('weightedMedian pondera amostras por peso (decay temporal do historico)', () => {
@@ -507,8 +671,19 @@ test('weightedMedian pondera amostras por peso (decay temporal do historico)', (
   assert.equal(core.weightedMedian([1, 2, 10], [0.1, 0.1, 10]), 10);
   // Ordem de entrada nao importa.
   assert.equal(core.weightedMedian([10, 1, 2], [10, 0.1, 0.1]), 10);
+  assert.equal(core.weightedMedian([1, 2], [1e308, 1e308]), 1, 'normalizacao evita overflow do peso total');
   assert.ok(Number.isNaN(core.weightedMedian([], [])));
   assert.ok(Number.isNaN(core.weightedMedian([1, 2], [0, 0])));
+});
+
+test('FVG: gap totalmente preenchido deixa de ser reportado; gap aberto permanece', () => {
+  const base = [
+    { time: 1, open: 99, high: 100, low: 98, close: 99 },
+    { time: 2, open: 100, high: 102, low: 99, close: 101 },
+    { time: 3, open: 104, high: 106, low: 103, close: 105 },
+  ];
+  assert.deepEqual(core.findOpenFairValueGap(base), { type: 'bullish', low: 100, high: 103, time: 3 });
+  assert.equal(core.findOpenFairValueGap(base.concat([{ time: 4, open: 104, high: 105, low: 99, close: 101 }])), null);
 });
 
 test('DVOL direcional: vol subindo so e medo quando o preco nao sobe junto', () => {
@@ -585,6 +760,7 @@ test('sinais v2: entrada short espelhada e guarda de R:R minimo', () => {
   assert.ok(short.state.stopPrice > 100);
   assert.equal(short.state.targetPrice, 96);
   assert.equal(short.state.maxBars, 12, 'range segura menos tempo');
+  assert.equal(core.evaluateSignalTransition(null, machineSnapshot({ total: -80 })).state, null, 'score short sem gatilho nomeado nao entra');
   // R:R < 1 nao entra: alvo colado (101) com stop longe.
   const badRr = core.evaluateSignalTransition(null, machineSnapshot({
     resistances: [100.5, 101], supports: [92],
@@ -627,6 +803,23 @@ test('sinais v2: saidas — alvo, stop (stop vence no mesmo candle), deterioraca
   assert.equal(timedRecord.exitReason, 'time');
 });
 
+test('sinais v2: gap atraves do stop usa o open do candle, nao o close', () => {
+  const long = core.evaluateSignalTransition(null, machineSnapshot({
+    total: 55,
+    structureShift: { event: 'CHoCH', direction: 'bull', score: 6 },
+  })).state;
+  const gap = core.evaluateSignalTransition(long, machineSnapshot({
+    closeTime: long.lastCloseTime + 1,
+    open: long.stopPrice - 2,
+    low: long.stopPrice - 3,
+    high: long.entryPrice + 1,
+    close: long.stopPrice + 1,
+  }));
+  assert.equal(gap.event.type, 'exit');
+  assert.equal(gap.event.record.exitReason, 'stop');
+  assert.equal(gap.event.record.exitPrice, long.stopPrice - 2);
+});
+
 test('sinais v2: reducer e idempotente por candle (reload nao dobra barsHeld)', () => {
   const active = core.evaluateSignalTransition(null, machineSnapshot({ structureShift: { event: 'CHoCH', direction: 'bull', score: 6 } })).state;
   const bar = machineSnapshot({ high: 101.5, low: 98.5, close: 100.5, closeTime: 1_003_600 });
@@ -639,6 +832,25 @@ test('sinais v2: reducer e idempotente por candle (reload nao dobra barsHeld)', 
   // Candle do proprio momento da entrada tambem nao conta como barra segurada.
   const entryReplay = core.evaluateSignalTransition(active, machineSnapshot({ closeTime: 1_000_000 }));
   assert.equal(entryReplay.state.barsHeld, 0);
+});
+
+test('sinais v2: estado persistido corrompido e descartado sem contaminar o reducer', () => {
+  const active = core.evaluateSignalTransition(null, machineSnapshot({
+    total: 55,
+    structureShift: { event: 'CHoCH', direction: 'bull', score: 6 },
+  })).state;
+  const normalized = core.normalizeSignalMachineMap({
+    good: active,
+    partial: { phase: 'ACTIVE', side: 'long', entryPrice: 100 },
+    inverted: { ...active, stopPrice: 120 },
+    tombstone: { phase: 'FLAT', lastCloseTime: '1234' },
+    garbage: 'x',
+  });
+  assert.equal(normalized.good.side, 'long');
+  assert.deepEqual(normalized.tombstone, { phase: 'FLAT', lastCloseTime: 1234 });
+  assert.equal('partial' in normalized, false);
+  assert.equal('inverted' in normalized, false);
+  assert.equal('garbage' in normalized, false);
 });
 
 test('sinais v2: MAE/MFE acumulam pelo caminho e o registro carrega metadados', () => {
@@ -654,6 +866,16 @@ test('sinais v2: MAE/MFE acumulam pelo caminho e o registro carrega metadados', 
   assert.ok(record.durationBars >= 2);
   assert.ok(Number.isFinite(record.rMultiple));
   assert.equal(record.entrySnapshotId, 'snap-1');
+
+  const short = core.evaluateSignalTransition(null, machineSnapshot({
+    total: -55, regime: 'Range', supports: [96, 92], resistances: [102, 110],
+    structureShift: { event: 'CHoCH', direction: 'bear', score: -6, brokenLevel: 102 },
+  })).state;
+  const shortStep = core.evaluateSignalTransition(short, machineSnapshot({
+    total: -50, high: 101, low: 98, close: 99, closeTime: 1_003_600,
+  }));
+  assert.ok(shortStep.state.mfePct >= 2 - 1e-9, 'short captura excursao favoravel na minima');
+  assert.ok(shortStep.state.maePct <= -1 + 1e-9, 'short captura excursao adversa na maxima');
 });
 
 test('sinais v2: tabelas de acerto por regime x gatilho x faixa com flag de amostra minima', () => {
@@ -746,6 +968,15 @@ test('MTF: sem linhas ou score fraco fica Misto sem crash', () => {
   assert.equal(weak.bias, 'Misto');
 });
 
+test('MTF ignora intervalos invalidos, score nao finito e deduplica o mesmo timeframe', () => {
+  const actual = core.aggregateMultiTimeframe([
+    mtfRow('1d', 50), mtfRow('1d', -50), mtfRow('desconhecido', 50), mtfRow('1w', NaN), null,
+  ]);
+  const expected = core.aggregateMultiTimeframe([mtfRow('1d', -50)]);
+  assert.deepEqual(actual, expected);
+  assert.equal(actual.alignment, 1, 'duplicata nao infla o denominador de alinhamento');
+});
+
 test('put/call OI: banda calibrada para o baseline call-dominante da Deribit', () => {
   const asOf = 10_000;
   const optionsWith = (putCallOi) => ({
@@ -826,6 +1057,13 @@ test('source throttle bloqueia fonte apos 429/418 e faz backoff exponencial ate 
   assert.equal(throttle.penalize('Binance', 0, 10_000), 1_000, 'apos sucesso o backoff reinicia da base');
 });
 
+test('source throttle trata chaves especiais como fontes isoladas sem tocar no prototipo', () => {
+  const throttle = core.createSourceThrottle({ baseCooldownMs: 1_000, maxCooldownMs: 60_000 });
+  assert.equal(throttle.penalize('__proto__', 0, 0), 1_000);
+  assert.equal(throttle.isBlocked('__proto__', 500), true);
+  assert.equal(throttle.isBlocked('constructor', 500), false);
+});
+
 test('request gate invalida respostas obsoletas', () => {
   const gate = core.createRequestGate();
   const first = gate.begin();
@@ -837,6 +1075,84 @@ test('request gate invalida respostas obsoletas', () => {
   const second = gate.begin();
   assert.equal(gate.isCurrent(second), true);
   assert.equal(gate.current(), second);
+});
+
+test('request budget limita concorrencia global sem perder chamadas enfileiradas', async () => {
+  const budget = core.createRequestBudget({ maxConcurrent: 2, maxStartsPerWindow: 50, maxStartsPerSource: 50, windowMs: 1000, maxQueue: 10 });
+  let active = 0;
+  let peak = 0;
+  const order = [];
+  const jobs = Array.from({ length: 6 }, (_, index) => budget.run(async () => {
+    active += 1;
+    peak = Math.max(peak, active);
+    order.push(index);
+    await new Promise((resolve) => setTimeout(resolve, 3));
+    active -= 1;
+    return index;
+  }, { source: index % 2 ? 'source-b' : 'source-a' }));
+  assert.deepEqual(await Promise.all(jobs), [0, 1, 2, 3, 4, 5]);
+  assert.equal(peak, 2);
+  assert.deepEqual(order, [0, 1, 2, 3, 4, 5]);
+  assert.deepEqual({ active: budget.stats().active, queued: budget.stats().queued }, { active: 0, queued: 0 });
+});
+
+test('request budget prioriza trabalho critico e rejeita overflow de fila', async () => {
+  const budget = core.createRequestBudget({ maxConcurrent: 1, maxStartsPerWindow: 50, maxStartsPerSource: 50, windowMs: 1000, maxQueue: 2 });
+  let release;
+  const order = [];
+  const first = budget.run(() => new Promise((resolve) => { release = resolve; order.push('running'); }), { source: 'source-a' });
+  const low = budget.run(() => { order.push('low'); }, { source: 'source-b', priority: -1 });
+  const high = budget.run(() => { order.push('high'); }, { source: 'source-c', priority: 5 });
+  await assert.rejects(budget.run(() => {}, { source: 'source-d' }), (error) => error.category === 'budget' && error.throttled === true);
+  await new Promise((resolve) => setImmediate(resolve));
+  release();
+  await Promise.all([first, low, high]);
+  assert.deepEqual(order, ['running', 'high', 'low']);
+});
+
+test('request budget aplica janelas moveis globais e por fonte com relogio deterministico', async () => {
+  function fakeTime() {
+    let now = 0;
+    let sequence = 0;
+    const timers = new Map();
+    return {
+      clock: () => now,
+      schedule(callback, delay) { const id = ++sequence; timers.set(id, { callback, at: now + delay }); return id; },
+      cancelSchedule(id) { timers.delete(id); },
+      advance(ms) {
+        now += ms;
+        let due;
+        do {
+          due = [...timers.entries()].filter(([, timer]) => timer.at <= now).sort((a, b) => a[1].at - b[1].at)[0];
+          if (due) { timers.delete(due[0]); due[1].callback(); }
+        } while (due);
+      }
+    };
+  }
+  const globalTime = fakeTime();
+  const globalBudget = core.createRequestBudget({ maxConcurrent: 3, maxStartsPerWindow: 2, maxStartsPerSource: 5, windowMs: 100, maxQueue: 5, ...globalTime });
+  const globalOrder = [];
+  const globalJobs = ['a', 'b', 'c'].map((name) => globalBudget.run(() => { globalOrder.push(name); }, { source: name }));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(globalOrder, ['a', 'b']);
+  assert.equal(globalBudget.stats().queued, 1);
+  globalTime.advance(99);
+  assert.deepEqual(globalOrder, ['a', 'b']);
+  globalTime.advance(1);
+  await Promise.all(globalJobs);
+  assert.deepEqual(globalOrder, ['a', 'b', 'c']);
+
+  const sourceTime = fakeTime();
+  const sourceBudget = core.createRequestBudget({ maxConcurrent: 3, maxStartsPerWindow: 10, maxStartsPerSource: 1, windowMs: 100, maxQueue: 5, ...sourceTime });
+  const sourceOrder = [];
+  const first = sourceBudget.run(() => { sourceOrder.push('a1'); }, { source: 'a' });
+  const second = sourceBudget.run(() => { sourceOrder.push('a2'); }, { source: 'a' });
+  const other = sourceBudget.run(() => { sourceOrder.push('b1'); }, { source: 'b' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(sourceOrder, ['a1', 'b1']);
+  sourceTime.advance(100);
+  await Promise.all([first, second, other]);
+  assert.deepEqual(sourceOrder, ['a1', 'b1', 'a2']);
 });
 
 test('Data Confidence pondera cobertura sem confundir ausencia com zero valido', () => {
@@ -907,7 +1223,7 @@ test('derivativo stale e invariavel a remover o dataset', () => {
     longShortRatio: 2,
     fundingAvg: 0.0005
   };
-  const fresh = core.calculateDerivativeDetailContribution({ detail, close: 105, vwap: 100, asOf: 10_000 });
+  const fresh = core.calculateDerivativeDetailContribution({ detail, oiPriceChangePct: 5, asOf: 10_000 });
   const stale = core.calculateDerivativeDetailContribution({ detail, close: 105, vwap: 100, asOf: 12_001 });
   const removed = core.calculateDerivativeDetailContribution({ detail: null, close: 105, vwap: 100, asOf: 12_001 });
 
@@ -1007,4 +1323,159 @@ test('long/short: divergencia varejo x top traders soma a favor do smart money',
     detail: freshDerivative({ longShortRatio: 2.0, topPositionRatio: 0.5 }), asOf
   });
   assert.equal(bearishDivergence, -3);
+});
+
+test('janela OIxpreco exige cobertura real do inicio e nunca usa o candle mais antigo como substituto', () => {
+  const covered = [
+    { closeTime: 1_000, close: 100 },
+    { closeTime: 2_000, close: 105 },
+    { closeTime: 3_000, close: 110 }
+  ];
+  assert.equal(core.priceChangeOverWindow(covered, 1_000, 3_000), 10);
+  assert.equal(Number.isNaN(core.priceChangeOverWindow(covered, 500, 3_000)), true, 'serie comeca depois da janela');
+  assert.equal(Number.isNaN(core.priceChangeOverWindow(covered, 1_000, 10_000)), true, 'serie termina muito antes do fim da janela');
+  assert.equal(Number.isNaN(core.priceChangeOverWindow(covered, 10_000, 12_000)), true, 'candle muito antigo nao substitui o inicio');
+  assert.equal(Number.isNaN(core.priceChangeOverWindow(covered, 2_000, 2_000)), true, 'janela invertida/zero');
+  const detail = { fetchedAt: 3_000, observedAt: 3_000, staleAfterMs: 10_000, dataStatus: 'fresh', eligibleForScore: true, metricObservedAt: { oiChangePct: 3_000 }, metricStaleAfterMs: { oiChangePct: 10_000 }, oiChangePct: 8 };
+  assert.equal(core.calculateDerivativeDetailContribution({ detail, close: 120, vwap: 100, asOf: 3_500 }), 0, 'sem retorno na mesma janela, VWAP nao autoriza quadrante');
+});
+
+test('compactacao do journal preserva todos os horizontes pendentes e limita apenas completos', () => {
+  const day = 86_400_000;
+  const now = 20 * day;
+  const complete = Array.from({ length: 4 }, (_, index) => ({
+    modelVersion: 'v', symbol: 'BTCUSDT', interval: '1h', signalCloseTime: (index + 1) * day,
+    recordedAt: (index + 1) * day, outcome: { r1h: 1, r24h: 2, r7d: 3 }
+  }));
+  const pending = Array.from({ length: 5 }, (_, index) => ({
+    modelVersion: 'v', symbol: 'ETHUSDT', interval: '1s', signalCloseTime: now - index * 1_000,
+    recordedAt: now - index * 1_000, outcome: null
+  }));
+  const compacted = core.compactSignalJournal(complete.concat(pending), now, 2);
+  assert.equal(compacted.length, 7);
+  assert.equal(compacted.filter((row) => row.symbol === 'ETHUSDT').length, 5, 'pendentes podem exceder cap sem perder evidencia');
+  assert.deepEqual(compacted.filter((row) => row.symbol === 'BTCUSDT').map((row) => row.signalCloseTime), [3 * day, 4 * day]);
+});
+
+test('cobertura MTF conta apenas timeframes canonicos unicos', () => {
+  const expected = ['15m', '1h', '4h', '1d', '1w'];
+  const coverage = core.timeframeCoverage([
+    { interval: '5m' }, { interval: '15m' }, { interval: '15m' },
+    { interval: '1h' }, { interval: '4h' }, { interval: '1d' }, { interval: '1w' }
+  ], expected);
+  assert.deepEqual(coverage, { available: 5, expected: 5, ratio: 1, missing: [] });
+  assert.deepEqual(core.timeframeCoverage([{ interval: '5m' }, { interval: '1d' }], expected), {
+    available: 1, expected: 5, ratio: 0.2, missing: ['15m', '1h', '4h', '1w']
+  });
+});
+
+test('ladder de decisao exige 1d+1w em todos os niveis de entrada e permanece simetrica', () => {
+  const base = { quality: 70, alignment: 0.7, multiBias: 'Alta', multiScore: 8, htfAvailable: true };
+  assert.deepEqual(core.setupDecision({ ...base, total: 45 }), { decision: 'Entrada com confirmacao', tone: 'long' });
+  assert.deepEqual(core.setupDecision({ ...base, total: 45, htfAvailable: false }), { decision: 'Gate HTF: 1d+1w indisponiveis', tone: 'wait' });
+  assert.deepEqual(core.setupDecision({ ...base, total: -45, multiBias: 'Baixa', multiScore: -8 }), { decision: 'Entrada vendedora com confirmacao', tone: 'short' });
+  assert.deepEqual(core.setupDecision({ ...base, total: -65, multiBias: 'Baixa', multiScore: -12 }), { decision: 'Entrada vendedora favoravel', tone: 'short' });
+  assert.deepEqual(core.setupDecision({ ...base, total: 65, trapVeto: 'long', trapBarsLeft: 4 }), { decision: 'Veto pos-trap: aguardar 4 barra(s)', tone: 'wait' });
+  assert.deepEqual(core.setupDecision({ ...base, total: 65, quality: 39 }), { decision: 'Dados insuficientes', tone: 'wait' });
+  assert.deepEqual(core.setupDecision({ ...base, total: -45, htfAvailable: false }), { decision: 'Gate HTF: 1d+1w indisponiveis', tone: 'wait' });
+  assert.deepEqual(core.setupDecision({ ...base, total: 45, htfVetoLong: true }), { decision: 'Gate HTF: 1d+1w baixistas vetam long', tone: 'wait' });
+  assert.deepEqual(core.setupDecision({ ...base, total: -45, multiBias: 'Baixa', multiScore: -8, htfVetoShort: true }), { decision: 'Gate HTF: 1d+1w altistas vetam short', tone: 'wait' });
+  assert.deepEqual(core.setupDecision({ ...base, total: 25 }), { decision: 'Aguardar pullback', tone: 'wait' });
+  assert.deepEqual(core.setupDecision({ ...base, total: -25 }), { decision: 'Cautela', tone: 'avoid' });
+});
+
+test('Ichimoku cobre nuvem baixista e export inclui radar rastreavel', () => {
+  const candles = Array.from({ length: 100 }, (_, index) => {
+    const close = 200 - index;
+    return { time: index, open: close + 0.5, high: close + 1, low: close - 1, close, volume: 1 };
+  });
+  assert.equal(core.ichimokuState(candles).state, 'Baixa');
+
+  const exported = core.buildAnalyticsExport({
+    modelVersion: 'test', rulesetHash: 'hash', calculatedAt: 1, inputSnapshotId: 'snap', symbol: 'BTCUSDT', interval: '1h',
+    radar: { score: 10, bias: 'Comprador', dataConfidence: 80, dataStatus: 'partial', components: [{ name: 'Tecnica', ruleId: 'r1', contribution: 10, weight: 30, quality: 0.8, status: 'fresh', scope: 'symbol', reason: 'fixture' }] },
+  });
+  assert.equal(exported.radar.components[0].ruleId, 'r1');
+  assert.equal(exported.radar.components[0].reason, 'fixture');
+});
+
+test('cobertura de derivativos e por metrica: ok pleno, parcial honesto e sem leitura (UX-001)', () => {
+  const full = core.derivativeCoverage({ oiChangePct: 1.2, fundingAvg: 0.0001, longShortRatio: 1.1, takerRatio: 0.9 });
+  assert.equal(full.state, 'ok');
+  assert.equal(full.label, 'OI, funding, L/S, taker');
+
+  const partial = core.derivativeCoverage({ fundingAvg: 0.0001 });
+  assert.equal(partial.state, 'partial');
+  assert.match(partial.label, /^funding \| faltam: OI, L\/S, taker$/);
+  assert.deepEqual(partial.liveMetrics, ['fundingAvg']);
+
+  const extrasOnly = core.derivativeCoverage({ topPositionRatio: 1.4, basisRate: 0.002 });
+  assert.equal(extrasOnly.state, 'partial');
+  assert.match(extrasOnly.label, /faltam: OI, funding, L\/S, taker/);
+
+  assert.equal(core.derivativeCoverage({}).state, 'none');
+  assert.equal(core.derivativeCoverage(null).label, 'sem leitura');
+  assert.equal(core.derivativeCoverage({ fundingAvg: Infinity }).state, 'none');
+});
+
+test('formatDisplayTimestamp respeita o fuso explicito na virada de dia (UX-005)', () => {
+  const nearMidnightUtc = Date.UTC(2026, 6, 13, 2, 30); // 13/07 02:30 UTC
+  const saoPaulo = core.formatDisplayTimestamp(nearMidnightUtc, 'America/Sao_Paulo', 'short');
+  const utc = core.formatDisplayTimestamp(nearMidnightUtc, 'UTC', 'short');
+  assert.match(saoPaulo, /^12\/07/); // UTC-3: ainda e 12/07 23:30
+  assert.match(utc, /^13\/07/);
+  assert.equal(core.formatDisplayTimestamp(null, 'UTC', 'short'), '--');
+  assert.equal(core.formatDisplayTimestamp(Infinity, 'UTC', 'short'), '--');
+  assert.match(core.formatDisplayTimestamp(nearMidnightUtc, 'Fuso/Invalido', 'time'), /^\d{2}:\d{2}:\d{2}$/);
+  assert.match(core.formatDisplayTimestamp(nearMidnightUtc, 'UTC', 'full'), /^13\/07\/2026,? 02:30:00$/);
+});
+
+test('buildInputSnapshotId: mesmo estado gera o mesmo id; qualquer input de score muda o id (ANL-001)', () => {
+  const baseSpec = () => ({
+    modelVersion: '1.0.0-test',
+    rulesetHash: 'abcd1234',
+    symbol: 'BTCUSDT',
+    interval: '5m',
+    signalCloseTime: 1_783_924_800_000,
+    derivativeDetail: { observedAt: 1_783_924_700_000 },
+    coinMetrics: { fetchedAt: 1_783_924_600_000 },
+    options: null,
+    institutional: { observedAt: 1_783_924_500_000 },
+    externalFetchedAt: 1_783_924_400_000,
+    newsFetchedAt: 1_783_924_300_000,
+    newsMode: 'auto',
+    newsOverrideAt: null,
+    mtfStamp: '5m@1:1h@2',
+    history: { observedAt: 1_783_924_200_000 },
+    inputComponents: { book: { spreadBps: 1.5 }, liquidations: { count: 3 } }
+  });
+
+  const identical = core.buildInputSnapshotId(baseSpec());
+  assert.equal(core.buildInputSnapshotId(baseSpec()), identical, 'estado identico deve gerar id identico');
+
+  // Book e liquidacoes entram via inputComponents: mudar SO eles muda o id.
+  const bookChanged = baseSpec();
+  bookChanged.inputComponents = { book: { spreadBps: 2.0 }, liquidations: { count: 3 } };
+  assert.notEqual(core.buildInputSnapshotId(bookChanged), identical, 'book diferente deve mudar o id');
+  const liquidationsChanged = baseSpec();
+  liquidationsChanged.inputComponents = { book: { spreadBps: 1.5 }, liquidations: { count: 4 } };
+  assert.notEqual(core.buildInputSnapshotId(liquidationsChanged), identical, 'liquidacoes diferentes devem mudar o id');
+
+  // Cada dataset carimbado tambem participa da identidade.
+  ['derivativeDetail', 'coinMetrics', 'institutional'].forEach((key) => {
+    const changed = baseSpec();
+    changed[key] = { observedAt: 1_783_999_999_000 };
+    assert.notEqual(core.buildInputSnapshotId(changed), identical, key + ' diferente deve mudar o id');
+  });
+  const optionsChanged = baseSpec();
+  optionsChanged.options = { observedAt: 1_783_924_100_000 };
+  assert.notEqual(core.buildInputSnapshotId(optionsChanged), identical);
+
+  const mtfChanged = baseSpec();
+  mtfChanged.mtfStamp = '5m@1:1h@3';
+  assert.notEqual(core.buildInputSnapshotId(mtfChanged), identical);
+
+  assert.equal(core.datasetInputStamp(null), 'na');
+  assert.equal(core.datasetInputStamp({ observedAt: 5_000_000_000_000 }), '5000000000000');
+  assert.equal(core.datasetInputStamp({ fetchedAt: 5_000_000_000_000 }), 'f5000000000000');
 });

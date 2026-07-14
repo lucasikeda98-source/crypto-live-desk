@@ -1,12 +1,28 @@
-(function () {
-  var MODEL_VERSION = '1.0.0-preview.6';
+(function cryptoLiveDeskApp() {
+  var MODEL_VERSION = '1.0.0-preview.8';
   var AnalyticsCore = window.CryptoAnalyticsCore;
   if (!AnalyticsCore) throw new Error('CryptoAnalyticsCore nao foi carregado.');
-  var RULESET_HASH = AnalyticsCore.rulesetHash();
+  var RequestClient = window.CryptoRequestClient;
+  if (!RequestClient) throw new Error('CryptoRequestClient nao foi carregado.');
+  var SignalSync = window.CryptoSignalSyncClient;
+  if (!SignalSync) throw new Error('CryptoSignalSyncClient nao foi carregado.');
+  var CrossTabLock = window.CryptoCrossTabLock;
+  if (!CrossTabLock) throw new Error('CryptoCrossTabLock nao foi carregado.');
+  // The full app function joins the complete analytics core artifact in the implementation hash.
+  // This is intentionally conservative: no transitive score helper can change invisibly.
+  var RULESET_HASH = AnalyticsCore.rulesetHash(undefined, [cryptoLiveDeskApp]);
   var refreshGate = AnalyticsCore.createRequestGate();
   var sourceThrottle = AnalyticsCore.createSourceThrottle({ baseCooldownMs: 5000, maxCooldownMs: 300000 });
+  var requestBudget = AnalyticsCore.createRequestBudget({ maxConcurrent: 8, maxStartsPerWindow: 180, maxStartsPerSource: 60, windowMs: 60000, maxQueue: 128 });
+  var networkClient = RequestClient.createRequestClient({
+    budget: requestBudget,
+    throttle: sourceThrottle,
+    health: health,
+    classifyHttpError: AnalyticsCore.classifyHttpError,
+    parseRetryAfter: AnalyticsCore.parseRetryAfter
+  });
   var REFRESH_MS = 3000;
-  var BOARD_REFRESH_MS = 15000;
+  var BOARD_REFRESH_MS = 60000;
   var DERIVATIVES_REFRESH_MS = 15000;
   var CHAIN_REFRESH_MS = 30000;
   var NEWS_REFRESH_MS = 300000;
@@ -17,12 +33,16 @@
   var OPTIONS_REFRESH_MS = 60000;
   var OPTIONS_STALE_MS = 5 * 60 * 1000;
   var INSTITUTIONAL_REFRESH_MS = 300000;
-  var INSTITUTIONAL_STALE_MS = 36 * 60 * 60 * 1000;
+  // ETF/EOD observations remain current across weekends; 36h incorrectly made Friday stale on Sunday.
+  var INSTITUTIONAL_STALE_MS = 96 * 60 * 60 * 1000;
+  var MICROSTRUCTURE_REFRESH_MS = 15000;
+  var MICROSTRUCTURE_STALE_MS = 60 * 1000;
   var NEWS_ITEM_STALE_MS = 36 * 60 * 60 * 1000;
   var EXTERNAL_STALE_MS = 10 * 60 * 1000;
   var EOD_STALE_MS = 96 * 60 * 60 * 1000;
   var HISTORY_REFRESH_MS = 21600000;
   var HISTORY_STALE_MS = 48 * 60 * 60 * 1000;
+  var DISPLAY_TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'horario local';
   var BINANCE_SPOT_BASES = ['https://data-api.binance.vision', 'https://api.binance.com'];
   var BINANCE_INTERVALS = ['1s', '1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d', '3d', '1w', '1M'];
   var MTF_INTERVALS = ['15m', '1h', '4h', '1d', '1w'];
@@ -79,7 +99,7 @@
     ARBUSDT: { gecko: 'arbitrum', paprika: 'arb-arbitrum', chain: 'Arbitrum', kind: 'Ethereum L2', narrative: 'ARB depende de TVL, volume DEX, atividade de L2 e calendario de desbloqueios.' },
     OPUSDT: { gecko: 'optimism', paprika: 'op-optimism', chain: 'Optimism', kind: 'Ethereum L2', narrative: 'OP reage a atividade do Superchain, TVL, receitas de L2 e desbloqueios de tokens.' }
   };
-  var state = { symbol: 'BTCUSDT', interval: '5m', view: 'dashboard', assetTab: 'summary', live: true, refreshing: false, pendingRefresh: false, boardRefreshing: false, boardPendingRefresh: false, contextRefreshing: false, chainRefreshing: false, timer: null, klines: [], analysis: null, board: [], boardFetchedAt: 0, boardInterval: '', sort: 'score', chain: null, chainFetchedAt: 0, news: [], newsFetchedAt: 0, newsAttemptedAt: 0, newsMode: 'auto', newsSources: [], external: {}, externalFetchedAt: 0, derivativeCache: {}, mtfCache: {}, mtf: null, historyProfiles: {}, historyCandles: {}, historyLoading: {}, historySweepStarted: false, coinMetricsCache: {}, coinMetrics: null, optionsCache: {}, options: null, optionsFetchedAt: 0, institutionalCache: {}, institutional: null, institutionalFetchedAt: 0, liquidations: [], liquidationSocket: null, liquidationSymbol: '', liquidationConnected: false, liquidationReconnectTimer: null, apiHealth: {}, boardFailures: {}, signalMachineEval: {}, quantChecks: null, chart: { ema9: true, ema21: true, ema50: true, ema200: false, bb: false, vwap: false, supertrend: false, levels: true, fib: false, patterns: true, candles: 120 } };
+  var state = { symbol: 'BTCUSDT', interval: '5m', view: 'dashboard', assetTab: 'summary', live: true, refreshing: false, pendingRefresh: false, boardRefreshing: false, boardPendingRefresh: false, contextRefreshing: false, contextPromise: null, chainRefreshing: false, timer: null, klines: [], analysis: null, board: [], boardFetchedAt: 0, boardInterval: '', sort: 'score', chain: null, chainFetchedAt: 0, news: [], newsFetchedAt: 0, newsAttemptedAt: 0, newsMode: 'auto', newsOverrideAt: null, newsOverrideAuthor: null, newsOverrideReason: null, newsSources: [], external: {}, externalFetchedAt: 0, externalAttemptedAt: 0, derivativeCache: {}, mtfCache: {}, mtf: null, historyProfiles: {}, historyCandles: {}, historyLoading: {}, coinMetricsCache: {}, coinMetrics: null, optionsCache: {}, options: null, optionsFetchedAt: 0, institutionalCache: {}, institutional: null, institutionalFetchedAt: 0, microstructureCache: {}, microstructure: null, liquidations: [], liquidationSocket: null, liquidationSymbol: '', liquidationConnected: false, liquidationReconnectTimer: null, apiHealth: {}, boardFailures: {}, trapVetos: {}, signalMachineEval: {}, quantChecks: null, chart: { ema9: true, ema21: true, ema50: true, ema200: false, bb: false, vwap: false, supertrend: false, levels: true, fib: false, patterns: true, candles: 120 } };
   var $ = function (id) { return document.getElementById(id); };
   function analysisMatchesSelection(analysis) {
     if (!analysis) return false;
@@ -99,51 +119,168 @@
     var snapshot = analysis.snapshot || {};
     var signalTime = snapshot.signalCloseTime || analysis.signalCandle && analysis.signalCandle.closeTime;
     var calculatedTime = snapshot.calculatedAt || Date.now();
-    text('updatedAt', 'v' + MODEL_VERSION + ' | candle fechado ' + (signalTime ? new Date(signalTime).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--') + ' | snapshot ' + new Date(calculatedTime).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' | r' + (snapshot.revision || 0));
+    text('updatedAt', 'v' + MODEL_VERSION + ' | candle fechado ' + (signalTime ? new Date(signalTime).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--') + ' | snapshot ' + new Date(calculatedTime).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' | ' + DISPLAY_TIME_ZONE + ' | r' + (snapshot.revision || 0));
     var node = $('updatedAt');
     if (node) {
       node.dataset.snapshotId = snapshot.inputSnapshotId || '';
       node.title = snapshot.updateReason ? 'Ultima mudanca do snapshot: ' + snapshot.updateReason : '';
     }
   }
-  function datasetInputStamp(dataset) {
-    if (!dataset) return 'na';
-    var observed = timestampMs(dataset.observedAt);
-    if (Number.isFinite(observed)) return String(observed);
-    var fetched = timestampMs(dataset.fetchedAt);
-    return Number.isFinite(fetched) ? 'f' + fetched : 'na';
-  }
   function mtfInputStamp() {
     var multi = state.mtf;
     if (!multi || !multi.rows || !multi.rows.length) return 'na';
     return multi.rows.map(function (row) { return row.interval + '@' + (Number.isFinite(row.closeTime) ? row.closeTime : 'x'); }).join(',');
   }
+  function scoreInputComponents(analysis) {
+    var finiteOrNull = function (value) { return Number.isFinite(value) ? value : null; };
+    var detail = analysis.derivativeDetail || {}, flow = analysis.coinMetrics && analysis.coinMetrics.exchangeFlow || {};
+    var options = analysis.options || {}, optionMarket = options.market || {}, optionNearest = options.nearest || {};
+    var external = analysis.external || {}, news = scoreNews(state.symbol), liquidations = liquidationSummary();
+    return {
+      signalCandle: analysis.signalCandle ? { time: analysis.signalCandle.time, closeTime: analysis.signalCandle.closeTime, open: analysis.signalCandle.open, high: analysis.signalCandle.high, low: analysis.signalCandle.low, close: analysis.signalCandle.close, volume: analysis.signalCandle.volume, takerBuy: finiteOrNull(analysis.signalCandle.takerBuy) } : null,
+      market: { funding: finiteOrNull(analysis.funding), basis: finiteOrNull(analysis.basis), tickerChange24h: finiteOrNull(finiteNumber(analysis.ticker && analysis.ticker.priceChangePercent)) },
+      book: { bidQty: finiteOrNull(analysis.bidQty), askQty: finiteOrNull(analysis.askQty), spreadBps: finiteOrNull(analysis.spreadBps), bookImbalance: finiteOrNull(analysis.bookImb), buySlipBps: finiteOrNull(analysis.buySlipBps), sellSlipBps: finiteOrNull(analysis.sellSlipBps) },
+      derivatives: { status: datasetStatus(detail), oiChangePct: finiteOrNull(detail.oiChangePct), fundingAvg: finiteOrNull(detail.fundingAvg), longShortRatio: finiteOrNull(detail.longShortRatio), takerRatio: finiteOrNull(detail.takerRatio), topPositionRatio: finiteOrNull(detail.topPositionRatio), basisRate: finiteOrNull(detail.basisRate) },
+      onchain: { status: datasetStatus(analysis.coinMetrics), score: finiteOrNull(analysis.chainScore), nativeChainScore: finiteOrNull(analysis.nativeChainScore), netflow7d: finiteOrNull(flow.netflow7d), coverageDays: finiteOrNull(flow.flowCoverageDays) },
+      options: { status: datasetStatus(options), isProxy: !!options.isProxy, dvol: finiteOrNull(options.dvol && options.dvol.latest), putCallOi: finiteOrNull(optionMarket.putCallOi), putCallVolume: finiteOrNull(optionMarket.putCallVolume), atmIv: finiteOrNull(optionNearest.atmIv), expectedMove: finiteOrNull(optionNearest.expectedMove) },
+      institutional: { status: datasetStatus(analysis.institutional), etfFlow: finiteOrNull(latestEtfFlow(analysis.institutional)) },
+      external: { status: datasetStatus(external), total: finiteOrNull(external.total), sentiment: finiteOrNull(external.sentiment), global: finiteOrNull(external.global), asset: finiteOrNull(external.asset), defi: finiteOrNull(external.defi) },
+      news: { mode: state.newsMode, provenance: state.newsMode === 'auto' ? 'rss-auto' : 'manual-user-session', overrideAt: state.newsOverrideAt, overrideAuthor: state.newsOverrideAuthor, overrideReason: state.newsOverrideReason, score: finiteOrNull(news.score), items: news.items.length, newestObservedAt: news.items.length ? Math.max.apply(null, news.items.map(function (item) { return timestampMs(item.observedAt); }).filter(Number.isFinite).concat([0])) : null },
+      multiTimeframe: state.mtf && state.mtf.rows ? state.mtf.rows.map(function (row) { return { interval: row.interval, closeTime: finiteOrNull(row.closeTime), score: finiteOrNull(row.score), bias: row.bias }; }) : [],
+      history: analysis.history ? { status: historyFresh(analysis.history) ? 'fresh' : 'stale', observedAt: finiteOrNull(timestampMs(analysis.history.observedAt)), score: finiteOrNull(analysis.history.score), samples: finiteOrNull(analysis.history.samples) } : null,
+      liquidations: { long15m: finiteOrNull(liquidations.longValue), short15m: finiteOrNull(liquidations.shortValue), events15m: liquidations.recent.length, latestEventAt: liquidations.recent.length ? liquidations.recent[0].time : null },
+      events: { trap: analysis.trap || null, squeeze: analysis.squeeze || null, structureShift: analysis.structureShift || null, divergence: analysis.divergence || null, volumeClimax: analysis.volumeClimax || null }
+    };
+  }
+  function evidenceDataset(sourceIds, observedAt, payload) {
+    var observed = timestampMs(observedAt);
+    return { sourceIds: sourceIds, observedAt: Number.isFinite(observed) ? observed : null, payload: payload };
+  }
+  function multiTimeframeRawEvidence(symbol) {
+    var candlesByInterval = {};
+    var rows = state.mtf && Array.isArray(state.mtf.rows) ? state.mtf.rows : [];
+    rows.forEach(function (row) {
+      var cached = state.mtfCache[symbol + ':' + row.interval];
+      candlesByInterval[row.interval] = cached && Array.isArray(cached.candles) ? cached.candles : [];
+    });
+    return { aggregation: state.mtf || null, candlesByInterval: candlesByInterval };
+  }
+  function externalRawEvidence(symbol, analysis) {
+    var ext = state.external || {};
+    var marketData = ext.marketData || {};
+    return {
+      observedAt: ext.observedAt || null,
+      fetchedAt: ext.fetchedAt || null,
+      dataStatus: ext.dataStatus || null,
+      fearGreed: ext.fearGreed || null,
+      marketDataStatus: {
+        source: marketData.source || null,
+        observedAt: marketData.observedAt || null,
+        fetchedAt: marketData.fetchedAt || null,
+        staleAfterMs: marketData.staleAfterMs || null,
+        dataStatus: marketData.dataStatus || null,
+        eligibleForScore: !!marketData.eligibleForScore
+      },
+      global: ext.global || null,
+      selectedMarket: selectedMarket(symbol),
+      paprikaGlobal: ext.paprikaGlobal || null,
+      macro: ext.macro || null,
+      tradfi: ext.tradfi || null,
+      selectedChain: analysis.external && analysis.external.chain || null,
+      selectedProtocol: analysis.external && analysis.external.protocol || null,
+      scored: analysis.external || null
+    };
+  }
+  /** Capture a detached, immutable evidence bundle at the same synchronous boundary as the score id. */
+  function captureRawEvidence(analysis, snapshot) {
+    var symbol = snapshot.symbol || state.symbol;
+    var closedCandles = selectClosedCandles(state.klines);
+    var signalObservedAt = analysis.signalCandle && analysis.signalCandle.closeTime;
+    var newsSource = state.newsMode === 'auto' ? 'rss-news' : 'manual-user-session';
+    var rawDatasets = {
+      decisionState: evidenceDataset(['binance-spot-klines', 'binance-liquidations', newsSource], snapshot.calculatedAt, {
+        inputComponents: snapshot.inputComponents,
+        trapVetos: state.trapVetos,
+        activeTrapVeto: activeTrapVeto(analysis),
+        newsMode: state.newsMode,
+        newsOverrideAt: state.newsOverrideAt,
+        newsOverrideAuthor: state.newsOverrideAuthor,
+        newsOverrideReason: state.newsOverrideReason
+      }),
+      derivatives: evidenceDataset(['binance-futures'], analysis.derivativeDetail && analysis.derivativeDetail.observedAt, {
+        detail: analysis.derivativeDetail || null,
+        premium: analysis.marketInputs && analysis.marketInputs.premium || null,
+        openInterest: analysis.marketInputs && analysis.marketInputs.openInterest || null
+      }),
+      externalContext: evidenceDataset(['coingecko-market', 'coinpaprika-market', 'alternative-me', 'us-treasury-yields', 'cboe-vix', 'tradfi-yahoo', 'defillama'], state.external && (state.external.observedAt || state.external.fetchedAt), {
+        scoreInputs: externalRawEvidence(symbol, analysis)
+      }),
+      history: evidenceDataset(['binance-daily-history'], analysis.history && analysis.history.observedAt, {
+        candles: state.historyCandles[symbol] || [],
+        profile: analysis.history || null
+      }),
+      institutional: evidenceDataset(['cryptoetf-public', 'cftc-legacy'], analysis.institutional && analysis.institutional.observedAt, analysis.institutional || null),
+      liquidations: evidenceDataset(['binance-liquidations'], state.liquidations.length ? state.liquidations[0].time : null, {
+        events: state.liquidations,
+        summary: liquidationSummary()
+      }),
+      microstructure: evidenceDataset(['binance-aggtrades', 'cross-venue-quotes'], analysis.microstructure && analysis.microstructure.observedAt, analysis.microstructure || null),
+      multiTimeframe: evidenceDataset(['binance-spot-klines'], signalObservedAt, multiTimeframeRawEvidence(symbol)),
+      news: evidenceDataset([newsSource], state.newsFetchedAt, {
+        items: state.news,
+        sources: state.newsSources,
+        mode: state.newsMode,
+        overrideAt: state.newsOverrideAt,
+        overrideAuthor: state.newsOverrideAuthor,
+        overrideReason: state.newsOverrideReason
+      }),
+      onchain: evidenceDataset(['coinmetrics-community', 'mempool-space'], analysis.coinMetrics && analysis.coinMetrics.observedAt, {
+        coinMetrics: analysis.coinMetrics || null,
+        nativeChain: analysis.chain || null,
+        mempoolContext: analysis.mempoolContext || null
+      }),
+      options: evidenceDataset(['deribit-options'], analysis.options && analysis.options.observedAt, analysis.options || null),
+      selectedMarket: evidenceDataset(['binance-spot-klines', 'binance-spot-ticker', 'binance-spot-depth'], signalObservedAt, {
+        candles: state.klines,
+        closedCandleCount: closedCandles.length,
+        signalCandle: analysis.signalCandle || null,
+        liveCandle: analysis.liveCandle || null,
+        ticker: analysis.marketInputs && analysis.marketInputs.ticker || analysis.ticker || null,
+        depth: analysis.marketInputs && analysis.marketInputs.depth || null
+      })
+    };
+    return AnalyticsCore.buildRawEvidenceEnvelope({
+      capturedAt: snapshot.calculatedAt,
+      modelVersion: MODEL_VERSION,
+      rulesetHash: RULESET_HASH,
+      inputSnapshotId: snapshot.inputSnapshotId,
+      datasets: rawDatasets
+    });
+  }
   /**
-   * The snapshot id is derived only from the identity of the discrete INPUTS
-   * (symbol, interval, closed candle, each dataset's observation stamp and
-   * the multi-timeframe closed candles), never from the calculation time:
-   * the same inputs always produce the same id. Continuous real-time blocks
-   * (order book depth, liquidation stream) are intentionally excluded per
-   * contract section 5 — they carry their own observation times and would
-   * make every 3s cycle a "new" snapshot.
+   * The snapshot id hashes every score-driving input, including continuous book/liquidation
+   * observations. Calculation time stays excluded: identical inputs still produce the same id.
    */
   function buildInputSnapshotId(analysis, snapshot) {
-    return [
-      MODEL_VERSION,
-      RULESET_HASH,
-      snapshot.symbol || state.symbol,
-      snapshot.interval || state.interval,
-      snapshot.signalCloseTime || 0,
-      'drv' + datasetInputStamp(analysis.derivativeDetail),
-      'cm' + datasetInputStamp(analysis.coinMetrics),
-      'opt' + datasetInputStamp(analysis.options),
-      'etf' + datasetInputStamp(analysis.institutional),
-      'ext' + (state.external && state.external.fetchedAt ? state.external.fetchedAt : 'na'),
-      'news' + (state.newsFetchedAt || 'na'),
-      'mode' + state.newsMode,
-      'mtf' + mtfInputStamp(),
-      'hist' + (analysis.history && Number.isFinite(timestampMs(analysis.history.observedAt)) ? timestampMs(analysis.history.observedAt) : 'na')
-    ].join(':');
+    // ANL-001: identidade calculada pelo core (testavel); aqui so montamos o spec do estado.
+    return AnalyticsCore.buildInputSnapshotId({
+      modelVersion: MODEL_VERSION,
+      rulesetHash: RULESET_HASH,
+      symbol: snapshot.symbol || state.symbol,
+      interval: snapshot.interval || state.interval,
+      signalCloseTime: snapshot.signalCloseTime || 0,
+      derivativeDetail: analysis.derivativeDetail,
+      coinMetrics: analysis.coinMetrics,
+      options: analysis.options,
+      institutional: analysis.institutional,
+      externalFetchedAt: state.external && state.external.fetchedAt ? state.external.fetchedAt : null,
+      newsFetchedAt: state.newsFetchedAt,
+      newsMode: state.newsMode,
+      newsOverrideAt: state.newsOverrideAt,
+      mtfStamp: mtfInputStamp(),
+      history: analysis.history,
+      inputComponents: snapshot.inputComponents || scoreInputComponents(analysis)
+    });
   }
   function stampAnalysisSnapshot(analysis, reason, fields) {
     if (!analysis) return null;
@@ -157,7 +294,10 @@
       revision: revision,
       updateReason: reason || 'refresh'
     });
+    snapshot.inputComponents = scoreInputComponents(analysis);
     snapshot.inputSnapshotId = buildInputSnapshotId(analysis, snapshot);
+    analysis.rawEvidence = captureRawEvidence(analysis, snapshot);
+    snapshot.rawEvidenceHash = analysis.rawEvidence.envelopeHash;
     analysis.snapshot = snapshot;
     if (analysis === state.analysis) renderSnapshotStamp(analysis);
     return snapshot;
@@ -165,6 +305,24 @@
   function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
   function avg(values) { return values.length ? values.reduce(function (a, b) { return a + b; }, 0) / values.length : NaN; }
   function last(arr) { return arr[arr.length - 1]; }
+  function finiteNumber(value) { var parsed = AnalyticsCore.toFiniteNumber(value); return parsed === null ? NaN : parsed; }
+  function firstFinite(values) {
+    for (var i = 0; i < values.length; i++) {
+      var value = finiteNumber(values[i]);
+      if (Number.isFinite(value)) return value;
+    }
+    return NaN;
+  }
+  function sumFinite(values) {
+    var total = 0;
+    var count = 0;
+    values.forEach(function (raw) {
+      var value = finiteNumber(raw);
+      if (Number.isFinite(value)) { total += value; count += 1; }
+    });
+    return count ? total : NaN;
+  }
+  function counted(value, singular, plural) { return value + ' ' + (value === 1 ? singular : plural); }
   function escapeHTML(value) {
     return String(value == null ? '' : value).replace(/[&<>"']/g, function (ch) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[ch];
@@ -191,6 +349,16 @@
   function intervalLabel(interval) { return interval === '1m' ? '1 min' : interval === '1M' ? '1 mes' : interval; }
   function normKey(value) { return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
   function sourceRow(name, ok, detail) { return { name: name, ok: !!ok, detail: detail || (ok ? 'online' : 'sem leitura') }; }
+  function sourceReference(sourceId) {
+    var source = AnalyticsCore.SOURCE_REGISTRY[sourceId];
+    return source ? source.provider + ' [' + sourceId + ']' : 'FONTE NAO REGISTRADA [' + sourceId + ']';
+  }
+  function sourceReferenceTitle(sourceId) {
+    var source = AnalyticsCore.SOURCE_REGISTRY[sourceId];
+    if (!source) return 'Fonte ausente do registro normativo';
+    var validity = source.staleAfterMs === 0 ? 'somente no instante aplicado' : Math.round(source.staleAfterMs / 60000) + ' min';
+    return source.metrics.join(', ') + ' | unidade: ' + source.unit + ' | validade: ' + validity + ' | ausencia: ' + source.unavailablePolicy;
+  }
   function health(name, ok, detail) {
     if (!name) return;
     var prior = state.apiHealth[name] || {};
@@ -201,100 +369,72 @@
       lastSuccess: ok ? Date.now() : prior.lastSuccess || 0
     };
   }
-  async function fetchJSON(url, timeout, source) {
-    // Circuit breaker: while a source is in rate-limit cooldown, fail fast without hitting the API.
-    if (source && sourceThrottle.isBlocked(source, Date.now())) {
-      var cooldownError = new Error('rate-limit cooldown');
-      cooldownError.category = 'rateLimit';
-      cooldownError.throttled = true;
-      health(source, false, 'cooldown de rate limit ate ' + new Date(sourceThrottle.retryAt(source)).toLocaleTimeString('pt-BR'));
-      throw cooldownError;
-    }
-    var controller = new AbortController();
-    var id = setTimeout(function () { controller.abort(); }, timeout || 9000);
-    try {
-      var res = await fetch(url, { signal: controller.signal, cache: 'no-store' });
-      if (!res.ok) {
-        var httpError = new Error('HTTP ' + res.status);
-        httpError.status = res.status;
-        httpError.category = AnalyticsCore.classifyHttpError(res.status);
-        if (httpError.category === 'rateLimit') {
-          var retryAfterMs = AnalyticsCore.parseRetryAfter(res.headers.get('Retry-After'), Date.now());
-          var wait = sourceThrottle.penalize(source, retryAfterMs, Date.now());
-          health(source, false, 'rate limit ' + res.status + ' | cooldown ' + Math.round(wait / 1000) + 's');
-        } else {
-          health(source, false, 'HTTP ' + res.status);
-        }
-        throw httpError;
-      }
-      var data = await res.json();
-      if (source) sourceThrottle.succeed(source);
-      health(source, true, 'online');
-      return data;
-    } catch (error) {
-      if (!error || !error.category) health(source, false, error && error.name === 'AbortError' ? 'timeout' : (error && error.message) || 'falhou');
-      throw error;
-    } finally { clearTimeout(id); }
+  async function fetchJSON(url, timeout, source, options) {
+    return networkClient.fetchJSON(url, timeout, source, options);
   }
   async function fetchSpotJSON(path, timeout, source) {
-    var lastError = null;
-    for (var i = 0; i < BINANCE_SPOT_BASES.length; i++) {
-      try {
-        var data = await fetchJSON(BINANCE_SPOT_BASES[i] + path, timeout, source);
-        if (i > 0) health(source, true, 'fallback ' + BINANCE_SPOT_BASES[i]);
-        return data;
-      } catch (error) {
-        lastError = error;
-        // Rate limit / cooldown: never try another Binance host (spreads the IP ban further).
-        if (error && (error.category === 'rateLimit' || error.throttled)) break;
-      }
-    }
-    throw lastError || new Error('Binance spot indisponivel');
+    return networkClient.fetchFromBases(BINANCE_SPOT_BASES, path, timeout, source);
   }
   function delay(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
+  var crossTabStorage = null;
+  try { crossTabStorage = window.localStorage; } catch (error) { /* coordinator reports degradation */ }
+  var crossTabCoordinator = CrossTabLock.createCoordinator({
+    locks: typeof navigator !== 'undefined' ? navigator.locks : null,
+    storage: crossTabStorage,
+    cryptoApi: window.crypto,
+    onDegraded: function (reason) {
+      health('Concorrencia multiaba', false, reason === 'cross-tab-lock-unavailable'
+        ? 'sem Web Locks/localStorage; serializacao limitada a esta aba'
+        : 'lease multiaba indisponivel; serializacao limitada a esta aba');
+    }
+  });
+  function withCrossTabLock(name, task) { return crossTabCoordinator.run(name, task); }
+  // Session fallback keeps the state coherent when storage is blocked or full. It is deliberately
+  // volatile and never presented as durable across reloads.
+  var volatileStorage = Object.create(null);
   function safeStorageGet(key) {
-    try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (error) { return null; }
+    try {
+      if (Object.prototype.hasOwnProperty.call(volatileStorage, key)) return JSON.parse(volatileStorage[key]);
+      return JSON.parse(localStorage.getItem(key) || 'null');
+    } catch (error) { return null; }
   }
   function safeStorageSet(key, value) {
+    var serialized;
+    try { serialized = JSON.stringify(value); }
+    catch (error) { return false; }
     try {
-      localStorage.setItem(key, JSON.stringify(value));
+      localStorage.setItem(key, serialized);
+      delete volatileStorage[key];
       return true;
     } catch (error) {
+      volatileStorage[key] = serialized;
       // Surface a quota failure instead of silently dropping the journal/history write.
       if (error && (error.name === 'QuotaExceededError' || error.code === 22 || /quota/i.test(error.message || ''))) {
-        health('Armazenamento local', false, 'quota excedida; journal/historico nao persistido');
-      }
+        health('Armazenamento local', false, 'quota excedida; usando fallback volatil apenas nesta sessao');
+      } else health('Armazenamento local', false, 'indisponivel; usando fallback volatil apenas nesta sessao');
       return false;
     }
   }
-  function purgeStaleStorage() {
-    // On a MODEL_VERSION bump: cached history is dropped (re-fetchable) and the transient trade
-    // state machine is dropped (an open simulated trade can't carry across rule versions). The
-    // signal/trade JOURNALS are ARCHIVED, not deleted (renamed under an 'archived:' prefix): each
-    // record self-describes its modelVersion+rulesetHash, so past signals stay available for
-    // version-segmented analysis (contract 11 forbids AGGREGATING across versions, not preserving).
+  function reportLegacyStorage() {
+    // Historical model evidence is immutable by default. Cleanup must be an explicit user action
+    // scoped to a named version; boot only reports preserved legacy keys for cross-version review.
+    // (Chaves sao versionadas por MODEL_VERSION, entao maquinas de trade antigas nunca sao
+    // carregadas pela versao nova — preservar nao reativa estado transiente de outra versao.)
     try {
       var keepHistoryPrefix = 'liveDesk.history.' + MODEL_VERSION + '.';
-      var dropPrefixes = ['cld-signal-machine:'];
-      var archivePrefixes = ['cld-signal-journal:', 'cld-signal-trades:'];
-      var drop = [], archive = [];
+      var versionedPrefixes = ['cld-signal-journal:', 'cld-signal-machine:', 'cld-signal-trades:'];
+      var legacyCount = 0;
       for (var i = 0; i < localStorage.length; i++) {
         var key = localStorage.key(i);
         if (!key || key.indexOf('archived:') === 0) continue;
         var staleHistory = key.indexOf('liveDesk.history.') === 0 && key.indexOf(keepHistoryPrefix) !== 0;
-        var staleDrop = dropPrefixes.some(function (prefix) { return key.indexOf(prefix) === 0 && key !== prefix + MODEL_VERSION; });
-        var staleArchive = archivePrefixes.some(function (prefix) { return key.indexOf(prefix) === 0 && key !== prefix + MODEL_VERSION; });
-        if (staleHistory || staleDrop) drop.push(key);
-        else if (staleArchive) archive.push(key);
+        var staleVersioned = versionedPrefixes.some(function (prefix) {
+          return key.indexOf(prefix) === 0 && key !== prefix + MODEL_VERSION;
+        });
+        if (staleHistory || staleVersioned) legacyCount += 1;
       }
-      archive.forEach(function (key) {
-        try {
-          localStorage.setItem('archived:' + key, localStorage.getItem(key));
-          localStorage.removeItem(key);
-        } catch (archiveError) { /* quota: leave the original in place, no data loss */ }
-      });
-      drop.forEach(function (key) { try { localStorage.removeItem(key); } catch (removeError) { /* ignore */ } });
-      return drop.length + archive.length;
+      if (legacyCount) health('Armazenamento local', true, legacyCount + ' chave(s) historica(s) preservada(s) para auditoria');
+      return legacyCount;
     } catch (error) { return 0; }
   }
   function timestampMs(value) {
@@ -489,11 +629,7 @@
     return (365 * 1440) / minutes;
   }
   function realizedVolatility(values, period, interval) {
-    var rows = values.slice(-(period + 1));
-    if (rows.length <= period) return NaN;
-    var returns = [];
-    for (var i = 1; i < rows.length; i++) if (rows[i - 1] > 0 && rows[i] > 0) returns.push(Math.log(rows[i] / rows[i - 1]));
-    return standardDeviation(returns) * Math.sqrt(intervalPeriodsPerYear(interval)) * 100;
+    return AnalyticsCore.realizedVolatility(values, period, intervalPeriodsPerYear(interval));
   }
   function zScore(values, period) {
     var rows = values.slice(-period);
@@ -517,12 +653,7 @@
   }
   function ichimoku(candles) { return AnalyticsCore.ichimokuState(candles); }
   function findFairValueGap(candles) {
-    var recent = candles.slice(-60), latest = null;
-    for (var i = 2; i < recent.length; i++) {
-      if (recent[i].low > recent[i - 2].high) latest = { type: 'bullish', low: recent[i - 2].high, high: recent[i].low, time: recent[i].time };
-      else if (recent[i].high < recent[i - 2].low) latest = { type: 'bearish', low: recent[i].high, high: recent[i - 2].low, time: recent[i].time };
-    }
-    return latest;
+    return AnalyticsCore.findOpenFairValueGap(candles, 60);
   }
   function marketRegime(close, ema50, ema200, adxNow, realizedVol) {
     var trend = close > ema200 && ema50 > ema200 ? 'Alta estrutural' : close < ema200 && ema50 < ema200 ? 'Baixa estrutural' : 'Transicao';
@@ -706,8 +837,9 @@
     var divergenceScore = (divergence.bullish ? 5 : 0) + (divergence.bearish ? -5 : 0);
     var volumeClimax = AnalyticsCore.detectVolumeClimax(candles, atr14);
     var squeeze = AnalyticsCore.detectSqueeze(candles, { deltaSum: deltaSum });
-    var funding = premium ? +premium.lastFundingRate : NaN;
-    var basis = premium ? (+premium.markPrice - +premium.indexPrice) : NaN;
+    var funding = finiteNumber(premium && premium.lastFundingRate);
+    var markPrice = finiteNumber(premium && premium.markPrice), indexPrice = finiteNumber(premium && premium.indexPrice);
+    var basis = Number.isFinite(markPrice) && Number.isFinite(indexPrice) ? markPrice - indexPrice : NaN;
     var currentBar = last(candles);
     var body = Math.abs(currentBar.close - currentBar.open);
     var displacement = Number.isFinite(atr14) && Number.isFinite(currentBar.volume) && Number.isFinite(avgVol) && body > atr14 * 1.15 && currentBar.volume > avgVol * 1.25 ? (currentBar.close > currentBar.open ? 'Alta' : 'Baixa') : 'Nao';
@@ -722,20 +854,33 @@
     var bookScore = options.bookScore || 0;
     var score = clamp(Math.round(trendScore + momScore + flowScore + derivScore + chainScore + bookScore + structureShift.score + divergenceScore + squeeze.score), -100, 100);
     var bias = biasFromScore(score);
-    return { modelVersion: MODEL_VERSION, close: close, ema9: ema9, ema21: ema21, ema20: ema20, ema50: ema50, ema200: ema200, rsi14: rsi14, rsiValues: rsiValues, stochRsi14: stochRsi14, mfi14: mfi14, atr14: atr14, macd: macdNow, macdData: macdData, bb: bb, bbPctB: bbPctB, bbWidth: bbWidth, vwap: vwapNow, adx: adxNow, supertrend: supertrendNow, keltner: keltnerNow, donchian: donchianNow, roc12: roc12, obv: obvNow, cmf20: cmf20, realizedVol30: realizedVol30, zScore20: zScore20, williams14: williams14, cci20: cci20, ichimoku: ichimokuNow, fvg: fvg, patterns: patterns, displacement: displacement, regime: regime, supports: supports, resistances: resistances, structure: structure, sweepDown: sweepDown, sweepUp: sweepUp, priorLow: priorLow, priorHigh: priorHigh, deltaSum: deltaSum, avgVol: avgVol, lastVol: lastVol, funding: funding, basis: basis, score: score, bias: bias, trendScore: trendScore, momScore: momScore, flowScore: flowScore, fundingScore: fundingScore, structureShift: structureShift, divergence: divergence, divergenceScore: divergenceScore, volumeClimax: volumeClimax, squeeze: squeeze, flowAvailable: candleFlow.available, flowCoverage: candleFlow.coverage, candleCount: candles.length, derivScore: derivScore, chainScore: chainScore, bookScore: bookScore, ticker: ticker };
+    return { modelVersion: MODEL_VERSION, interval: options.interval || state.interval, close: close, ema9: ema9, ema21: ema21, ema20: ema20, ema50: ema50, ema200: ema200, rsi14: rsi14, rsiValues: rsiValues, stochRsi14: stochRsi14, mfi14: mfi14, atr14: atr14, macd: macdNow, macdData: macdData, bb: bb, bbPctB: bbPctB, bbWidth: bbWidth, vwap: vwapNow, adx: adxNow, supertrend: supertrendNow, keltner: keltnerNow, donchian: donchianNow, roc12: roc12, obv: obvNow, cmf20: cmf20, realizedVol30: realizedVol30, zScore20: zScore20, williams14: williams14, cci20: cci20, ichimoku: ichimokuNow, fvg: fvg, patterns: patterns, displacement: displacement, regime: regime, supports: supports, resistances: resistances, structure: structure, sweepDown: sweepDown, sweepUp: sweepUp, priorLow: priorLow, priorHigh: priorHigh, deltaSum: deltaSum, avgVol: avgVol, lastVol: lastVol, funding: funding, basis: basis, score: score, bias: bias, trendScore: trendScore, momScore: momScore, flowScore: flowScore, fundingScore: fundingScore, structureShift: structureShift, divergence: divergence, divergenceScore: divergenceScore, volumeClimax: volumeClimax, squeeze: squeeze, flowAvailable: candleFlow.available, flowCoverage: candleFlow.coverage, candleCount: candles.length, derivScore: derivScore, chainScore: chainScore, bookScore: bookScore, ticker: ticker };
+  }
+  function normalizeDepth(depth) {
+    function levels(rows) {
+      return (Array.isArray(rows) ? rows : []).map(function (row) {
+        var price = finiteNumber(row && row[0]);
+        var quantity = finiteNumber(row && row[1]);
+        return Number.isFinite(price) && price > 0 && Number.isFinite(quantity) && quantity > 0 ? [price, quantity] : null;
+      }).filter(Boolean);
+    }
+    var bids = levels(depth && depth.bids).sort(function (a, b) { return b[0] - a[0]; });
+    var asks = levels(depth && depth.asks).sort(function (a, b) { return a[0] - b[0]; });
+    if (!bids.length || !asks.length || bids[0][0] >= asks[0][0]) return { bids: [], asks: [] };
+    return { bids: bids, asks: asks };
   }
   function depthWindow(depth, mid, pct) {
     var bidQty = 0, askQty = 0, bidNotional = 0, askNotional = 0;
-    if (!depth || !depth.bids || !depth.asks) return { bidQty: 0, askQty: 0, bidNotional: 0, askNotional: 0, imbalance: 0 };
-    depth.bids.forEach(function (b) { var p = +b[0], q = +b[1]; if (p >= mid * (1 - pct)) { bidQty += q; bidNotional += p * q; } });
-    depth.asks.forEach(function (a) { var p = +a[0], q = +a[1]; if (p <= mid * (1 + pct)) { askQty += q; askNotional += p * q; } });
-    return { bidQty: bidQty, askQty: askQty, bidNotional: bidNotional, askNotional: askNotional, imbalance: (bidQty + askQty) ? (bidQty - askQty) / (bidQty + askQty) : 0 };
+    if (!depth || !depth.bids || !depth.asks) return { bidQty: 0, askQty: 0, bidNotional: 0, askNotional: 0, imbalance: NaN };
+    depth.bids.forEach(function (b) { var p = b[0], q = b[1]; if (p >= mid * (1 - pct)) { bidQty += q; bidNotional += p * q; } });
+    depth.asks.forEach(function (a) { var p = a[0], q = a[1]; if (p <= mid * (1 + pct)) { askQty += q; askNotional += p * q; } });
+    return { bidQty: bidQty, askQty: askQty, bidNotional: bidNotional, askNotional: askNotional, imbalance: (bidQty + askQty) ? (bidQty - askQty) / (bidQty + askQty) : NaN };
   }
   function estimateSlippage(levels, notional, side) {
-    var remaining = notional, qty = 0, spent = 0, first = levels && levels.length ? +levels[0][0] : NaN;
+    var remaining = notional, qty = 0, spent = 0, first = levels && levels.length ? levels[0][0] : NaN;
     if (!levels || !levels.length || !Number.isFinite(first)) return NaN;
     for (var i = 0; i < levels.length && remaining > 0; i++) {
-      var price = +levels[i][0], size = +levels[i][1], levelNotional = price * size;
+      var price = levels[i][0], size = levels[i][1], levelNotional = price * size;
       var take = Math.min(remaining, levelNotional);
       spent += take;
       qty += take / price;
@@ -745,23 +890,25 @@
     var avgPrice = spent / qty;
     return side === 'buy' ? ((avgPrice - first) / first) * 10000 : ((first - avgPrice) / first) * 10000;
   }
-  function mergeSelected(symbol, candles, ticker, depth, premium, oi, chain, chainAdjustment) {
+  function mergeSelected(symbol, interval, candles, ticker, depth, premium, oi, chain, chainAdjustment) {
     var mempoolContext = AnalyticsCore.bitcoinMempoolContext(symbol, chain && chain.fees && chain.fees.fastestFee);
     var chainScore = clamp(mempoolContext.score + (Number.isFinite(chainAdjustment) ? chainAdjustment : 0), -10, 10);
+    var safeDepth = normalizeDepth(depth);
     var bidQty = 0, askQty = 0, bidNotional = 0, askNotional = 0, spread = NaN, close = last(candles).close, mid = close;
-    if (depth && depth.bids && depth.asks && depth.bids.length && depth.asks.length) {
-      var bestBid = +depth.bids[0][0], bestAsk = +depth.asks[0][0];
+    if (safeDepth.bids.length && safeDepth.asks.length) {
+      var bestBid = safeDepth.bids[0][0], bestAsk = safeDepth.asks[0][0];
       spread = bestAsk - bestBid; mid = (bestBid + bestAsk) / 2;
-      depth.bids.forEach(function (b) { var p = +b[0], q = +b[1]; if (p >= mid * 0.999) { bidQty += q; bidNotional += p * q; } });
-      depth.asks.forEach(function (a) { var p = +a[0], q = +a[1]; if (p <= mid * 1.001) { askQty += q; askNotional += p * q; } });
+      safeDepth.bids.forEach(function (b) { var p = b[0], q = b[1]; if (p >= mid * 0.999) { bidQty += q; bidNotional += p * q; } });
+      safeDepth.asks.forEach(function (a) { var p = a[0], q = a[1]; if (p <= mid * 1.001) { askQty += q; askNotional += p * q; } });
     }
-    var bookImb = (bidQty + askQty) ? (bidQty - askQty) / (bidQty + askQty) : 0;
+    var bookImb = (bidQty + askQty) ? (bidQty - askQty) / (bidQty + askQty) : NaN;
     var bookScore = bookImb > 0.12 ? 10 : bookImb < -0.12 ? -10 : 0;
-    var a = buildCoreAnalysis(candles, ticker, premium, { chainScore: chainScore, bookScore: bookScore });
-    var w01 = depthWindow(depth, mid, 0.001);
-    var w05 = depthWindow(depth, mid, 0.005);
+    var a = buildCoreAnalysis(candles, ticker, premium, { chainScore: chainScore, bookScore: bookScore, interval: interval });
+    var w01 = depthWindow(safeDepth, mid, 0.001);
+    var w05 = depthWindow(safeDepth, mid, 0.005);
     var notional = Math.max(1000, Math.min(50000, a.close * 0.75));
-    a.bidQty = bidQty; a.askQty = askQty; a.bidNotional = bidNotional; a.askNotional = askNotional; a.spread = spread; a.spreadBps = mid ? (spread / mid) * 10000 : NaN; a.microprice = depth && depth.bids && depth.asks && (bidQty + askQty) ? ((+depth.asks[0][0] * bidQty) + (+depth.bids[0][0] * askQty)) / (bidQty + askQty) : NaN; a.book01 = w01; a.book05 = w05; a.buySlipBps = estimateSlippage(depth && depth.asks, notional, 'buy'); a.sellSlipBps = estimateSlippage(depth && depth.bids, notional, 'sell'); a.slippageNotional = notional; a.bookImb = bookImb; a.oi = oi; a.chain = chain; a.mempoolContext = mempoolContext;
+    a.bidQty = bidQty; a.askQty = askQty; a.bidNotional = bidNotional; a.askNotional = askNotional; a.spread = spread; a.spreadBps = mid ? (spread / mid) * 10000 : NaN; a.microprice = (bidQty + askQty) && safeDepth.bids.length && safeDepth.asks.length ? ((safeDepth.asks[0][0] * bidQty) + (safeDepth.bids[0][0] * askQty)) / (bidQty + askQty) : NaN; a.book01 = w01; a.book05 = w05; a.buySlipBps = estimateSlippage(safeDepth.asks, notional, 'buy'); a.sellSlipBps = estimateSlippage(safeDepth.bids, notional, 'sell'); a.slippageNotional = notional; a.bookImb = bookImb; a.oi = oi; a.chain = chain; a.mempoolContext = mempoolContext;
+    a.marketInputs = { ticker: ticker || null, depth: safeDepth, premium: premium || null, openInterest: oi || null };
     return applyExternalToAnalysis(symbol, a);
   }
   async function loadChain() {
@@ -781,7 +928,7 @@
     return mapping[symbol] || baseAsset(symbol).toLowerCase();
   }
   function metricNumber(row, key) {
-    return row && Number.isFinite(+row[key]) ? +row[key] : NaN;
+    return finiteNumber(row && row[key]);
   }
   function metricChange(rows, key, lag) {
     if (!rows || rows.length <= lag) return NaN;
@@ -789,7 +936,13 @@
     return Number.isFinite(now) && Number.isFinite(prior) && prior !== 0 ? ((now - prior) / Math.abs(prior)) * 100 : NaN;
   }
   function normalizeCoinMetrics(rows) {
-    rows = Array.isArray(rows) ? rows.slice().sort(function (a, b) { return Date.parse(a.time) - Date.parse(b.time); }) : [];
+    var byTime = new Map();
+    (Array.isArray(rows) ? rows : []).forEach(function (row) {
+      var time = timestampMs(row && row.time);
+      if (!row || !Number.isFinite(time) || time < 0 || time > Date.now() + AnalyticsCore.RULESET.clockSkewToleranceMs) return;
+      byTime.set(time, row);
+    });
+    rows = Array.from(byTime.entries()).sort(function (a, b) { return a[0] - b[0]; }).map(function (entry) { return entry[1]; });
     var latest = last(rows) || {};
     var adr7 = metricChange(rows, 'AdrActCnt', 7), tx7 = metricChange(rows, 'TxCnt', 7), fees7 = metricChange(rows, 'FeeTotUSD', 7);
     var score = 0;
@@ -844,7 +997,7 @@
   }
   function optionsForSymbol(payload, scope, cachedAt, status) {
     if (!payload) return null;
-    var marked = markDataset(payload, cachedAt || payload.fetchedAt, OPTIONS_STALE_MS, status, payload.observedAt || payload.fetchedAt);
+    var marked = markDataset(payload, cachedAt || payload.fetchedAt, OPTIONS_STALE_MS, status, payload.observedAt);
     return Object.assign({}, marked, {
       requestedAsset: scope.asset,
       isProxy: scope.isProxy,
@@ -860,9 +1013,9 @@
       var payload = await fetchJSON('/api/options?currency=' + encodeURIComponent(currency), 24000, 'Deribit options');
       if (!payload || !payload.market) throw new Error('sem dados de opcoes');
       var clientNow = Date.now();
-      var serverFetchedAt = timestampMs(payload.fetchedAt);
+      var serverObservedAt = timestampMs(payload.observedAt);
       payload.fetchedAt = clientNow;
-      payload.observedAt = AnalyticsCore.resolveObservedAt(serverFetchedAt, clientNow).observedAt;
+      payload.observedAt = AnalyticsCore.resolveObservedAt(serverObservedAt, clientNow).observedAt;
       var cachedAt = clientNow;
       state.optionsCache[currency] = { value: payload, fetchedAt: cachedAt };
       return optionsForSymbol(payload, scope, cachedAt, 'fresh');
@@ -878,15 +1031,12 @@
       var institutionalNow = Date.now();
       var flows = payload.etf && payload.etf.flows;
       var flowRows = nestedRows(flows);
-      var lastFlowRow = flowRows.length ? flowRows[flowRows.length - 1] : null;
-      // Freshness must follow the data that actually scores: latestEtfFlow skips zero-filled days
-      // (weekends/unreported), so anchor observedAt on the last NON-ZERO row's date. The provider's
-      // updatedAt is a service heartbeat — it kept a days-old flow scoring as current.
-      var reportedRows = flowRows.filter(function (row) { return etfFlowValue(row) !== 0; });
-      var lastReportedRow = reportedRows.length ? reportedRows[reportedRows.length - 1] : lastFlowRow;
-      var flowTimestamp = timestampMs(lastReportedRow && (lastReportedRow.date || lastReportedRow.day || lastReportedRow.time))
-        || timestampMs(flows && flows.updatedAt)
-        || timestampMs(payload.fetchedAt);
+      // Freshness follows the last report eligible for scoring. The API annotates provider flags
+      // and US equity-market closures; a zero on an actual trading day remains a neutral report.
+      // updatedAt is only a service heartbeat and never replaces the observation date.
+      var reportedRows = flowRows.filter(etfReportedRow);
+      var lastReportedRow = AnalyticsCore.latestTimestampedRow(reportedRows, ['date', 'day', 'timestamp', 'time'], institutionalNow);
+      var flowTimestamp = timestampMs(lastReportedRow && (lastReportedRow.date || lastReportedRow.day || lastReportedRow.time));
       payload.fetchedAt = institutionalNow;
       payload.observedAt = AnalyticsCore.resolveObservedAt(flowTimestamp, institutionalNow).observedAt;
       state.institutionalCache[asset] = { value: payload, fetchedAt: institutionalNow };
@@ -894,6 +1044,22 @@
       return markDataset(payload, institutionalNow, INSTITUTIONAL_STALE_MS, status, payload.observedAt);
     } catch (error) {
       return cached ? markDataset(cached.value, cached.fetchedAt, INSTITUTIONAL_STALE_MS) : null;
+    }
+  }
+  async function loadMicrostructure(symbol, force) {
+    var cached = state.microstructureCache[symbol];
+    if (!force && cached && Date.now() - cached.fetchedAt < MICROSTRUCTURE_REFRESH_MS) {
+      return markDataset(cached.value, cached.fetchedAt, MICROSTRUCTURE_STALE_MS);
+    }
+    try {
+      var payload = await fetchJSON('/api/market-microstructure?symbol=' + encodeURIComponent(symbol), 14000, 'Microestrutura cross-venue');
+      var fetchedAt = finiteNumber(payload.fetchedAt);
+      if (!Number.isFinite(fetchedAt)) fetchedAt = Date.now();
+      var status = Array.isArray(payload.venues) && payload.venues.length || payload.orderFlow && payload.orderFlow.trades ? 'fresh' : 'missing';
+      state.microstructureCache[symbol] = { value: payload, fetchedAt: fetchedAt };
+      return markDataset(payload, fetchedAt, MICROSTRUCTURE_STALE_MS, status, payload.observedAt);
+    } catch (error) {
+      return cached ? markDataset(cached.value, cached.fetchedAt, MICROSTRUCTURE_STALE_MS) : null;
     }
   }
   function closeLiquidationStream() {
@@ -924,19 +1090,25 @@
       try {
         var payload = JSON.parse(event.data), order = payload.o || payload.data && payload.data.o;
         if (!order || order.s !== state.liquidationSymbol) return;
-        var price = +(order.ap || order.p), quantity = +(order.z || order.q), notional = price * quantity;
-        if (!Number.isFinite(notional) || notional <= 0) return;
+        var price = firstFinite([order.ap, order.p]), quantity = firstFinite([order.z, order.q]), notional = price * quantity;
+        var eventTime = firstFinite([order.T, payload.E]);
+        if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(notional) || notional <= 0) return;
+        if (!Number.isFinite(eventTime)) eventTime = Date.now();
+        var now = Date.now(), cutoff = now - 60 * 60 * 1000;
+        if (eventTime < cutoff || eventTime > now + AnalyticsCore.RULESET.clockSkewToleranceMs) return;
+        var eventId = String(order.i || order.orderId || [order.s, order.S, eventTime, price, quantity].join(':'));
+        if (state.liquidations.some(function (row) { return row.id === eventId; })) return;
         state.liquidations.unshift({
+          id: eventId,
           symbol: order.s,
-          time: +(order.T || payload.E || Date.now()),
+          time: eventTime,
           price: price,
           quantity: quantity,
           notional: notional,
           side: order.S === 'SELL' ? 'long' : 'short',
           status: order.X || ''
         });
-        var cutoff = Date.now() - 60 * 60 * 1000;
-        state.liquidations = state.liquidations.filter(function (row) { return row.time >= cutoff; }).slice(0, 300);
+        state.liquidations = state.liquidations.filter(function (row) { return row.time >= cutoff && row.time <= now + AnalyticsCore.RULESET.clockSkewToleranceMs; }).slice(0, 300);
         renderLiquidations();
       } catch (error) { /* ignora evento malformado */ }
     };
@@ -956,7 +1128,9 @@
     };
   }
   async function loadExternalContext(force) {
-    if (!force && Date.now() - state.externalFetchedAt < EXTERNAL_REFRESH_MS && state.external && state.external.fetchedAt) return state.external;
+    var lastExternalCycle = Math.max(state.externalFetchedAt, state.externalAttemptedAt);
+    if (!force && lastExternalCycle && Date.now() - lastExternalCycle < EXTERNAL_REFRESH_MS) return state.external;
+    state.externalAttemptedAt = Date.now();
     var rows = await Promise.allSettled([
       fetchJSON('https://api.alternative.me/fng/?limit=1', 9000, 'Alternative.me'),
       fetchJSON('/api/market', 22000, 'Market data'),
@@ -983,13 +1157,18 @@
   }
   function normalizeExternal(rows) {
     var fulfilledCount = rows.filter(function (row) { return row && row.status === 'fulfilled' && row.value; }).length;
-    var external = { fetchedAt: Date.now(), dataStatus: fulfilledCount ? 'fresh' : 'error', fearGreed: null, marketData: null, global: null, coinMarkets: {}, trending: [], chains: [], protocols: [], stablecoins: null, dex: null, paprikaGlobal: null, fees: null, perpsOi: null, macro: null, tradfi: null, sources: [] };
+    var assembledAt = Date.now();
+    var external = { observedAt: assembledAt, observedAtProvenance: 'client-assembled-live-snapshots', fetchedAt: assembledAt, dataStatus: fulfilledCount ? 'fresh' : 'error', fearGreed: null, marketData: null, global: null, coinMarkets: {}, trending: [], chains: [], protocols: [], stablecoins: null, dex: null, paprikaGlobal: null, fees: null, perpsOi: null, macro: null, tradfi: null, sources: [] };
     var fng = value(rows[0]);
     if (fng && fng.data && fng.data[0]) {
-      external.fearGreed = { value: +fng.data[0].value, label: fng.data[0].value_classification || '--', timestamp: +fng.data[0].timestamp * 1000, next: +fng.data[0].time_until_update || NaN };
+      var fearGreedValue = finiteNumber(fng.data[0].value);
+      var fearGreedTimestamp = timestampMs(fng.data[0].timestamp);
+      if (Number.isFinite(fearGreedValue) && Number.isFinite(fearGreedTimestamp)) {
+        external.fearGreed = { value: fearGreedValue, label: fng.data[0].value_classification || '--', timestamp: fearGreedTimestamp, next: finiteNumber(fng.data[0].time_until_update) };
+      }
     }
     var marketBundle = value(rows[1]) || {};
-    var marketObserved = AnalyticsCore.resolveObservedAt(marketBundle.fetchedAt, Date.now());
+    var marketObserved = AnalyticsCore.resolveObservedAt(marketBundle.observedAt, Date.now());
     external.marketData = Object.keys(marketBundle).length ? markDataset(marketBundle, Date.now(), EXTERNAL_STALE_MS, marketBundle.stale ? 'stale' : 'fresh', marketObserved.observedAt) : null;
     if (marketBundle.global && marketBundle.global.data) external.global = marketBundle.global.data;
     (marketBundle.markets || []).forEach(function (coin) { if (coin && coin.id) external.coinMarkets[coin.id] = coin; });
@@ -1008,49 +1187,49 @@
     var tradfiPayload = value(rows[10]);
     external.macro = macroPayload ? markDataset(macroPayload, macroPayload.fetchedAt, EOD_STALE_MS, 'fresh', macroPayload.observedAt) : null;
     external.tradfi = tradfiPayload ? markDataset(tradfiPayload, tradfiPayload.fetchedAt, EOD_STALE_MS, 'fresh', tradfiPayload.observedAt) : null;
-    external.defiTvl = external.chains.reduce(function (sum, chain) { return sum + (+chain.tvl || 0); }, 0);
+    external.defiTvl = sumFinite(external.chains.map(function (chain) { return chain && chain.tvl; }));
     external.stablecoinCap = stablecoinCap(external.stablecoins);
     external.stablecoinChanges = stablecoinChanges(external.stablecoins);
     external.dexVolume = dexVolume(external.dex);
-    external.dexChange = external.dex && Number.isFinite(+external.dex.total24h) && Number.isFinite(+external.dex.total48hto24h) && +external.dex.total48hto24h ? ((+external.dex.total24h - +external.dex.total48hto24h) / +external.dex.total48hto24h) * 100 : NaN;
+    var dexCurrent = finiteNumber(external.dex && external.dex.total24h);
+    var dexPrior = finiteNumber(external.dex && external.dex.total48hto24h);
+    external.dexChange = Number.isFinite(dexCurrent) && Number.isFinite(dexPrior) && dexPrior !== 0 ? ((dexCurrent - dexPrior) / dexPrior) * 100 : NaN;
     external.fees24h = overviewTotal(external.fees);
     external.perpsOpenInterest = overviewTotal(external.perpsOi);
     external.sources = [
       sourceRow('Alternative.me', !!external.fearGreed, external.fearGreed ? external.fearGreed.label + ' ' + external.fearGreed.value : 'falhou'),
       sourceRow('Market data', !!(eligibleDataset(external.marketData) && (external.global || Object.keys(external.coinMarkets).length)), (marketBundle.source || 'fonte publica') + ' | ' + datasetStatus(external.marketData) + ' | ' + Object.keys(external.coinMarkets).length + ' ativos'),
       sourceRow('DefiLlama', !!(external.chains.length || external.protocols.length), external.chains.length + ' chains'),
-      sourceRow('DefiLlama stablecoins', Number.isFinite(external.stablecoinCap) && external.stablecoinCap > 0, compactUsd(+external.stablecoinCap)),
-      sourceRow('DefiLlama DEX', Number.isFinite(external.dexVolume) && external.dexVolume > 0, compactUsd(+external.dexVolume) + ' 24h'),
-      sourceRow('DefiLlama fees/OI', !!(external.fees || external.perpsOi), compactUsd(+external.fees24h) + ' fees'),
+      sourceRow('DefiLlama stablecoins', Number.isFinite(external.stablecoinCap) && external.stablecoinCap > 0, compactUsd(finiteNumber(external.stablecoinCap))),
+      sourceRow('DefiLlama DEX', Number.isFinite(external.dexVolume) && external.dexVolume > 0, compactUsd(finiteNumber(external.dexVolume)) + ' 24h'),
+      sourceRow('DefiLlama fees/OI', Number.isFinite(external.fees24h) || Number.isFinite(external.perpsOpenInterest), compactUsd(finiteNumber(external.fees24h)) + ' fees | ' + compactUsd(finiteNumber(external.perpsOpenInterest)) + ' OI'),
       sourceRow('Treasury + Cboe', macroSourceAvailable(external.macro), external.macro ? datasetStatus(external.macro) + ' | macro ' + signed(activeMacroScore(external.macro)) : 'falhou'),
-      sourceRow('CoinPaprika', !!external.paprikaGlobal, external.paprikaGlobal ? percent(+external.paprikaGlobal.market_cap_change_24h, 2) + ' mcap' : 'falhou'),
+      sourceRow('CoinPaprika', Number.isFinite(finiteNumber(external.paprikaGlobal && external.paprikaGlobal.market_cap_change_24h)) || Number.isFinite(finiteNumber(external.paprikaGlobal && external.paprikaGlobal.bitcoin_dominance_percentage)), external.paprikaGlobal ? percent(finiteNumber(external.paprikaGlobal.market_cap_change_24h), 2) + ' mcap' : 'falhou'),
       sourceRow('TradFi EOD', activeTradFiAssets(external.tradfi).length > 0, external.tradfi ? datasetStatus(external.tradfi) + ' | ' + activeTradFiAssets(external.tradfi).length + ' mercados fresh' : 'falhou')
     ];
     return external;
   }
   function overviewTotal(data) {
     if (!data) return NaN;
-    if (Number.isFinite(+data.total24h)) return +data.total24h;
-    if (Number.isFinite(+data.totalDataChart24h)) return +data.totalDataChart24h;
-    if (Number.isFinite(+data.totalOpenInterest)) return +data.totalOpenInterest;
-    if (Number.isFinite(+data.openInterest)) return +data.openInterest;
+    var direct = firstFinite([data.total24h, data.totalDataChart24h, data.totalOpenInterest, data.openInterest]);
+    if (Number.isFinite(direct)) return direct;
     var protocols = Array.isArray(data.protocols) ? data.protocols : [];
-    return protocols.reduce(function (sum, item) { return sum + (+item.total24h || +item.openInterest || +item.totalOpenInterest || 0); }, 0);
+    return sumFinite(protocols.map(function (item) { return firstFinite([item && item.total24h, item && item.openInterest, item && item.totalOpenInterest]); }));
   }
   function stablecoinCap(stablecoins) {
     var assets = stablecoins && stablecoins.peggedAssets ? stablecoins.peggedAssets : [];
-    return assets.reduce(function (sum, item) {
+    return sumFinite(assets.map(function (item) {
       var circulating = item.circulating || {};
-      return sum + (+circulating.peggedUSD || +circulating.usd || +item.mcap || 0);
-    }, 0);
+      return firstFinite([circulating.peggedUSD, circulating.usd, item.mcap]);
+    }));
   }
   function stablecoinChanges(stablecoins) {
     var assets = stablecoins && stablecoins.peggedAssets ? stablecoins.peggedAssets : [];
     function total(key) {
-      return assets.reduce(function (sum, item) {
+      return sumFinite(assets.map(function (item) {
         var value = item[key] || {};
-        return sum + (+value.peggedUSD || +value.usd || 0);
-      }, 0);
+        return firstFinite([value.peggedUSD, value.usd]);
+      }));
     }
     var current = stablecoinCap(stablecoins), day = total('circulatingPrevDay'), week = total('circulatingPrevWeek'), month = total('circulatingPrevMonth');
     function pct(prior) { return current && prior ? ((current - prior) / prior) * 100 : NaN; }
@@ -1058,10 +1237,10 @@
   }
   function dexVolume(dex) {
     if (!dex) return NaN;
-    if (Number.isFinite(+dex.total24h)) return +dex.total24h;
-    if (Number.isFinite(+dex.totalDataChart24h)) return +dex.totalDataChart24h;
+    var direct = firstFinite([dex.total24h, dex.totalDataChart24h]);
+    if (Number.isFinite(direct)) return direct;
     var protocols = Array.isArray(dex.protocols) ? dex.protocols : [];
-    return protocols.reduce(function (sum, item) { return sum + (+item.total24h || +item.volume24h || 0); }, 0);
+    return sumFinite(protocols.map(function (item) { return firstFinite([item && item.total24h, item && item.volume24h]); }));
   }
   // Memo keyed by external.fetchedAt so the board's 24 cards don't rescan the protocol/chain
   // lists on every 3s tick; a new external snapshot resets the cache.
@@ -1100,7 +1279,8 @@
   }
   function selectedMarket(symbol) {
     var ctx = contextFor(symbol);
-    return state.external && state.external.coinMarkets ? state.external.coinMarkets[ctx.gecko] || null : null;
+    var row = state.external && state.external.coinMarkets ? state.external.coinMarkets[ctx.gecko] || null : null;
+    return row && sourceObservationFresh(row.observedAt || row.last_updated, EXTERNAL_STALE_MS) ? row : null;
   }
   function externalContextFresh() {
     return !!(state.external && AnalyticsCore.classifyFreshness(state.external.fetchedAt, EXTERNAL_STALE_MS, Date.now()).eligibleForScore);
@@ -1110,6 +1290,10 @@
   }
   function sourceObservationFresh(observedAt, staleAfterMs) {
     return AnalyticsCore.classifyFreshness(timestampMs(observedAt), staleAfterMs, Date.now()).eligibleForScore;
+  }
+  function activeGlobalMarket(ext) {
+    var global = ext && eligibleDataset(ext.marketData) ? ext.global : null;
+    return global && sourceObservationFresh(global.updated_at || global.observedAt, EXTERNAL_STALE_MS) ? global : null;
   }
   function activeMacroParts(macro) {
     if (!eligibleDataset(macro)) return { treasury: null, vix: null };
@@ -1136,10 +1320,26 @@
   function activeTradFiScore(tradfi) {
     var bySymbol = {};
     activeTradFiAssets(tradfi).forEach(function (asset) { bySymbol[asset.symbol] = asset; });
-    return ['QQQ', 'SPY', 'COIN', 'MSTR'].reduce(function (score, symbol) {
+    // Crypto equities remain visible as context, but cannot score a supposedly independent
+    // macro block: feeding COIN/MSTR back into a crypto signal creates a circular proxy.
+    return ['QQQ', 'SPY', 'NVDA'].reduce(function (score, symbol) {
       var row = bySymbol[symbol];
       return score + (row && Number.isFinite(row.change5d) ? (row.change5d > 2 ? 1 : row.change5d < -2 ? -1 : 0) : 0);
     }, 0);
+  }
+  function fundamentalContextChecks(externalScore) {
+    var ext = externalScore || {};
+    var marketTrend = AnalyticsCore.calculateMarketTrendContext(ext.market);
+    var chainAvailable = !!(ext.chain && (Number.isFinite(finiteNumber(ext.chain.change_1d)) || Number.isFinite(finiteNumber(ext.chain.change_7d))));
+    var protocolAvailable = !!(ext.protocol && (Number.isFinite(finiteNumber(ext.protocol.change_1d)) || Number.isFinite(finiteNumber(ext.protocol.change_7d))));
+    return [marketTrend.available, chainAvailable || protocolAvailable];
+  }
+  function marketMacroContextAvailable(ext) {
+    if (!externalContextFresh()) return false;
+    var global = activeGlobalMarket(ext);
+    var globalChange = finiteNumber(global && global.market_cap_change_percentage_24h_usd);
+    var paprikaChange = finiteNumber(ext && ext.paprikaGlobal && ext.paprikaGlobal.market_cap_change_24h);
+    return Number.isFinite(globalChange) || Number.isFinite(paprikaChange) || Number.isFinite(btcDominanceValue(ext));
   }
   function emptyExternalScore(observedAt) {
     return { total: 0, sentiment: 0, global: 0, asset: 0, defi: 0, market: null, chain: null, protocol: null, observedAt: observedAt || null, staleAfterMs: EXTERNAL_STALE_MS, dataStatus: 'stale', eligibleForScore: false };
@@ -1156,7 +1356,9 @@
       var fg = ext.fearGreed.value;
       sentiment = fg >= 80 ? -8 : fg >= 65 ? 4 : fg >= 45 ? 2 : fg >= 25 ? -3 : -6;
     }
-    var globalChange = marketDataFresh && ext.global && Number.isFinite(+ext.global.market_cap_change_percentage_24h_usd) ? +ext.global.market_cap_change_percentage_24h_usd : ext.paprikaGlobal ? +ext.paprikaGlobal.market_cap_change_24h : NaN;
+    var activeGlobal = marketDataFresh ? activeGlobalMarket(ext) : null;
+    var globalChange = activeGlobal ? finiteNumber(activeGlobal.market_cap_change_percentage_24h_usd) : NaN;
+    if (!Number.isFinite(globalChange) && ext.paprikaGlobal) globalChange = finiteNumber(ext.paprikaGlobal.market_cap_change_24h);
     if (Number.isFinite(globalChange)) globalScore += clamp(Math.round(globalChange * 2.2), -10, 10);
     if (macroSourceAvailable(ext.macro)) globalScore += clamp(activeMacroScore(ext.macro), -8, 8);
     if (activeTradFiAssets(ext.tradfi).length) globalScore += clamp(activeTradFiScore(ext.tradfi), -4, 4);
@@ -1169,11 +1371,7 @@
     if (market) {
       // d24 fica fora: o momentum de 24h ja e componente proprio do radar (momentum24h) e
       // entrava duplicado aqui; o bloco fundamental le posicionamento de medio prazo (7d/30d).
-      var d7 = finiteOr(market.price_change_percentage_7d_in_currency, NaN);
-      var d30 = finiteOr(market.price_change_percentage_30d_in_currency, NaN);
-      var assetRaw = (Number.isFinite(d7) ? d7 * 0.45 : 0) + (Number.isFinite(d30) ? d30 * 0.15 : 0);
-      asset = Number.isFinite(d7) || Number.isFinite(d30) ? clamp(Math.round(assetRaw), -12, 12) : 0;
-      if (finiteOr(market.market_cap_rank, Infinity) <= 10) asset += 1;
+      asset = AnalyticsCore.calculateMarketTrendContext(market).score;
     }
     if (chain) {
       var chain1d = finiteOr(chain.change_1d, NaN), chain7d = finiteOr(chain.change_7d, NaN);
@@ -1185,11 +1383,14 @@
     }
     defi = clamp(defi, -10, 10);
     var total = clamp(sentiment + globalScore + asset + defi, -28, 28);
-    return { total: total, sentiment: sentiment, global: globalScore, asset: asset, defi: defi, market: market, chain: chain, protocol: protocol, observedAt: ext.fetchedAt, staleAfterMs: EXTERNAL_STALE_MS, dataStatus: ext.dataStatus || 'fresh', eligibleForScore: ext.dataStatus !== 'error' };
+    return { total: total, sentiment: sentiment, global: globalScore, asset: asset, defi: defi, market: market, chain: chain, protocol: protocol, observedAt: ext.observedAt, staleAfterMs: EXTERNAL_STALE_MS, dataStatus: ext.dataStatus || 'fresh', eligibleForScore: ext.dataStatus !== 'error' };
   }
   function btcDominanceValue(ext) {
-    if (ext && eligibleDataset(ext.marketData) && ext.global && ext.global.market_cap_percentage && Number.isFinite(+ext.global.market_cap_percentage.btc)) return +ext.global.market_cap_percentage.btc;
-    if (ext && ext.paprikaGlobal && Number.isFinite(+ext.paprikaGlobal.bitcoin_dominance_percentage)) return +ext.paprikaGlobal.bitcoin_dominance_percentage;
+    var global = activeGlobalMarket(ext);
+    var marketDominance = finiteNumber(global && global.market_cap_percentage && global.market_cap_percentage.btc);
+    if (Number.isFinite(marketDominance)) return marketDominance;
+    var paprikaDominance = finiteNumber(ext && ext.paprikaGlobal && ext.paprikaGlobal.bitcoin_dominance_percentage);
+    if (Number.isFinite(paprikaDominance)) return paprikaDominance;
     return NaN;
   }
   function applyExternalToAnalysis(symbol, analysis) {
@@ -1207,21 +1408,25 @@
     var history = historyFresh(historyCandidate) ? historyCandidate : null;
     var news = scoreNews(symbol);
     var ticker = analysis.ticker || {};
+    var tickerChange24h = finiteNumber(ticker.priceChangePercent);
     var extEligible = ext.eligibleForScore !== false;
-    var externalAvailable = extEligible && !!(ext.market || ext.chain || ext.protocol || fearGreedEligible(state.external) || macroSourceAvailable(state.external.macro) || activeTradFiAssets(state.external.tradfi).length);
+    var marketMacroAvailable = marketMacroContextAvailable(state.external);
+    var externalMacroAvailable = fearGreedEligible(state.external) || macroSourceAvailable(state.external.macro) || activeTradFiAssets(state.external.tradfi).length > 0 || marketMacroAvailable;
     var macroChecks = [!!news.items.length || state.newsMode !== 'auto', fearGreedEligible(state.external), macroSourceAvailable(state.external.macro) || activeTradFiAssets(state.external.tradfi).length > 0];
-    // Contrato 8.2/12.7: presenca do bloco de mercado ganha credito parcial (0.8) quando a fonte
-    // que o alimentou e o fallback equivalente (CoinPaprika); chain/protocolo seguem com credito 1.
+    // Contrato 8.2/12.7 (RC-007): presenca do bloco de mercado ganha credito parcial (0.8) quando
+    // a fonte que o alimentou e o fallback equivalente (CoinPaprika); chain/protocolo seguem com
+    // credito 1. A disponibilidade vem de fundamentalContextChecks (ciclo D).
     var marketProvenance = AnalyticsCore.sourceProvenanceFactor(state.external.marketData && state.external.marketData.source);
-    var fundamentalChecks = [ext.market ? marketProvenance : 0, (ext.chain || ext.protocol) ? 1 : 0];
+    var fundamentalAvailability = fundamentalContextChecks(ext);
+    var fundamentalChecks = [fundamentalAvailability[0] ? marketProvenance : 0, fundamentalAvailability[1] ? 1 : 0];
     var parts = [
       { name: 'Tecnica', ruleId: 'radar.technical.v2', weight: 30, available: Number.isFinite(analysis.trendScore) && Number.isFinite(analysis.momScore), value: clamp(((analysis.trendScore + analysis.momScore + (analysis.structureShift ? analysis.structureShift.score : 0) + (analysis.divergenceScore || 0) + (analysis.squeeze ? analysis.squeeze.score : 0)) / 60) * 100, -100, 100), quality: Math.min(1, (analysis.candleCount || 0) / 220), raw: analysis.trendScore + analysis.momScore + (analysis.structureShift ? analysis.structureShift.score : 0) + (analysis.divergenceScore || 0) + (analysis.squeeze ? analysis.squeeze.score : 0), scope: 'symbol', reason: 'EMAs, RSI, MACD, ADX, estrutura, CHoCH/BOS, divergencia e squeeze do timeframe' },
       { name: 'Fluxo', ruleId: 'radar.flow.v1', weight: 15, available: analysis.flowAvailable === true, value: clamp((analysis.flowScore / 13) * 100, -100, 100), quality: Number.isFinite(analysis.flowCoverage) ? analysis.flowCoverage : 0, raw: analysis.flowScore, scope: 'symbol', reason: 'Delta taker e CMF (volume marca cobertura, sem bonus direcional)' },
       { name: 'Derivativos', ruleId: 'radar.derivatives.v1', weight: 10, available: Number.isFinite(analysis.funding) || Number.isFinite(analysis.basis), value: clamp((analysis.derivScore / 9) * 100, -100, 100), quality: ((Number.isFinite(analysis.funding) ? 1 : 0) + (Number.isFinite(analysis.basis) ? 1 : 0)) / 2, raw: analysis.derivScore, scope: 'symbol', reason: 'Funding e basis dos perpetuos Binance' },
-      { name: 'Fundamental', ruleId: 'radar.fundamental.v1', weight: 15, available: extEligible && !!(ext.market || ext.chain || ext.protocol), value: clamp(((ext.asset + ext.defi) / 22) * 100, -100, 100), quality: (fundamentalChecks[0] + fundamentalChecks[1]) / fundamentalChecks.length, raw: ext.asset + ext.defi, scope: 'symbol', reason: 'Mercado CoinGecko/fallback e TVL DeFiLlama mapeados' },
-      { name: 'Macro/noticias', ruleId: 'radar.macro.v1', weight: 10, available: !!(news.items.length || state.newsMode !== 'auto' || externalAvailable), value: clamp(((news.score * 0.45 + ext.sentiment + ext.global) / 30) * 100, -100, 100), quality: macroChecks.filter(Boolean).length / macroChecks.length, raw: news.score * 0.45 + ext.sentiment + ext.global, scope: 'market', reason: 'Noticias RSS, sentimento e macro oficial' },
+      { name: 'Fundamental', ruleId: 'radar.fundamental.v1', weight: 15, available: extEligible && fundamentalChecks.some(Boolean), value: clamp(((ext.asset + ext.defi) / 22) * 100, -100, 100), quality: (fundamentalChecks[0] + fundamentalChecks[1]) / fundamentalChecks.length, raw: ext.asset + ext.defi, scope: 'symbol', reason: 'Variacoes 7d/30d de mercado (CoinGecko/fallback com credito de proveniencia) e 1d/7d de TVL DeFiLlama' },
+      { name: 'Macro/noticias', ruleId: 'radar.macro.v1', weight: 10, available: !!(news.items.length || state.newsMode !== 'auto' || externalMacroAvailable), value: clamp(((news.score * 0.45 + ext.sentiment + ext.global) / 30) * 100, -100, 100), quality: macroChecks.filter(Boolean).length / macroChecks.length, raw: news.score * 0.45 + ext.sentiment + ext.global, scope: 'market', reason: 'Noticias RSS, sentimento e macro oficial' },
       { name: 'Historico', ruleId: 'radar.history.v1', weight: 15, available: !!history, value: history ? clamp((history.score / 12) * 100, -100, 100) : 0, quality: history ? Math.min(1, (history.samples || 0) / 20) : 0, raw: history ? history.score : null, scope: 'symbol', reason: 'Regimes semelhantes no historico diario' },
-      { name: 'Momentum 24h', ruleId: 'radar.momentum24h.v1', weight: 5, available: Number.isFinite(+ticker.priceChangePercent), value: clamp((+ticker.priceChangePercent / 5) * 100, -100, 100), quality: 1, raw: +ticker.priceChangePercent, scope: 'symbol', reason: 'Variacao 24h do ticker Binance' }
+      { name: 'Momentum 24h', ruleId: 'radar.momentum24h.v1', weight: 5, available: Number.isFinite(tickerChange24h), value: Number.isFinite(tickerChange24h) ? clamp((tickerChange24h / 5) * 100, -100, 100) : 0, quality: Number.isFinite(tickerChange24h) ? 1 : 0, raw: Number.isFinite(tickerChange24h) ? tickerChange24h : null, scope: 'symbol', reason: 'Variacao 24h do ticker Binance' }
     ];
     var aggregate = AnalyticsCore.aggregateRadarParts(parts);
     parts.forEach(function (part, index) {
@@ -1235,7 +1440,7 @@
       rulesetHash: RULESET_HASH,
       scoreType: 'radar',
       symbol: symbol,
-      interval: state.boardInterval || state.interval,
+      interval: analysis.interval || state.boardInterval || state.interval,
       score: aggregate.score,
       rawScore: aggregate.rawScore,
       bias: aggregate.bias,
@@ -1291,7 +1496,7 @@
       // forever. 30 weekly candles still give EMA21/structure a meaningful read.
       if (!candles || candles.length < (interval === '1w' ? 30 : 60)) return null;
       var snapshot = technicalSnapshot(candles, interval);
-      state.mtfCache[key] = { value: snapshot, fetchedAt: Date.now() };
+      state.mtfCache[key] = { value: snapshot, candles: candles.slice(), fetchedAt: Date.now() };
       return snapshot;
     }));
     return summarizeMultiTimeframe(results.map(value).filter(Boolean), selectedInterval);
@@ -1435,30 +1640,6 @@
     })();
     return state.historyLoading[symbol];
   }
-  function warmHistoricalProfiles() {
-    if (state.historySweepStarted) return;
-    state.historySweepStarted = true;
-    var queue = ASSETS.slice(), workers = [0, 1].map(async function () {
-      while (queue.length) {
-        var symbol = queue.shift();
-        var profile = await ensureHistoricalProfile(symbol, symbol === state.symbol);
-        var item = state.board.find(function (row) { return row.symbol === symbol; });
-        if (item && profile) {
-          attachHistory(item.analysis, profile);
-          buildRadarScore(symbol, item.analysis);
-        }
-        if (symbol === state.symbol && state.analysis && profile && analysisMatchesSelection(state.analysis)) {
-          attachHistory(state.analysis, profile);
-          renderHistoricalProfile(state.analysis);
-          renderConfluence(state.analysis);
-          renderWrittenAnalysis(state.analysis);
-        }
-        renderBoard();
-        await delay(120);
-      }
-    });
-    Promise.allSettled(workers);
-  }
   function setupQuality(a) {
     var volumeRatio = Number.isFinite(a.avgVol) && a.avgVol ? a.lastVol / a.avgVol : NaN;
     var derivative = scoreableDerivativeDetail(a.derivativeDetail);
@@ -1514,8 +1695,55 @@
     var score = clamp(Math.round(total * 6), -22, 22);
     return { score: score, label: newsItems.length ? 'auto noticias' : 'sem noticias frescas', items: scored.sort(function (a, b) { return Math.abs(b.score) - Math.abs(a.score); }).slice(0, 6) };
   }
+  function cleanNewsOverrideText(value, maxLength) {
+    return String(value || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, maxLength);
+  }
+  function rerenderNewsDrivenAnalysis(reason) {
+    if (!state.analysis || !analysisMatchesSelection(state.analysis)) return;
+    stampAnalysisSnapshot(state.analysis, reason || 'news-mode');
+    renderConfluence(state.analysis);
+    renderWrittenAnalysis(state.analysis);
+    updateScore(state.analysis);
+  }
+  function setNewsOverrideFeedback(message, isError) {
+    var node = $('newsOverrideFeedback');
+    if (!node) return;
+    node.textContent = message || '';
+    node.classList.toggle('is-error', !!isError);
+  }
+  function showNewsOverrideEditor(visible) {
+    var panel = $('newsOverridePanel');
+    if (panel) panel.hidden = !visible;
+  }
+  function applyNewsMode(mode, author, reason) {
+    var allowed = ['auto', 'risk-on', 'neutral', 'risk-off'];
+    if (allowed.indexOf(mode) === -1) return false;
+    if (mode === 'auto') {
+      state.newsMode = 'auto';
+      state.newsOverrideAt = null;
+      state.newsOverrideAuthor = null;
+      state.newsOverrideReason = null;
+      rerenderNewsDrivenAnalysis('news-mode-auto');
+      return true;
+    }
+    author = cleanNewsOverrideText(author, 80);
+    reason = cleanNewsOverrideText(reason, 180);
+    if (!author || !reason) return false;
+    state.newsMode = mode;
+    state.newsOverrideAt = Date.now();
+    state.newsOverrideAuthor = author;
+    state.newsOverrideReason = reason;
+    rerenderNewsDrivenAnalysis('news-mode-manual');
+    return true;
+  }
+  function newsOverrideAuditLabel() {
+    if (state.newsMode === 'auto') return '';
+    var time = timestampMs(state.newsOverrideAt);
+    var when = Number.isFinite(time) ? new Date(time).toISOString() : 'instante nao registrado';
+    return 'override manual por ' + (state.newsOverrideAuthor || 'autor nao registrado') + ' em ' + when + '; motivo: ' + (state.newsOverrideReason || 'nao registrado') + '; ';
+  }
   function smartMoneyAnalysis(a) {
-    var score = 0, liquidity = 'Sem sweep', imbalance = 'Sem deslocamento', oiPhase = 'OI neutro';
+    var score = 0, liquidity = 'Sem sweep', imbalance = 'Sem deslocamento', oiPhase = 'OI/preco indisponivel';
     score += a.structure === 'HH/HL' ? 5 : a.structure === 'LH/LL' ? -5 : 0;
     // A confirmed trap already scores the reclaim (with its extra OI/liq confirmation) in trapScore,
     // which also feeds flow — scoring the raw sweep here too would count the same reclaim twice in
@@ -1533,12 +1761,10 @@
     // since smart.score also feeds flow (smart.score*0.55).
     var detail = scoreableDerivativeDetail(a.derivativeDetail);
     if (Number.isFinite(detail.oiChangePct)) {
-      // Same signal and fallback as calculateDerivativeDetailContribution so both read the same
-      // quadrant. Narrative label ONLY: the quadrant SCORES exclusively in the derivatives bucket
+      // Same-window signal as calculateDerivativeDetailContribution. Narrative label ONLY: the
+      // quadrant SCORES exclusively in the derivatives bucket
       // (lib) — adding it here too double-counted it into flow via smart.score*0.55.
-      var oiPriceSignal = Number.isFinite(a.oiPriceChangePct) ? a.oiPriceChangePct
-        : Number.isFinite(a.close) && Number.isFinite(a.vwap) ? a.close - a.vwap : NaN;
-      oiPhase = AnalyticsCore.calculateOiPriceQuadrant(detail.oiChangePct, oiPriceSignal).phase;
+      if (Number.isFinite(a.oiPriceChangePct)) oiPhase = AnalyticsCore.calculateOiPriceQuadrant(detail.oiChangePct, a.oiPriceChangePct).phase;
     }
     return { score: clamp(Math.round(score), -18, 18), structure: a.structure, liquidity: liquidity, imbalance: imbalance, oiPhase: oiPhase };
   }
@@ -1548,29 +1774,28 @@
     // Quality = coverage of the CANONICAL timeframes (the weekly leg matters most), not raw row
     // count — the chart TF row used to inflate this while 1w was missing.
     var mtfRows = (state.mtf && state.mtf.rows) || [];
-    var mtfQuality = MTF_INTERVALS.filter(function (interval) {
-      return mtfRows.some(function (row) { return row.interval === interval; });
-    }).length / MTF_INTERVALS.length;
+    var mtfQuality = AnalyticsCore.timeframeCoverage(mtfRows, MTF_INTERVALS).ratio;
     var historyQuality = historyFresh(a.history) ? Math.min(1, (a.history.samples || 0) / 20) : 0;
     var flowChecks = [Number.isFinite(a.deltaSum) && Number.isFinite(a.cmf20), Number.isFinite(a.spreadBps) && Number.isFinite(a.buySlipBps)];
     var flowQuality = flowChecks.filter(Boolean).length / flowChecks.length;
     var derivativeChecks = [Number.isFinite(a.funding) || Number.isFinite(a.basis), hasDerivativeData(a.derivativeDetail)];
     if (eligibleDataset(a.options)) derivativeChecks.push(!!a.options.market);
     var derivativeQuality = derivativeChecks.filter(Boolean).length / derivativeChecks.length;
-    // Contrato 8.2/12.7: quando o contexto externo so esta coberto pelo market data de FALLBACK
-    // (CoinPaprika no lugar da CoinGecko), o credito de proveniencia e parcial (0.8), nao cheio.
-    var chainOrProtocolContext = externalContextFresh() && !!(findChainContext(state.symbol) || findProtocolContext(state.symbol));
-    var marketContextOk = externalContextFresh() && eligibleDataset(state.external.marketData) && !!selectedMarket(state.symbol);
-    var contextCredit = chainOrProtocolContext ? 1
-      : marketContextOk ? AnalyticsCore.sourceProvenanceFactor(state.external.marketData.source) : 0;
-    var coinMetricsCredit = a.coinMetrics && a.coinMetrics.latest && eligibleDataset(a.coinMetrics) ? 1 : 0;
+    var currentExternal = a.external && eligibleDataset(a.external) ? a.external : scoreExternalContext(state.symbol);
+    var nativeChainEligible = !!(a.mempoolContext && a.mempoolContext.eligibleForScore);
+    // Contrato 8.2/12.7 (RC-007): quando o contexto externo so esta coberto pelo market data de
+    // FALLBACK (CoinPaprika no lugar da CoinGecko), o credito de proveniencia e parcial (0.8),
+    // nao cheio. A disponibilidade vem de fundamentalContextChecks (ciclo D).
+    var contextAvailability = fundamentalContextChecks(currentExternal);
+    var contextCredit = contextAvailability[1] ? 1
+      : contextAvailability[0] ? AnalyticsCore.sourceProvenanceFactor(state.external.marketData && state.external.marketData.source) : 0;
+    var coinMetricsCredit = (!!(a.coinMetrics && a.coinMetrics.latest && eligibleDataset(a.coinMetrics)) || nativeChainEligible) ? 1 : 0;
     var fundamentalQuality = (coinMetricsCredit + contextCredit) / 2;
-    var macroChecks = [freshNewsItems().length > 0, externalContextFresh() && !!(state.external && (state.external.global || state.external.paprikaGlobal)), externalContextFresh() && !!(state.external && (macroSourceAvailable(state.external.macro) || activeTradFiAssets(state.external.tradfi).length || fearGreedEligible(state.external)))];
+    var macroChecks = [state.newsMode !== 'auto' || freshNewsItems().length > 0, marketMacroContextAvailable(state.external), externalContextFresh() && !!(state.external && (macroSourceAvailable(state.external.macro) || activeTradFiAssets(state.external.tradfi).length || fearGreedEligible(state.external)))];
     var macroQuality = macroChecks.filter(Boolean).length / macroChecks.length;
     var riskQuality = (technicalQuality + flowQuality + derivativeQuality) / 3;
     // Data Confidence weights ARE the setup caps (contract 8.2). Derive them from the ruleset so
-    // the two can never drift again — the caps moved to mtf 16 / risk 14 while these were still
-    // hardcoded at 24 / 10, over-weighting MTF coverage and under-weighting risk in the DC.
+    // the two can never drift again.
     var caps = AnalyticsCore.RULESET.setupCaps;
     return AnalyticsCore.calculateDataConfidence([
       { weight: caps.technical, quality: technicalQuality },
@@ -1689,21 +1914,11 @@
     var htfVetoLong = htfGateAvailable && htf1d.bias === 'Baixa' && htf1w.bias === 'Baixa';
     var htfVetoShort = htfGateAvailable && htf1d.bias === 'Alta' && htf1w.bias === 'Alta';
     var trapVeto = activeTrapVeto(a);
-    var decision = 'Sem entrada clara';
-    var tone = 'wait';
-    // Ladder simetrico: o lado short existe com os MESMOS gates do lado long (o plano de trade e
-    // o motor v2 ja eram bidirecionais; o ladder dizia 'Evitar' enquanto o plano dizia short).
-    if (total >= 60 && multi.bias === 'Alta' && multi.alignment >= 0.6 && quality >= 63 && htfGateAvailable && !htfVetoLong) { decision = 'Entrada favoravel'; tone = 'long'; }
-    else if (total <= -60 && multi.bias === 'Baixa' && multi.alignment >= 0.6 && quality >= 63 && htfGateAvailable && !htfVetoShort) { decision = 'Entrada vendedora favoravel'; tone = 'short'; }
-    else if (total >= 42 && multi.score >= 0 && !htfVetoLong) { decision = 'Entrada com confirmacao'; tone = 'long'; }
-    else if (total <= -42 && multi.score <= 0 && !htfVetoShort) { decision = 'Entrada vendedora com confirmacao'; tone = 'short'; }
-    else if (total >= 42 && htfVetoLong) { decision = 'Gate HTF: 1d+1w baixistas vetam long'; tone = 'wait'; }
-    else if (total <= -42 && htfVetoShort) { decision = 'Gate HTF: 1d+1w altistas vetam short'; tone = 'wait'; }
-    else if (total >= 20) { decision = 'Aguardar pullback'; tone = 'wait'; }
-    else if (total <= -20) { decision = 'Cautela'; tone = 'avoid'; }
-    if (tone === 'long' && trapVeto === 'long') { decision = 'Veto pos-trap: aguardar ' + trapVetoBarsLeft(a) + ' barra(s)'; tone = 'wait'; }
-    if (tone === 'short' && trapVeto === 'short') { decision = 'Veto pos-trap: aguardar ' + trapVetoBarsLeft(a) + ' barra(s)'; tone = 'wait'; }
-    if (quality < 40) { decision = 'Dados insuficientes'; tone = 'wait'; }
+    // A mesma ladder pura e testada governa a UI. Todo nivel de entrada, inclusive +/-42, exige
+    // que 1d e 1w estejam presentes; assim a tela nunca diverge do motor de sinais.
+    var decisionResult = AnalyticsCore.setupDecision({ total: total, quality: quality, multiScore: multi.score, multiBias: multi.bias, alignment: multi.alignment, htfAvailable: htfGateAvailable, htfVetoLong: htfVetoLong, htfVetoShort: htfVetoShort, trapVeto: trapVeto, trapBarsLeft: trapVetoBarsLeft(a) });
+    var decision = decisionResult.decision;
+    var tone = decisionResult.tone;
     var reasons = [
       { tone: technical > 7 ? 'good' : technical < -7 ? 'bad' : 'neutral', text: technical > 7 ? 'Tecnica do timeframe selecionado favorece compra.' : technical < -7 ? 'Tecnica do timeframe selecionado pesa contra.' : 'Tecnica local mista: falta rompimento ou reteste confirmado.' },
       { tone: multi.score > 5 ? 'good' : multi.score < -5 ? 'bad' : 'neutral', text: multi.score > 5 ? 'Demais timeframes confirmam tendencia de alta de forma independente.' : multi.score < -5 ? 'Demais timeframes divergem ou mantem tendencia de baixa.' : 'Multi-timeframe ainda sem alinhamento direcional forte.' },
@@ -1723,13 +1938,16 @@
     if (risk !== 0) {
       reasons.push({ tone: risk > 0 ? 'good' : 'bad', text: risk > 0 ? 'Ajuste de risco favorece: sobrevenda esticada (risco de repique), exaustao de fundo, volume comprador ou liquidacoes de longs absorvidas.' : 'Ajuste de risco pesa contra: sobrecompra esticada, exaustao de topo, volume vendedor ou liquidacoes de shorts no sweep de maxima.' });
     }
+    var mtfCoverage = AnalyticsCore.timeframeCoverage(multi.rows, MTF_INTERVALS);
+    var macroStatus = state.newsMode !== 'auto' ? 'manual'
+      : (news.items.length || fearGreedEligible(state.external) || macroSourceAvailable(state.external.macro) || activeTradFiAssets(state.external.tradfi).length || marketMacroContextAvailable(state.external)) ? 'fresh' : 'missing';
     var components = [
       { name: 'Tecnica', ruleId: 'setup.technical.v1', score: technical, max: 20, status: 'fresh', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines'], reason: 'trendScore*0.32 + momScore*0.42 do timeframe selecionado' },
-      { name: 'Multi-TF', ruleId: 'setup.mtf.v2', score: multi.score, max: 16, status: multi.rows && multi.rows.length ? 'fresh' : 'missing', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines'], reason: 'Confirmacao INDEPENDENTE (TF do grafico excluido) + gate 1d/1w em ' + (multi.aggregatedCount || 0) + ' timeframes' },
+      { name: 'Multi-TF', ruleId: 'setup.mtf.v2', score: multi.score, max: 16, status: mtfCoverage.available === mtfCoverage.expected ? 'fresh' : mtfCoverage.available ? 'partial' : 'missing', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines'], reason: 'Confirmacao INDEPENDENTE (TF do grafico excluido) + gate 1d/1w; cobertura ' + mtfCoverage.available + '/' + mtfCoverage.expected + ' timeframes canonicos' },
       { name: 'Smart/fluxo', ruleId: 'setup.flow.v1', score: flow, max: 18, status: a.flowAvailable ? 'fresh' : 'missing', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines', 'binance-spot-depth'], reason: 'flowScore*0.48 + book*0.35 + smart money*0.55' },
       { name: 'Derivativos', ruleId: 'setup.derivatives.v1', score: derivatives, max: 12, status: datasetStatus(a.derivativeDetail) || 'missing', scope: 'symbol', isProxy: false, sources: ['binance-futures', 'deribit-options'], reason: 'derivScore*1.25 + detalhe de OI/funding/taker/opcoes elegiveis' },
-      { name: 'On-chain/fund.', ruleId: 'setup.chain.v1', score: chain, max: 10, status: eligibleDataset(a.coinMetrics) ? 'fresh' : a.coinMetrics ? datasetStatus(a.coinMetrics) : 'missing', scope: 'symbol', isProxy: !!(a.mempoolContext && a.mempoolContext.isProxy), sources: ['coinmetrics-community', 'defillama', 'mempool-space'], reason: 'chainScore + defi*0.45 + asset*0.2' },
-      { name: 'Noticias/macro', ruleId: 'setup.macro.v1', score: macro, max: 10, status: news.items.length || state.newsMode !== 'auto' ? 'fresh' : 'missing', scope: 'market', isProxy: false, sources: ['rss-news', 'alternative-me', 'treasury-cboe', 'etf-flows'], reason: 'news*0.36 + sentimento*0.45 + global*0.45 + ETF' },
+      { name: 'On-chain/fund.', ruleId: 'setup.chain.v1', score: chain, max: 10, status: eligibleDataset(a.coinMetrics) || (a.mempoolContext && a.mempoolContext.eligibleForScore) ? 'fresh' : a.coinMetrics ? datasetStatus(a.coinMetrics) : 'missing', scope: 'symbol', isProxy: !!(a.mempoolContext && a.mempoolContext.isProxy), sources: ['coinmetrics-community', 'defillama', 'mempool-space'], reason: 'chainScore + defi*0.45 + asset*0.2' },
+      { name: 'Noticias/macro', ruleId: 'setup.macro.v1', score: macro, max: 10, status: macroStatus, scope: 'market', isProxy: false, sources: state.newsMode !== 'auto' ? ['manual-user-session', 'alternative-me', 'us-treasury-yields', 'cboe-vix', 'cryptoetf-public'] : ['rss-news', 'alternative-me', 'us-treasury-yields', 'cboe-vix', 'cryptoetf-public'], reason: newsOverrideAuditLabel() + 'news*0.36 + sentimento*0.45 + global*0.45 + ETF' },
       { name: 'Historico', ruleId: 'setup.history.v1', score: historyScore, max: 12, status: history ? 'fresh' : historyCandidate ? 'stale' : 'missing', scope: 'symbol', isProxy: false, sources: ['binance-daily-history'], reason: history ? (history.samples || 0) + ' amostras de regimes semelhantes' : 'sem perfil historico fresco' },
       { name: 'Risco', ruleId: 'setup.risk.v2', score: risk, max: 14, status: 'fresh', scope: 'symbol', isProxy: false, sources: ['binance-spot-klines', 'binance-liquidations'], reason: 'Esticamento de bandas, climax de volume, volume x delta e sweeps confirmados por liquidacoes' }
     ];
@@ -1797,14 +2015,15 @@
     if (newsList) {
       var rows = c.news.items.length ? c.news.items.map(function (x) { return x.item; }) : freshNewsItems().slice(0, 5);
       newsList.innerHTML = rows.length ? rows.slice(0, 5).map(function (item) {
-        var time = item.published ? new Date(item.published).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+        var time = item.published ? AnalyticsCore.formatDisplayTimestamp(item.published, DISPLAY_TIME_ZONE, 'short') : '';
         return '<div class="news-item"><a href="' + escapeHTML(safeURL(item.url)) + '" target="_blank" rel="noreferrer">' + escapeHTML(item.title || 'Sem titulo') + '</a><small>' + escapeHTML(item.source || 'Fonte') + (time ? ' | ' + escapeHTML(time) : '') + '</small></div>';
       }).join('') : '<div class="news-item"><small>Sem noticias carregadas agora. Use o botao para tentar atualizar.</small></div>';
     }
+    var overrideTime = timestampMs(state.newsOverrideAt);
     var status = state.newsMode !== 'auto'
-      ? 'Noticias/macro: modo ' + c.news.label.replace(/^manual /, '') + '.'
+      ? 'Noticias/macro: override ' + c.news.label.replace(/^manual /, '') + ' por ' + (state.newsOverrideAuthor || 'autor nao registrado') + (Number.isFinite(overrideTime) ? ' em ' + new Date(overrideTime).toLocaleString('pt-BR') : '') + '. Motivo: ' + (state.newsOverrideReason || 'nao registrado') + '.'
       : state.newsFetchedAt
-        ? 'Noticias/macro: auto a cada 5 min. Ultima leitura ' + new Date(state.newsFetchedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + '.'
+        ? 'Noticias/macro: auto a cada 5 min. Ultima leitura ' + AnalyticsCore.formatDisplayTimestamp(state.newsFetchedAt, DISPLAY_TIME_ZONE, 'time') + ' (' + DISPLAY_TIME_ZONE + ').'
         : 'Noticias/macro: tentando carregar fontes externas.';
     text('newsStatus', status);
   }
@@ -1812,10 +2031,11 @@
     var rows = $('explanationRows');
     if (!rows || !c) return;
     var snapshot = a.snapshot || {};
-    text('explanationEnvelope', 'Modelo ' + (c.modelId || '--') + ' v' + c.modelVersion + ' | regras ' + (c.rulesetHash || '--') + ' | snapshot ' + (snapshot.inputSnapshotId ? snapshot.inputSnapshotId.slice(0, 60) + '...' : '--') + ' | candle fechado ' + (c.lastClosedCandleTime ? new Date(c.lastClosedCandleTime).toLocaleString('pt-BR') : '--') + ' | calculado ' + new Date(c.calculatedAt).toLocaleTimeString('pt-BR') + ' | dados ' + c.dataStatus);
+    text('explanationEnvelope', 'Modelo ' + (c.modelId || '--') + ' v' + c.modelVersion + ' | regras ' + (c.rulesetHash || '--') + ' | fontes ' + AnalyticsCore.SOURCE_REGISTRY_VERSION + ' | snapshot ' + (snapshot.inputSnapshotId ? snapshot.inputSnapshotId.slice(0, 60) + '...' : '--') + ' | candle fechado ' + (c.lastClosedCandleTime ? new Date(c.lastClosedCandleTime).toLocaleString('pt-BR') : '--') + ' | calculado ' + new Date(c.calculatedAt).toLocaleTimeString('pt-BR') + ' | dados ' + c.dataStatus);
     rows.innerHTML = c.components.map(function (component) {
       var contribClass = component.contribution > 0 ? 'contrib-pos' : component.contribution < 0 ? 'contrib-neg' : '';
-      return '<tr><td>' + escapeHTML(component.name) + '</td><td>' + escapeHTML(component.ruleId || '--') + '</td><td class="' + contribClass + '">' + signed(component.contribution) + '</td><td>&plusmn;' + component.max + '</td><td class="status-' + escapeHTML(component.status || 'fresh') + '">' + escapeHTML(component.status || 'fresh') + (component.isProxy ? ' (proxy)' : '') + '</td><td>' + escapeHTML(component.scope || '--') + '</td><td>' + escapeHTML((component.sources || []).join(', ')) + '</td><td>' + escapeHTML(component.reason || '') + '</td></tr>';
+      var sourceCells = (component.sources || []).map(function (sourceId) { return '<span title="' + escapeHTML(sourceReferenceTitle(sourceId)) + '">' + escapeHTML(sourceReference(sourceId)) + '</span>'; }).join('<br>');
+      return '<tr><td>' + escapeHTML(component.name) + '</td><td>' + escapeHTML(component.ruleId || '--') + '</td><td class="' + contribClass + '">' + signed(component.contribution) + '</td><td>&plusmn;' + component.max + '</td><td class="status-' + escapeHTML(component.status || 'fresh') + '">' + escapeHTML(component.status || 'fresh') + (component.isProxy ? ' (proxy)' : '') + '</td><td>' + escapeHTML(component.scope || '--') + '</td><td>' + sourceCells + '</td><td>' + escapeHTML(component.reason || '') + '</td></tr>';
     }).join('');
     var sum = c.components.reduce(function (total, component) { return total + component.contribution; }, 0);
     text('explanationReconciliation', 'Soma das contribuicoes: ' + signed(sum) + ' | Setup Score exibido: ' + signed(c.total) + (sum === c.total ? ' (reconciliado)' : ' (diferenca apenas pelo clamp de -100 a +100)') + ' | Data Confidence ' + c.dataConfidence + '% mede cobertura de dados, nao chance de acerto.');
@@ -1834,14 +2054,19 @@
     var detectedPatterns = (a.patterns || []).slice(0, 3).map(function (pattern) { return pattern.name; });
     var tradePlan = buildTradePlan(a);
     var operationalPlan = tradePlan.side === 'Aguardar' ? tradePlan.rationale + ' ' : 'Plano ' + tradePlan.side + ': ' + tradePlan.levels.map(function (level) { return level.label + ' ' + level.value; }).join(', ') + '. ';
-    var optionData = a.options || state.options, optionSentence = optionData && optionData.market && (optionData.isProxy || eligibleDataset(optionData)) ? (optionData.isProxy ? 'Como proxy BTC apenas informativo e fora do Setup Score, ' : 'Nas opcoes nativas ' + optionData.currency + ', ') + 'put/call OI esta em ' + num(+optionData.market.putCallOi, 2) + 'x' + (AnalyticsCore.toFiniteNumber(optionData.dvol && optionData.dvol.latest) !== null ? ', DVOL em ' + num(+optionData.dvol.latest, 1) : ', sem indice DVOL para esta moeda') + ' e IV ATM em ' + num(optionData.nearest && +optionData.nearest.atmIv, 1) + '%. ' : '';
+    var optionData = a.options || state.options;
+    var optionPutCall = AnalyticsCore.toFiniteNumber(optionData && optionData.market && optionData.market.putCallOi);
+    var optionAtmIv = AnalyticsCore.toFiniteNumber(optionData && optionData.nearest && optionData.nearest.atmIv);
+    var optionSentence = optionData && optionData.market && (optionData.isProxy || eligibleDataset(optionData)) ? (optionData.isProxy ? 'Como proxy BTC apenas informativo e fora do Setup Score, ' : 'Nas opcoes nativas ' + optionData.currency + ', ') + 'put/call OI ' + (optionPutCall !== null ? 'em ' + num(optionPutCall, 2) + 'x' : 'indisponivel') + (AnalyticsCore.toFiniteNumber(optionData.dvol && optionData.dvol.latest) !== null ? ', DVOL em ' + num(finiteNumber(optionData.dvol.latest), 1) : ', sem indice DVOL para esta moeda') + ' e IV ATM ' + (optionAtmIv !== null ? 'em ' + num(optionAtmIv, 1) + '%' : 'indisponivel') + '. ' : '';
     var exchangeFlow = eligibleDataset(a.coinMetrics) && a.coinMetrics.exchangeFlow, exchangeSentence = exchangeFlow && Number.isFinite(exchangeFlow.netflow7d) ? 'O netflow agregado de exchanges em ' + exchangeFlow.flowCoverageDays + ' de ' + exchangeFlow.flowWindowDays + ' dias cobertos e ' + compactMoney(exchangeFlow.netflow7d) + ' (positivo significa entrada liquida em exchanges). ' : '';
     var liqSummary = liquidationSummary(), liquidationSentence = liqSummary.total ? 'Nos ultimos 15 minutos, o stream observou ' + compactMoney(liqSummary.longValue) + ' em longs e ' + compactMoney(liqSummary.shortValue) + ' em shorts liquidados. ' : '';
     var etfValue = latestEtfFlow(a.institutional || state.institutional), etfSentence = Number.isFinite(etfValue) ? 'O ultimo ETF net flow disponivel e ' + compactMoney(etfValue) + '. ' : '';
-    var body = 'No timeframe ' + intervalLabel(state.interval) + ', a leitura tecnica esta ' + technicalTone + ': estrutura ' + a.structure + ', preco ' + (a.close > a.vwap ? 'acima' : 'abaixo') + ' do VWAP, RSI em ' + num(a.rsi14, 1) + ', MACD ' + (a.macd.hist >= 0 ? 'positivo' : 'negativo') + ', ADX ' + num(a.adx.adx, 1) + ' e Supertrend em ' + a.supertrend.trend + '. ' +
+    var vwapNarrative = Number.isFinite(a.vwap) ? (a.close > a.vwap ? 'acima' : 'abaixo') + ' do VWAP' : 'com VWAP indisponivel';
+    var macdNarrative = Number.isFinite(a.macd.hist) ? (a.macd.hist >= 0 ? 'positivo' : 'negativo') : 'indisponivel';
+    var body = 'No timeframe ' + intervalLabel(state.interval) + ', a leitura tecnica esta ' + technicalTone + ': estrutura ' + a.structure + ', preco ' + vwapNarrative + ', RSI em ' + num(a.rsi14, 1) + ', MACD ' + macdNarrative + ', ADX ' + num(a.adx.adx, 1) + ' e Supertrend em ' + a.supertrend.trend + '. ' +
       'A confirmacao multi-timeframe esta em ' + c.multi.bias + ', com alinhamento de ' + Math.round(c.multi.alignment * 100) + '% e score ' + signed(c.multi.score) + '. ' +
       'O fluxo esta ' + flowTone + ', com delta taker de ' + num(a.deltaSum, 3) + ' ' + baseAsset(state.symbol) + ', CMF ' + num(a.cmf20, 2) + (Number.isFinite(volumeRatio) ? ' e volume em ' + num(volumeRatio, 2) + 'x a media recente. ' : '. ') +
-      'Na leitura smart money, ' + c.smart.liquidity.toLowerCase() + ', fase de OI ' + c.smart.oiPhase + ' e ' + c.smart.imbalance.toLowerCase() + '. ' +
+      'Na leitura smart money, ' + c.smart.liquidity.toLowerCase() + ', ' + c.smart.oiPhase.toLowerCase() + ' e ' + c.smart.imbalance.toLowerCase() + '. ' +
       'A qualidade do setup soma ' + signed(quality.total) + ', com spread de ' + num(a.spreadBps, 2) + ' bps e slippage estimado de compra em ' + num(a.buySlipBps, 2) + ' bps. ' +
       'Nos derivativos, funding atual ' + (Number.isFinite(a.funding) ? percent(a.funding * 100, 4) : '--') + ', ' + derivativeTone + (Number.isFinite(d.longShortRatio) ? ' e long/short em ' + num(d.longShortRatio, 2) + 'x. ' : '. ') +
       optionSentence + exchangeSentence + liquidationSentence + etfSentence +
@@ -1850,7 +2075,7 @@
       (detectedPatterns.length ? 'Padroes/eventos em candles fechados: ' + detectedPatterns.join(', ') + '; continuam sendo hipoteses operacionais. ' : 'Nenhum padrao grafico objetivo foi encontrado nos candles fechados. ') +
       'Operacionalmente, a zona de alta fica acima de ' + (a.resistances[0] ? money(a.resistances[0]) : '--') + '; perda de ' + (a.supports[0] ? money(a.supports[0]) : '--') + ' enfraquece o setup. ' +
       operationalPlan +
-      (market ? 'No dado fundamental de mercado, rank #' + market.market_cap_rank + ', market cap ' + compactUsd(+market.market_cap) + ', volume 24h ' + compactUsd(+market.total_volume) + ' e distancia do ATH ' + percent(+market.ath_change_percentage, 1) + '. ' : '') +
+      (market ? 'No dado fundamental de mercado, rank #' + (Number.isFinite(finiteNumber(market.market_cap_rank)) ? finiteNumber(market.market_cap_rank) : '--') + ', market cap ' + compactUsd(finiteNumber(market.market_cap)) + ', volume 24h ' + compactUsd(finiteNumber(market.total_volume)) + ' e distancia do ATH ' + percent(finiteNumber(market.ath_change_percentage), 1) + '. ' : '') +
       'Isso e uma leitura analitica do painel, nao uma recomendacao automatica de compra ou venda.';
     text('analysisHeadline', headline);
     text('analysisBody', body);
@@ -1872,13 +2097,17 @@
   }
   function value(result) { return result && result.status === 'fulfilled' ? result.value : null; }
   function tickerMapFromRows(rows) {
-    var map = {};
-    (rows || []).forEach(function (row) { map[row.symbol] = row; });
+    var map = Object.create(null);
+    (Array.isArray(rows) ? rows : []).forEach(function (row) {
+      if (row && ASSETS.indexOf(row.symbol) !== -1) map[row.symbol] = row;
+    });
     return map;
   }
   function premiumMapFromRows(rows) {
-    var map = {};
-    (rows || []).forEach(function (row) { map[row.symbol] = row; });
+    var map = Object.create(null);
+    (Array.isArray(rows) ? rows : []).forEach(function (row) {
+      if (row && ASSETS.indexOf(row.symbol) !== -1) map[row.symbol] = row;
+    });
     return map;
   }
   function reapplyExternalContext() {
@@ -1899,15 +2128,16 @@
     renderSourceHealth(state.external || {});
   }
   function refreshContextIfNeeded(force) {
-    if (state.contextRefreshing) return;
+    if (state.contextRefreshing) return state.contextPromise || Promise.resolve(state.external);
     var lastNewsCycle = Math.max(state.newsFetchedAt, state.newsAttemptedAt);
     var needsNews = !!force || !lastNewsCycle || Date.now() - lastNewsCycle >= NEWS_REFRESH_MS;
-    var needsExternal = !!force || !state.external || !state.external.fetchedAt || Date.now() - state.externalFetchedAt >= EXTERNAL_REFRESH_MS;
-    if (!needsNews && !needsExternal) return;
+    var lastExternalCycle = Math.max(state.externalFetchedAt, state.externalAttemptedAt);
+    var needsExternal = !!force || !lastExternalCycle || Date.now() - lastExternalCycle >= EXTERNAL_REFRESH_MS;
+    if (!needsNews && !needsExternal) return Promise.resolve(state.external);
     state.contextRefreshing = true;
     if (needsNews) text('newsStatus', 'Atualizando noticias e macro...');
     if (needsExternal) text('externalStatus', 'Atualizando contexto externo...');
-    Promise.allSettled([
+    state.contextPromise = Promise.allSettled([
       needsNews ? loadNewsIfNeeded(true) : Promise.resolve(),
       needsExternal ? loadExternalContext(true) : Promise.resolve(state.external)
     ]).then(function (rows) {
@@ -1918,7 +2148,9 @@
       if (needsExternal) text('externalStatus', 'Contexto externo indisponivel agora.');
     }).finally(function () {
       state.contextRefreshing = false;
+      state.contextPromise = null;
     });
+    return state.contextPromise;
   }
   function refreshChainIfNeeded(force) {
     if (state.chainRefreshing) return;
@@ -1937,7 +2169,9 @@
     });
   }
   function refreshBoardIfNeeded(force) {
-    var needsBoard = !!force || !state.board.length || state.boardInterval !== state.interval || Date.now() - state.boardFetchedAt >= BOARD_REFRESH_MS;
+    var fastInterval = ['1s', '1m', '3m', '5m'].indexOf(state.interval) !== -1;
+    var boardTtl = fastInterval ? Math.min(BOARD_REFRESH_MS, 30000) : BOARD_REFRESH_MS;
+    var needsBoard = !!force || !state.board.length || state.boardInterval !== state.interval || Date.now() - state.boardFetchedAt >= boardTtl;
     if (!needsBoard) return;
     if (state.boardRefreshing) {
       state.boardPendingRefresh = true;
@@ -1955,7 +2189,7 @@
         ]);
         var tickerMap = tickerMapFromRows(value(baseResults[0]));
         var premiumMap = premiumMapFromRows(value(baseResults[1]));
-        var boardResults = await Promise.allSettled(ASSETS.map(function (symbol) { return loadBoardAsset(symbol, tickerMap[symbol], premiumMap[symbol], intervalChoice); }));
+        var boardResults = await mapSettledPool(ASSETS, 4, function (symbol) { return loadBoardAsset(symbol, tickerMap[symbol], premiumMap[symbol], intervalChoice); });
         if (intervalChoice !== state.interval) return;
         state.board = boardResults.map(value).filter(Boolean);
         state.boardFetchedAt = Date.now();
@@ -1971,6 +2205,22 @@
         }
       }
     })();
+  }
+  async function mapSettledPool(items, concurrency, mapper) {
+    var results = new Array(items.length);
+    var cursor = 0;
+    async function worker() {
+      while (cursor < items.length) {
+        var index = cursor++;
+        try { results[index] = { status: 'fulfilled', value: await mapper(items[index], index) }; }
+        catch (error) { results[index] = { status: 'rejected', reason: error }; }
+      }
+    }
+    var workers = [];
+    var count = Math.max(1, Math.min(concurrency || 1, items.length));
+    for (var i = 0; i < count; i++) workers.push(worker());
+    await Promise.all(workers);
+    return results;
   }
   async function refresh(force) {
     if (state.refreshing) {
@@ -1989,11 +2239,11 @@
     state.interval = requestedInterval;
     if (ASSETS.indexOf(state.symbol) === -1) ASSETS.unshift(state.symbol);
     refreshChainIfNeeded(false);
-    refreshContextIfNeeded(false);
+    var contextPromise = refreshContextIfNeeded(false);
     refreshBoardIfNeeded(!!force);
     text('statusText', 'Atualizando ativo selecionado em tempo real...');
     try {
-      var applied = await refreshSelected(null, null, state.chain || {}, !!force, requestedSymbol, requestedInterval, requestId);
+      var applied = await refreshSelected(null, null, state.chain || {}, !!force, requestedSymbol, requestedInterval, requestId, contextPromise);
       if (applied && refreshGate.isCurrent(requestId)) text('statusText', 'Modelo ' + MODEL_VERSION + ' | snapshot: ' + requestedSymbol + ' ' + intervalLabel(requestedInterval) + ' | preco ao vivo ' + Math.round(REFRESH_MS / 1000) + 's');
     } catch (error) {
       if (refreshGate.isCurrent(requestId)) text('statusText', 'Falha ao atualizar: ' + error.message);
@@ -2008,7 +2258,7 @@
   function normalizeSymbol(value) {
     var clean = String(value || 'BTCUSDT').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
     if (!clean.endsWith('USDT')) clean += 'USDT';
-    return clean || 'BTCUSDT';
+    return /^[A-Z0-9]{1,15}USDT$/.test(clean) ? clean : 'BTCUSDT';
   }
   var BOARD_FAIL_SKIP = 5, BOARD_FAIL_RETEST = 25;
   async function loadBoardAsset(symbol, ticker, premium, intervalChoice) {
@@ -2064,21 +2314,40 @@
     return Math.max(DERIVATIVES_REFRESH_MS * 3, unit * 2 * 60 * 1000);
   }
   function normalizeDerivativeDetail(oiHist, fundingRows, longShortRows, takerRows, topAccountRows, topPositionRows, basisRows) {
+    function orderedRows(rows) {
+      var byTime = new Map();
+      (Array.isArray(rows) ? rows : []).forEach(function (row) {
+        var raw = row && (row.timestamp || row.fundingTime || row.time || row.T);
+        var time = timestampMs(raw);
+        if (!row || !Number.isFinite(time) || time < 0 || time > Date.now() + AnalyticsCore.RULESET.clockSkewToleranceMs) return;
+        byTime.set(time, row);
+      });
+      return Array.from(byTime.entries()).sort(function (a, b) { return a[0] - b[0]; }).map(function (entry) { return entry[1]; });
+    }
+    oiHist = orderedRows(oiHist);
+    fundingRows = orderedRows(fundingRows);
+    longShortRows = orderedRows(longShortRows);
+    takerRows = orderedRows(takerRows);
+    topAccountRows = orderedRows(topAccountRows);
+    topPositionRows = orderedRows(topPositionRows);
+    basisRows = orderedRows(basisRows);
     // oiChangePct keeps its ORIGINAL 30-period window (the quadrant, trap flush threshold and
     // priceChangeOverWindow were all calibrated on it); the full 500-row series feeds ONLY the
     // percentile engine — mirroring how fundingAvg kept its 12-settlement meaning.
     var oiWindow = Array.isArray(oiHist) ? oiHist.slice(-30) : [];
     var oiChangePct = NaN, oiWindowStart = NaN, oiWindowEnd = NaN;
     if (oiWindow.length > 1) {
-      var firstOi = +oiWindow[0].sumOpenInterestValue || +oiWindow[0].sumOpenInterest || 0;
-      var lastOi = +oiWindow[oiWindow.length - 1].sumOpenInterestValue || +oiWindow[oiWindow.length - 1].sumOpenInterest || 0;
-      oiChangePct = firstOi ? ((lastOi - firstOi) / firstOi) * 100 : NaN;
-      oiWindowStart = +oiWindow[0].timestamp;
-      oiWindowEnd = +oiWindow[oiWindow.length - 1].timestamp;
+      var firstOi = finiteNumber(oiWindow[0].sumOpenInterestValue);
+      var lastOi = finiteNumber(oiWindow[oiWindow.length - 1].sumOpenInterestValue);
+      if (!Number.isFinite(firstOi)) firstOi = finiteNumber(oiWindow[0].sumOpenInterest);
+      if (!Number.isFinite(lastOi)) lastOi = finiteNumber(oiWindow[oiWindow.length - 1].sumOpenInterest);
+      oiChangePct = firstOi > 0 && lastOi > 0 ? ((lastOi - firstOi) / firstOi) * 100 : NaN;
+      oiWindowStart = timestampMs(oiWindow[0].timestamp);
+      oiWindowEnd = timestampMs(oiWindow[oiWindow.length - 1].timestamp);
     }
     var fundingAvg = NaN, fundingSeries = [];
     if (Array.isArray(fundingRows) && fundingRows.length) {
-      fundingSeries = fundingRows.map(function (row) { return +row.fundingRate; }).filter(Number.isFinite);
+      fundingSeries = fundingRows.map(function (row) { return finiteNumber(row && row.fundingRate); }).filter(Number.isFinite);
       // fundingAvg keeps its original 12-settlement (~4d) meaning; the full series feeds percentiles.
       fundingAvg = avg(fundingSeries.slice(-12));
     }
@@ -2102,10 +2371,10 @@
     var seriesOf = function (rows, selector) {
       return Array.isArray(rows) ? rows.map(selector).filter(Number.isFinite) : [];
     };
-    var oiSeries = seriesOf(oiHist, function (row) { return +row.sumOpenInterestValue || +row.sumOpenInterest; });
-    var longShortSeries = seriesOf(longShortRows, function (row) { return +row.longShortRatio; });
-    var takerSeries = seriesOf(takerRows, function (row) { return +row.buySellRatio; });
-    var topPositionSeries = seriesOf(topPositionRows, function (row) { return +row.longShortRatio; });
+    var oiSeries = seriesOf(oiHist, function (row) { var value = finiteNumber(row && row.sumOpenInterestValue); if (!Number.isFinite(value)) value = finiteNumber(row && row.sumOpenInterest); return value > 0 ? value : NaN; });
+    var longShortSeries = seriesOf(longShortRows, function (row) { var value = finiteNumber(row && row.longShortRatio); return value > 0 ? value : NaN; });
+    var takerSeries = seriesOf(takerRows, function (row) { var value = finiteNumber(row && row.buySellRatio); return value > 0 ? value : NaN; });
+    var topPositionSeries = seriesOf(topPositionRows, function (row) { var value = finiteNumber(row && row.longShortRatio); return value > 0 ? value : NaN; });
     // Funding: ranks the ROLLING 12-settlement average within the series of rolling averages —
     // the same quantity the fallback threshold reads (fundingAvg), far less noisy than ranking a
     // single settlement, and immune to the "last print" jitter.
@@ -2132,16 +2401,25 @@
       oiWindowEnd: Number.isFinite(oiWindowEnd) ? oiWindowEnd : NaN,
       percentiles: percentiles,
       fundingAvg: fundingAvg,
-      longShortRatio: latestLongShort ? +latestLongShort.longShortRatio : NaN,
-      longAccount: latestLongShort ? +latestLongShort.longAccount : NaN,
-      shortAccount: latestLongShort ? +latestLongShort.shortAccount : NaN,
-      takerRatio: latestTaker ? +latestTaker.buySellRatio : NaN,
-      takerBuyVol: latestTaker ? +latestTaker.buyVol : NaN,
-      takerSellVol: latestTaker ? +latestTaker.sellVol : NaN,
-      topAccountRatio: latestTopAccount ? +latestTopAccount.longShortRatio : NaN,
-      topPositionRatio: latestTopPosition ? +latestTopPosition.longShortRatio : NaN,
-      basisRate: latestBasis ? +latestBasis.basisRate : NaN,
+      longShortRatio: (function () { var value = finiteNumber(latestLongShort && latestLongShort.longShortRatio); return value > 0 ? value : NaN; })(),
+      longAccount: finiteNumber(latestLongShort && latestLongShort.longAccount),
+      shortAccount: finiteNumber(latestLongShort && latestLongShort.shortAccount),
+      takerRatio: (function () { var value = finiteNumber(latestTaker && latestTaker.buySellRatio); return value > 0 ? value : NaN; })(),
+      takerBuyVol: (function () { var value = finiteNumber(latestTaker && latestTaker.buyVol); return value >= 0 ? value : NaN; })(),
+      takerSellVol: (function () { var value = finiteNumber(latestTaker && latestTaker.sellVol); return value >= 0 ? value : NaN; })(),
+      topAccountRatio: (function () { var value = finiteNumber(latestTopAccount && latestTopAccount.longShortRatio); return value > 0 ? value : NaN; })(),
+      topPositionRatio: (function () { var value = finiteNumber(latestTopPosition && latestTopPosition.longShortRatio); return value > 0 ? value : NaN; })(),
+      basisRate: finiteNumber(latestBasis && latestBasis.basisRate),
       metricObservedAt: metricObservedAt,
+      sourceRows: {
+        openInterestHistory: oiHist,
+        fundingHistory: fundingRows,
+        globalLongShortHistory: longShortRows,
+        takerLongShortHistory: takerRows,
+        topAccountHistory: topAccountRows,
+        topPositionHistory: topPositionRows,
+        basisHistory: basisRows
+      },
       observedAt: observedTimes.length ? Math.max.apply(null, observedTimes) : NaN
     };
   }
@@ -2198,14 +2476,47 @@
       topPositionRatio: staleAfterMs,
       basisRate: staleAfterMs
     };
+    // A partial seven-source refresh must not erase a still-fresh metric from the previous
+    // snapshot. Preserve each field independently, with its original observation timestamp.
+    if (cached && cached.value) {
+      var prior = cached.value;
+      var companions = {
+        oiChangePct: ['oiWindowStart', 'oiWindowEnd'],
+        longShortRatio: ['longAccount', 'shortAccount'],
+        takerRatio: ['takerBuyVol', 'takerSellVol']
+      };
+      var rawSeriesKeys = {
+        oiChangePct: 'openInterestHistory',
+        fundingAvg: 'fundingHistory',
+        longShortRatio: 'globalLongShortHistory',
+        takerRatio: 'takerLongShortHistory',
+        topAccountRatio: 'topAccountHistory',
+        topPositionRatio: 'topPositionHistory',
+        basisRate: 'basisHistory'
+      };
+      var percentileKeys = { oiChangePct: 'oi', fundingAvg: 'funding', longShortRatio: 'longShort', takerRatio: 'taker', topPositionRatio: 'topPosition' };
+      Object.keys(detail.metricStaleAfterMs).forEach(function (metric) {
+        var currentFresh = Number.isFinite(detail[metric]) && AnalyticsCore.classifyFreshness(detail.metricObservedAt[metric], detail.metricStaleAfterMs[metric], Date.now()).eligibleForScore;
+        var priorTtl = prior.metricStaleAfterMs && prior.metricStaleAfterMs[metric] || detail.metricStaleAfterMs[metric];
+        var priorFresh = Number.isFinite(prior[metric]) && AnalyticsCore.classifyFreshness(prior.metricObservedAt && prior.metricObservedAt[metric], priorTtl, Date.now()).eligibleForScore;
+        if (currentFresh || !priorFresh) return;
+        detail[metric] = prior[metric];
+        detail.metricObservedAt[metric] = prior.metricObservedAt[metric];
+        (companions[metric] || []).forEach(function (field) { detail[field] = prior[field]; });
+        var rawSeriesKey = rawSeriesKeys[metric];
+        if (rawSeriesKey && prior.sourceRows && prior.sourceRows[rawSeriesKey]) detail.sourceRows[rawSeriesKey] = prior.sourceRows[rawSeriesKey];
+        var percentileKey = percentileKeys[metric];
+        if (percentileKey && prior.percentiles) detail.percentiles[percentileKey] = prior.percentiles[percentileKey];
+      });
+      var mergedObservedTimes = Object.keys(detail.metricObservedAt).map(function (metric) { return detail.metricObservedAt[metric]; }).filter(Number.isFinite);
+      detail.observedAt = mergedObservedTimes.length ? Math.max.apply(null, mergedObservedTimes) : NaN;
+    }
     var markedDetail = markDataset(detail, detail.fetchedAt, staleAfterMs, Number.isFinite(detail.observedAt) ? 'fresh' : 'missing', detail.observedAt);
     if (!hasDerivativeData(markedDetail) && cached) return markDataset(cached.value, cached.fetchedAt, staleAfterMs);
     if (!hasDerivativeData(markedDetail)) return markedDetail;
     state.derivativeCache[key] = { value: detail, fetchedAt: detail.fetchedAt };
     return markedDetail;
   }
-  var INTERVAL_MS = { '1m': 60e3, '3m': 180e3, '5m': 300e3, '15m': 900e3, '30m': 1800e3, '1h': 3600e3, '2h': 7200e3, '4h': 14400e3, '6h': 21600e3, '8h': 28800e3, '12h': 43200e3, '1d': 86400e3, '3d': 259200e3, '1w': 604800e3, '1M': 2592000e3 };
-  function intervalToMs(interval) { return INTERVAL_MS[interval] || 300e3; }
   /**
    * Trap veto: after a confirmed trap, entries in the trapped direction stay blocked for
    * vetoBars candles of the CURRENT timeframe. Keyed by symbol+interval; expires by close time.
@@ -2214,24 +2525,17 @@
     if (!trap || !trap.trap || !Number.isFinite(lastCloseTime)) return;
     var key = symbol + ':' + interval;
     var direction = trap.vetoDirection === 'short' ? 'short' : 'long';
-    // A trap stays detectable while the sweep sits in the 5-bar lookback; re-registering on every
-    // refresh would slide the expiry to ~10-11 bars. An active same-direction veto keeps its
-    // original expiry; only a NEW direction (fresh opposite trap) replaces it.
-    var existing = state.trapVeto;
-    if (existing && existing.key === key && existing.direction === direction && lastCloseTime < existing.until) return;
-    state.trapVeto = { key: key, direction: direction, until: lastCloseTime + trap.vetoBars * intervalToMs(interval) };
+    state.trapVetos = AnalyticsCore.upsertTrapVeto(state.trapVetos, key, direction, lastCloseTime, trap.vetoBars, interval);
   }
   function activeTrapVeto(a) {
-    var veto = state.trapVeto;
-    if (!veto || veto.key !== state.symbol + ':' + state.interval) return null;
+    var key = state.symbol + ':' + state.interval;
     var reference = a && a.signalCandle && Number.isFinite(a.signalCandle.closeTime) ? a.signalCandle.closeTime : Date.now();
-    return reference < veto.until ? veto.direction : null;
+    return AnalyticsCore.activeTrapVeto(state.trapVetos, key, reference);
   }
   function trapVetoBarsLeft(a) {
-    var veto = state.trapVeto;
-    if (!veto) return 0;
+    var key = state.symbol + ':' + state.interval;
     var reference = a && a.signalCandle && Number.isFinite(a.signalCandle.closeTime) ? a.signalCandle.closeTime : Date.now();
-    return Math.max(0, Math.ceil((veto.until - reference) / intervalToMs(state.interval)));
+    return AnalyticsCore.trapVetoBarsLeft(state.trapVetos, key, reference, state.interval);
   }
   function liquidationBiasFor() {
     var summary = liquidationSummary();
@@ -2241,24 +2545,7 @@
     if (summary.shortValue > summary.longValue * 2) return 'buy';
     return null;
   }
-  // Price change over the OI history window, so OIxprice quadrants read both in the same window.
-  function priceChangeOverWindow(candles, startTs, endTs) {
-    if (!Array.isArray(candles) || candles.length < 2) return NaN;
-    var start = Number(startTs), end = Number(endTs);
-    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return NaN;
-    var startCandle = null, endCandle = null;
-    for (var i = 0; i < candles.length; i++) {
-      var t = Number.isFinite(candles[i].closeTime) ? candles[i].closeTime : candles[i].time;
-      if (!Number.isFinite(t)) continue;
-      if (t <= start) startCandle = candles[i];
-      if (t <= end) endCandle = candles[i];
-    }
-    if (!startCandle) startCandle = candles[0];
-    if (!endCandle || endCandle === startCandle) return NaN;
-    if (!Number.isFinite(startCandle.close) || !startCandle.close) return NaN;
-    return (endCandle.close - startCandle.close) / startCandle.close * 100;
-  }
-  async function refreshSelected(ticker, premium, chain, force, symbol, interval, requestId) {
+  async function refreshSelected(ticker, premium, chain, force, symbol, interval, requestId, contextPromise) {
     var s = encodeURIComponent(symbol);
     var p = futuresPeriod(interval);
     var results = await Promise.allSettled([
@@ -2270,7 +2557,8 @@
       loadDerivativeDetail(symbol, p, !!force),
       loadCoinMetrics(symbol, false),
       loadOptions(symbol, !!force),
-      loadInstitutional(symbol, !!force)
+      loadInstitutional(symbol, !!force),
+      loadMicrostructure(symbol, !!force)
     ]);
     if (!refreshGate.isCurrent(requestId)) return false;
     var candles = parseKlines(value(results[0])), closedCandles = selectClosedCandles(candles);
@@ -2278,18 +2566,20 @@
     var coinMetrics = value(results[6]);
     var options = value(results[7]);
     var institutional = value(results[8]);
+    var microstructure = value(results[9]);
     var chainAdjustment = 0;
     if (eligibleDataset(coinMetrics)) {
       chainAdjustment += coinMetrics.score;
       var flow = coinMetrics.exchangeFlow, market = eligibleDataset(state.external.marketData) ? selectedMarket(symbol) : null;
-      if (flow && market && Number.isFinite(flow.netflow7d) && Number.isFinite(+market.market_cap) && +market.market_cap > 0) {
-        var flowPct = flow.netflow7d / +market.market_cap * 100;
+      var selectedMarketCap = finiteNumber(market && market.market_cap);
+      if (flow && Number.isFinite(flow.netflow7d) && Number.isFinite(selectedMarketCap) && selectedMarketCap > 0) {
+        var flowPct = flow.netflow7d / selectedMarketCap * 100;
         chainAdjustment += flowPct > 0.1 ? -2 : flowPct < -0.1 ? 2 : 0;
       }
     }
-    var analysis = mergeSelected(symbol, closedCandles, value(results[3]), value(results[1]), value(results[4]), value(results[2]), chain || {}, chainAdjustment);
+    var analysis = mergeSelected(symbol, interval, closedCandles, value(results[3]), value(results[1]), value(results[4]), value(results[2]), chain || {}, chainAdjustment);
     analysis.derivativeDetail = value(results[5]) || {};
-    analysis.oiPriceChangePct = priceChangeOverWindow(closedCandles, analysis.derivativeDetail.oiWindowStart, analysis.derivativeDetail.oiWindowEnd);
+    analysis.oiPriceChangePct = AnalyticsCore.priceChangeOverWindow(closedCandles, analysis.derivativeDetail.oiWindowStart, analysis.derivativeDetail.oiWindowEnd);
     // Trap engine: sweep+reclaim+flip de delta com confirmacao de OI/liquidacao; registra veto.
     analysis.trap = AnalyticsCore.detectTrap(closedCandles, {
       atr: analysis.atr14,
@@ -2302,6 +2592,7 @@
     analysis.coinMetrics = coinMetrics;
     analysis.options = options;
     analysis.institutional = institutional;
+    analysis.microstructure = microstructure;
     analysis.signalCandle = last(closedCandles);
     analysis.liveCandle = last(candles) || analysis.signalCandle;
     analysis.liveClose = analysis.liveCandle.close;
@@ -2318,27 +2609,36 @@
     state.optionsFetchedAt = options ? Date.now() : state.optionsFetchedAt;
     state.institutional = institutional;
     state.institutionalFetchedAt = institutional ? Date.now() : state.institutionalFetchedAt;
+    state.microstructure = microstructure;
     state.mtf = mtf;
     stampAnalysisSnapshot(analysis, 'selected-refresh', { symbol: symbol, interval: interval, requestId: requestId, signalCloseTime: analysis.signalCandle.closeTime });
     render(value(results[3]), value(results[4]), value(results[2]), chain || {}, value(results[1]));
-    maybeRecordSignal(analysis, confluenceFor(analysis));
-    runSignalMachine(analysis);
-    processAlerts(analysis, confluenceFor(analysis));
     connectLiquidationStream(symbol);
-    ensureHistoricalProfile(symbol, true).then(function (profile) {
-      if (!profile || !refreshGate.isCurrent(requestId) || state.symbol !== symbol || state.interval !== interval || state.analysis !== analysis) return;
-      attachHistory(analysis, profile);
-      renderHistoricalProfile(analysis);
-      renderConfluence(analysis);
-      renderWrittenAnalysis(analysis);
-      updateScore(analysis);
+    // Journal, alerts and the state machine consume one stabilized closed-candle decision.
+    // The UI can paint immediately, but evidence waits until the initial context/history attempts
+    // settle so the first partial render cannot become the immutable record for that candle.
+    Promise.allSettled([
+      ensureHistoricalProfile(symbol, true),
+      contextPromise || Promise.resolve(state.external)
+    ]).then(function (decisionInputs) {
+      if (!refreshGate.isCurrent(requestId) || state.symbol !== symbol || state.interval !== interval || state.analysis !== analysis) return;
+      var profile = value(decisionInputs[0]);
+      if (profile) attachHistory(analysis, profile);
+      applyExternalToAnalysis(symbol, analysis);
+      stampAnalysisSnapshot(analysis, 'decision-ready');
+      render(value(results[3]), value(results[4]), value(results[2]), chain || {}, value(results[1]));
+      var stabilizedConfluence = confluenceFor(analysis);
+      maybeRecordSignal(analysis, stabilizedConfluence);
+      runSignalMachine(analysis);
+      processAlerts(analysis, stabilizedConfluence);
     });
     return true;
   }
   function sortedBoard() {
     var rows = state.board.slice();
-    if (state.sort === 'change') rows.sort(function (a, b) { return (+((b.ticker || {}).priceChangePercent || 0)) - (+((a.ticker || {}).priceChangePercent || 0)); });
-    else if (state.sort === 'volume') rows.sort(function (a, b) { return (+((b.ticker || {}).quoteVolume || 0)) - (+((a.ticker || {}).quoteVolume || 0)); });
+    function sortableTicker(item, key) { var value = finiteNumber((item.ticker || {})[key]); return Number.isFinite(value) ? value : -Infinity; }
+    if (state.sort === 'change') rows.sort(function (a, b) { return sortableTicker(b, 'priceChangePercent') - sortableTicker(a, 'priceChangePercent'); });
+    else if (state.sort === 'volume') rows.sort(function (a, b) { return sortableTicker(b, 'quoteVolume') - sortableTicker(a, 'quoteVolume'); });
     else rows.sort(function (a, b) { return sortableScore(b.analysis) - sortableScore(a.analysis); });
     return rows;
   }
@@ -2353,14 +2653,20 @@
     var bears = rows.filter(function (x) { return x.analysis.bias === 'Vendedor'; }).length;
     var renderedInterval = state.boardInterval || (rows[0] && rows[0].interval) || state.interval;
     var boardOutdated = renderedInterval !== state.interval;
-    var summary = bulls + ' compradores, ' + bears + ' vendedores, ' + (rows.length - bulls - bears) + ' neutros em ' + intervalLabel(renderedInterval) + '. ';
+    var neutralCount = rows.length - bulls - bears;
+    var summary = counted(bulls, 'comprador', 'compradores') + ', ' + counted(bears, 'vendedor', 'vendedores') + ', ' + counted(neutralCount, 'neutro', 'neutros') + ' em ' + intervalLabel(renderedInterval) + '. ';
     if (boardOutdated || state.boardPendingRefresh) summary += 'Leitura anterior mantida; atualizando para ' + intervalLabel(state.interval) + '. ';
     var stalled = stalledBoardSymbols();
-    if (stalled.length) summary += stalled.length + ' ativo(s) indisponivel(is) (' + stalled.map(baseAsset).join(', ') + '), possivel delist; re-teste periodico. ';
+    if (stalled.length) summary += counted(stalled.length, 'ativo indisponivel', 'ativos indisponiveis') + ' (' + stalled.map(baseAsset).join(', ') + '), possivel delist; re-teste periodico. ';
     text('boardSummary', summary + 'Radar Score preview: tecnica em candles fechados e contexto do snapshot atual.');
     rows.forEach(function (item) {
       var a = item.analysis, t = item.ticker || {};
+      var change24h = finiteNumber(t.priceChangePercent);
       var market = eligibleDataset(state.external.marketData) && state.external.coinMarkets ? state.external.coinMarkets[contextFor(item.symbol).gecko] : null;
+      var marketRank = finiteNumber(market && market.market_cap_rank);
+      var marketCap = finiteNumber(market && market.market_cap);
+      var market7d = finiteNumber(market && market.price_change_percentage_7d_in_currency);
+      var market30d = finiteNumber(market && market.price_change_percentage_30d_in_currency);
       var chain = findChainContext(item.symbol);
       var protocol = findProtocolContext(item.symbol);
       var contextName = protocol ? protocol.name : chain ? chain.name : (contextFor(item.symbol).kind || 'Global');
@@ -2369,15 +2675,15 @@
       card.className = 'asset-card' + (item.symbol === state.symbol ? ' active' : '');
       card.type = 'button'; card.dataset.symbol = item.symbol; card.dataset.interval = item.interval || renderedInterval;
       card.innerHTML = '<div class="asset-top"><div><span class="asset-symbol">' + baseAsset(item.symbol) + '</span><small>' + (ASSET_NAMES[item.symbol] || item.symbol) + '</small></div><div><span class="asset-score ' + scoreClass(a.bias) + '" title="Radar Score preview ' + MODEL_VERSION + '">' + (Number.isFinite(a.score) ? a.score : '--') + '</span><span class="radar-confidence">DC preview ' + (a.radar ? a.radar.dataConfidence : 0) + '%</span></div></div>' +
-        '<div class="asset-row"><div><span>Preco</span><strong>' + money(a.close) + '</strong></div><div><span>24h</span><strong class="' + ((+t.priceChangePercent || 0) >= 0 ? 'up' : 'down') + '">' + percent(+t.priceChangePercent) + '</strong></div></div>' +
+        '<div class="asset-row"><div><span>Preco</span><strong class="asset-price">' + money(a.close) + '</strong></div><div><span>24h</span><strong class="' + (Number.isFinite(change24h) ? (change24h >= 0 ? 'up' : 'down') : '') + '">' + percent(change24h) + '</strong></div></div>' +
         sparkline(item.candles) +
-        '<div class="asset-meta"><div><span>Bias</span><strong>' + a.bias + '</strong></div><div><span>RSI/MFI</span><strong>' + num(a.rsi14, 0) + ' / ' + num(a.mfi14, 0) + '</strong></div><div><span>Rank/MCap</span><strong>' + (market && Number.isFinite(+market.market_cap_rank) ? '#' + (+market.market_cap_rank) + ' ' + compactUsd(+market.market_cap) : '--') + '</strong></div><div><span>7d/30d</span><strong>' + (market ? percent(+market.price_change_percentage_7d_in_currency, 1) + ' / ' + percent(+market.price_change_percentage_30d_in_currency, 1) : '--') + '</strong></div><div><span>Funding</span><strong>' + (Number.isFinite(a.funding) ? percent(a.funding * 100, 4) : '--') + '</strong></div><div><span>Contexto</span><strong>' + signed(contextScore) + '</strong></div><div><span>Historico</span><strong>' + (historyFresh(a.history) ? signed(a.history.score) + ' | ' + a.history.samples + ' amostras' : a.history ? 'stale | fora do score' : 'carregando') + '</strong></div><div><span>Regime</span><strong>' + escapeHTML(a.regime || '--') + '</strong></div></div>' +
+        '<div class="asset-meta"><div><span>Bias</span><strong>' + a.bias + '</strong></div><div><span>RSI/MFI</span><strong>' + num(a.rsi14, 0) + ' / ' + num(a.mfi14, 0) + '</strong></div><div><span>Rank/MCap</span><strong>' + (Number.isFinite(marketRank) ? '#' + marketRank + ' ' + compactUsd(marketCap) : '--') + '</strong></div><div><span>7d/30d</span><strong>' + (Number.isFinite(market7d) || Number.isFinite(market30d) ? percent(market7d, 1) + ' / ' + percent(market30d, 1) : '--') + '</strong></div><div><span>Funding</span><strong>' + (Number.isFinite(a.funding) ? percent(a.funding * 100, 4) : '--') + '</strong></div><div><span>Contexto</span><strong>' + signed(contextScore) + '</strong></div><div><span>Historico</span><strong>' + (historyFresh(a.history) ? signed(a.history.score) + ' | ' + a.history.samples + ' amostras' : a.history ? 'stale | fora do score' : 'carregando') + '</strong></div><div><span>Regime</span><strong>' + escapeHTML(a.regime || '--') + '</strong></div></div>' +
         '<div class="asset-context"><span>' + escapeHTML(contextName) + '</span><strong>' + (a.supports[0] ? money(a.supports[0]) : '--') + ' / ' + (a.resistances[0] ? money(a.resistances[0]) : '--') + '</strong></div>';
       grid.appendChild(card);
     });
     renderOverviewDashboard();
   }
-  // Light per-tick board update: the 24-card grid only changes on board refresh (15s), sort or
+  // Light per-tick board update: the 24-card grid only changes on board refresh (60s), sort or
   // interval change, so the 3s pass just moves the active highlight and shows the live price on the
   // selected card instead of rebuilding every card + recomputing 24 radars.
   function updateSelectedBoardCard(livePrice) {
@@ -2388,7 +2694,7 @@
       var isActive = card.dataset.symbol === state.symbol;
       card.classList.toggle('active', isActive);
       if (isActive && Number.isFinite(livePrice)) {
-        var priceEl = card.querySelector('.asset-row strong');
+        var priceEl = card.querySelector('.asset-price');
         if (priceEl) priceEl.textContent = money(livePrice);
       }
     }
@@ -2403,27 +2709,34 @@
   }
   function render(ticker, premium, oi, chain, depth) {
     var a = state.analysis;
-    var change = ticker ? +ticker.priceChangePercent : NaN;
+    var change = finiteNumber(ticker && ticker.priceChangePercent);
     text('chartTitle', 'Price Action ' + state.symbol + ' | ' + intervalLabel(state.interval) + ' | grafico ao vivo');
-    var livePrice = ticker && Number.isFinite(+ticker.lastPrice) ? +ticker.lastPrice : (Number.isFinite(a.liveClose) ? a.liveClose : a.close);
+    var tickerLastPrice = finiteNumber(ticker && ticker.lastPrice);
+    var livePrice = Number.isFinite(tickerLastPrice) ? tickerLastPrice : (Number.isFinite(a.liveClose) ? a.liveClose : a.close);
     text('lastPrice', money(livePrice));
     text('priceChange', percent(change) + ' 24h');
-    $('priceChange').className = change >= 0 ? 'up' : 'down';
-    text('dayRange', ticker ? money(+ticker.lowPrice) + ' / ' + money(+ticker.highPrice) : '--');
-    text('weightedAvg', ticker ? 'VWAP 24h ' + money(+ticker.weightedAvgPrice) : '--');
+    $('priceChange').className = Number.isFinite(change) ? (change >= 0 ? 'up' : 'down') : '';
+    text('dayRange', ticker ? money(finiteNumber(ticker.lowPrice)) + ' / ' + money(finiteNumber(ticker.highPrice)) : '--');
+    text('weightedAvg', ticker ? 'VWAP 24h ' + money(finiteNumber(ticker.weightedAvgPrice)) : '--');
     text('fundingRate', Number.isFinite(a.funding) ? percent(a.funding * 100, 4) : '--');
-    text('nextFunding', premium && premium.nextFundingTime ? 'Prox. ' + new Date(+premium.nextFundingTime).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '--');
-    text('openInterest', oi && oi.openInterest ? num(+oi.openInterest, 2) : '--');
+    var nextFundingTime = finiteNumber(premium && premium.nextFundingTime);
+    text('nextFunding', Number.isFinite(nextFundingTime) ? 'Prox. ' + new Date(nextFundingTime).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '--');
+    text('openInterest', Number.isFinite(finiteNumber(oi && oi.openInterest)) ? num(finiteNumber(oi.openInterest), 2) : '--');
     text('basisLine', Number.isFinite(a.basis) ? 'Mark-Index ' + money(a.basis) : '--');
-    text('mempoolLine', a.coinMetrics && a.coinMetrics.latest ? compactNumber(metricNumber(a.coinMetrics.latest, 'AdrActCnt')) + ' end. ativos' : chain && chain.mempool ? fmt0.format(chain.mempool.count || 0) + ' tx BTC' + (state.symbol === 'BTCUSDT' ? '' : ' | proxy') : '--');
-    text('feeLine', a.coinMetrics ? 'rede 7d: end. ' + percent(a.coinMetrics.adr7, 1) + ' | tx ' + percent(a.coinMetrics.tx7, 1) : chain && chain.fees ? 'fee BTC ' + chain.fees.fastestFee + '/' + chain.fees.hourFee + ' sat/vB' + (state.symbol === 'BTCUSDT' ? '' : ' | proxy fora do score') : '--');
+    var mempoolCount = finiteNumber(chain && chain.mempool && chain.mempool.count);
+    text('mempoolLine', a.coinMetrics && a.coinMetrics.latest ? compactNumber(metricNumber(a.coinMetrics.latest, 'AdrActCnt')) + ' end. ativos' : Number.isFinite(mempoolCount) ? fmt0.format(mempoolCount) + ' tx BTC' + (state.symbol === 'BTCUSDT' ? '' : ' | proxy') : '--');
+    var fastFee = finiteNumber(chain && chain.fees && chain.fees.fastestFee), hourFee = finiteNumber(chain && chain.fees && chain.fees.hourFee);
+    var feeFallback = Number.isFinite(fastFee) || Number.isFinite(hourFee) ? 'fee BTC ' + (Number.isFinite(fastFee) ? num(fastFee, 0) : '--') + '/' + (Number.isFinite(hourFee) ? num(hourFee, 0) : '--') + ' sat/vB' + (state.symbol === 'BTCUSDT' ? '' : ' | proxy fora do score') : '--';
+    text('feeLine', a.coinMetrics ? 'rede 7d: end. ' + percent(a.coinMetrics.adr7, 1) + ' | tx ' + percent(a.coinMetrics.tx7, 1) : feeFallback);
     text('supportLevels', a.supports.length ? a.supports.map(money).join('  ') : '--');
     text('resistanceLevels', a.resistances.length ? a.resistances.map(money).join('  ') : '--');
     var upTrigger = a.resistances[0], downTrigger = a.supports[0];
-    text('triggerLine', (upTrigger ? 'Alta > ' + money(upTrigger) : '') + (downTrigger ? ' | Baixa < ' + money(downTrigger) : ''));
+    var triggerText = (upTrigger ? 'Alta > ' + money(upTrigger) : '') + (downTrigger ? (upTrigger ? ' | ' : '') + 'Baixa < ' + money(downTrigger) : '');
+    text('triggerLine', triggerText || '--');
     var sweep = a.sweepDown ? 'Sweep de baixa absorvido' : a.sweepUp ? 'Sweep de topo rejeitado' : 'Sem sweep relevante';
     var shiftLabel = a.structureShift && a.structureShift.event ? ' | ' + a.structureShift.event + ' ' + (a.structureShift.direction === 'bull' ? 'altista' : 'baixista') + ' em ' + money(a.structureShift.brokenLevel) : '';
-    text('structureLine', a.structure + shiftLabel + ' | ' + sweep + ' | fechamento confirmado ' + money(a.close) + ' ' + (a.close > a.vwap ? 'acima' : 'abaixo') + ' do VWAP' + (a.hasOpenCandle ? ' | atual ' + money(livePrice) + ' em formacao' : ''));
+    var vwapState = Number.isFinite(a.vwap) ? (a.close > a.vwap ? 'acima' : 'abaixo') + ' do VWAP' : 'VWAP indisponivel';
+    text('structureLine', a.structure + shiftLabel + ' | ' + sweep + ' | fechamento confirmado ' + money(a.close) + ' ' + vwapState + (a.hasOpenCandle ? ' | atual ' + money(livePrice) + ' em formacao' : ''));
     text('ema9', money(a.ema9));
     text('ema21', money(a.ema21));
     text('ema50', money(a.ema50));
@@ -2437,9 +2750,9 @@
     text('vwapLine', money(a.vwap));
     text('volumeRatio', Number.isFinite(a.avgVol) && a.avgVol ? num(a.lastVol / a.avgVol, 2) + 'x' : '--');
     var divergenceLabel = a.divergence && a.divergence.bearish ? ' | divergencia bearish (maturidade de tendencia)' : a.divergence && a.divergence.bullish ? ' | divergencia bullish (maturidade de tendencia)' : '';
-    text('rsiState', (a.rsi14 >= 70 ? 'Sobrecompra' : a.rsi14 <= 30 ? 'Sobrevenda' : 'Neutro') + divergenceLabel);
-    text('macdState', a.macd.hist > 0 ? 'Acima do sinal' : 'Abaixo do sinal');
-    text('volumeState', Number.isFinite(a.avgVol) && a.lastVol > a.avgVol * 1.35 ? 'Volume alto' : 'Normal');
+    text('rsiState', (Number.isFinite(a.rsi14) ? (a.rsi14 >= 70 ? 'Sobrecompra' : a.rsi14 <= 30 ? 'Sobrevenda' : 'Neutro') : 'Indisponivel') + divergenceLabel);
+    text('macdState', Number.isFinite(a.macd.hist) ? (a.macd.hist > 0 ? 'Acima do sinal' : 'Abaixo do sinal') : 'Indisponivel');
+    text('volumeState', Number.isFinite(a.avgVol) && Number.isFinite(a.lastVol) ? (a.lastVol > a.avgVol * 1.35 ? 'Volume alto' : 'Normal') : 'Indisponivel');
     updateScore(a); updateBook(a); updateChain(chain); renderCoinMetrics(a); renderExternalContext(a); renderAdvancedIndicators(a); renderSetupQuality(a); renderLiquidity(a); renderDerivativesDetails(a); renderMultiTimeframe(a); renderHistoricalProfile(a); renderSmartMoney(a); renderConfluence(a); renderWrittenAnalysis(a); renderHistoricalLab(a); renderFuturesConsole(a); renderLiquidations(); renderOptions(); renderExchangeFlows(a); renderInstitutional(); renderMacroFlow(a); renderCorrelation(a); calculatePosition(); drawPriceChart(); drawRsiChart(); drawMacdChart(); drawVolumeChart(); drawFlowChart(); updateSelectedBoardCard(livePrice);
     renderSnapshotStamp(a);
     document.title = state.symbol + ' ' + money(a.close);
@@ -2450,29 +2763,34 @@
     var gauge = $('scoreGauge'); gauge.className = 'score-gauge ' + (c.tone === 'long' ? 'bull' : c.tone === 'avoid' ? 'bear' : 'neutral');
     text('trendSignal', a.trendScore > 10 ? 'Alta' : a.trendScore < -10 ? 'Baixa' : 'Misto');
     text('momentumSignal', a.momScore > 8 ? 'Forte' : a.momScore < -8 ? 'Fraco' : 'Neutro');
-    text('volumeSignal', a.flowScore > 8 ? 'Compra' : a.flowScore < -8 ? 'Venda' : 'Equilibrio');
-    text('bookSignal', a.bookScore > 0 ? 'Bid domina' : a.bookScore < 0 ? 'Ask domina' : 'Balanceado');
+    text('volumeSignal', a.flowAvailable ? (a.flowScore > 8 ? 'Compra' : a.flowScore < -8 ? 'Venda' : 'Equilibrio') : 'Sem leitura');
+    var bookAvailable = Number.isFinite(a.spreadBps) && Number.isFinite(a.bidQty) && Number.isFinite(a.askQty) && (a.bidQty + a.askQty) > 0;
+    text('bookSignal', bookAvailable ? (a.bookScore > 0 ? 'Bid domina' : a.bookScore < 0 ? 'Ask domina' : 'Balanceado') : 'Sem leitura');
     text('derivativesSignal', hasDerivativeData(a.derivativeDetail) ? (a.derivScore > 0 ? 'Leve apoio' : a.derivScore < 0 ? 'Cautela' : 'Neutro') : 'Sem leitura');
-    var activeChainScore = eligibleDataset(a.coinMetrics) ? a.chainScore : (Number.isFinite(a.nativeChainScore) ? a.nativeChainScore : 0);
-    text('chainSignal', activeChainScore > 0 ? 'Atividade apoia' : activeChainScore < 0 ? 'Atividade enfraquece' : 'Neutro');
-    text('sentimentSignal', c.external.sentiment > 2 ? 'Apoia risco' : c.external.sentiment < -2 ? 'Pressiona' : 'Neutro');
-    text('externalSignal', c.external.total > 6 ? 'Favoravel' : c.external.total < -6 ? 'Contra' : 'Misto');
+    var chainAvailable = eligibleDataset(a.coinMetrics) || !!(a.mempoolContext && a.mempoolContext.eligibleForScore);
+    var activeChainScore = eligibleDataset(a.coinMetrics) ? a.chainScore : a.nativeChainScore;
+    text('chainSignal', chainAvailable ? (activeChainScore > 0 ? 'Atividade apoia' : activeChainScore < 0 ? 'Atividade enfraquece' : 'Neutro') : 'Sem leitura');
+    text('sentimentSignal', eligibleDataset(c.external) ? (c.external.sentiment > 2 ? 'Apoia risco' : c.external.sentiment < -2 ? 'Pressiona' : 'Neutro') : 'Sem leitura');
+    text('externalSignal', eligibleDataset(c.external) ? (c.external.total > 6 ? 'Favoravel' : c.external.total < -6 ? 'Contra' : 'Misto') : 'Sem leitura');
     var top = a.resistances[0], base = a.supports[0];
     var plan = buildTradePlan(a);
-    text('playbookText', plan.side + ': ' + plan.levels.map(function (level) { return level.label + ' ' + level.value; }).join(' | ') + '.');
+    text('playbookText', plan.levels.length ? plan.side + ': ' + plan.levels.map(function (level) { return level.label + ' ' + level.value; }).join(' | ') + '.' : plan.rationale);
   }
   function updateBook(a) {
     var total = (a.bidQty || 0) + (a.askQty || 0);
-    var bidPct = total ? clamp((a.bidQty / total) * 100, 5, 95) : 50;
-    $('bidBar').style.width = bidPct + '%'; $('askBar').style.width = (100 - bidPct) + '%';
-    text('bidDepth', 'Bid ' + num(a.bidQty, 3) + ' ' + baseAsset(state.symbol)); text('askDepth', 'Ask ' + num(a.askQty, 3) + ' ' + baseAsset(state.symbol));
-    text('spreadLine', 'Spread ' + money(a.spread) + ' | Imbalance ' + percent((a.bookImb || 0) * 100, 1));
+    var bidPct = total ? clamp((a.bidQty / total) * 100, 5, 95) : 0;
+    var askPct = total ? 100 - bidPct : 0;
+    $('bidBar').style.width = bidPct + '%'; $('askBar').style.width = askPct + '%';
+    text('bidDepth', total ? 'Bid ' + num(a.bidQty, 3) + ' ' + baseAsset(state.symbol) : 'Bid --'); text('askDepth', total ? 'Ask ' + num(a.askQty, 3) + ' ' + baseAsset(state.symbol) : 'Ask --');
+    text('spreadLine', total && Number.isFinite(a.spread) && Number.isFinite(a.bookImb) ? 'Spread ' + money(a.spread) + ' | Imbalance ' + percent(a.bookImb * 100, 1) : 'Livro indisponivel');
   }
   function updateChain(chain) {
-    text('blockHeight', chain && chain.height ? fmt0.format(chain.height) : '--');
-    text('mempoolTx', chain && chain.mempool ? fmt0.format(chain.mempool.count || 0) : '--');
-    text('fastFee', chain && chain.fees ? chain.fees.fastestFee + ' sat/vB' : '--');
-    text('lowFee', chain && chain.fees ? chain.fees.minimumFee + ' sat/vB' : '--');
+    var height = finiteNumber(chain && chain.height), mempoolCount = finiteNumber(chain && chain.mempool && chain.mempool.count);
+    var fastestFee = finiteNumber(chain && chain.fees && chain.fees.fastestFee), minimumFee = finiteNumber(chain && chain.fees && chain.fees.minimumFee);
+    text('blockHeight', Number.isFinite(height) && height > 0 ? fmt0.format(height) : '--');
+    text('mempoolTx', Number.isFinite(mempoolCount) && mempoolCount >= 0 ? fmt0.format(mempoolCount) : '--');
+    text('fastFee', Number.isFinite(fastestFee) && fastestFee >= 0 ? num(fastestFee, 0) + ' sat/vB' : '--');
+    text('lowFee', Number.isFinite(minimumFee) && minimumFee >= 0 ? num(minimumFee, 0) + ' sat/vB' : '--');
   }
   function renderCoinMetrics(a) {
     var metrics = a.coinMetrics;
@@ -2501,13 +2819,15 @@
   }
   function renderMultiTimeframe() {
     var mtf = state.mtf;
-    text('mtfAlignment', mtf ? mtf.bias + ' ' + Math.round(mtf.alignment * 100) + '%' : '--');
+    var availableIntervals = mtf && mtf.rows ? MTF_INTERVALS.filter(function (interval) { return mtf.rows.some(function (row) { return row.interval === interval; }); }) : [];
+    var missingIntervals = MTF_INTERVALS.filter(function (interval) { return availableIntervals.indexOf(interval) === -1; });
+    text('mtfAlignment', mtf ? mtf.bias + ' ' + Math.round(mtf.alignment * 100) + '% | ' + availableIntervals.length + '/' + MTF_INTERVALS.length + ' TF' : '--');
     var node = $('mtfMatrix');
     if (node) node.innerHTML = mtf && mtf.rows.length ? mtf.rows.map(function (row) {
       var cls = row.score >= 12 ? 'good' : row.score <= -12 ? 'bad' : '';
       return '<div class="mtf-cell ' + cls + '"><span>' + escapeHTML(intervalLabel(row.interval)) + '</span><strong>' + escapeHTML(row.bias) + ' ' + signed(row.score) + '</strong><small>RSI ' + num(row.rsi, 0) + ' | ADX ' + num(row.adx, 0) + '</small></div>';
     }).join('') : '<div class="mtf-cell"><span>Aguardando</span><strong>--</strong></div>';
-    text('mtfCaption', mtf ? mtf.positive + ' altas, ' + mtf.negative + ' baixas; peso maior para 4h, 1d e 1w.' : 'Carregando confirmacoes de tendencia.');
+    text('mtfCaption', mtf ? mtf.positive + ' altas, ' + mtf.negative + ' baixas; cobertura canonica ' + availableIntervals.length + '/' + MTF_INTERVALS.length + (missingIntervals.length ? ' (faltam ' + missingIntervals.map(intervalLabel).join(', ') + '; leitura degradada e gate HTF pode ficar indisponivel).' : '; 4h, 1d e 1w recebem maior peso.') : 'Carregando confirmacoes de tendencia.');
   }
   function renderHistoricalProfile(a) {
     var candidate = a.history || state.historyProfiles[state.symbol];
@@ -2560,36 +2880,39 @@
     text('globalRiskLine', 'Contexto ' + signed(externalScore.total));
     text('focusAssetKind', ctx.kind || 'Criptoativo');
     text('focusAssetName', (ASSET_NAMES[state.symbol] || baseAsset(state.symbol)) + ' / USDT');
-    text('focusRank', market && market.market_cap_rank ? '#' + market.market_cap_rank : '--');
+    var marketRank = finiteNumber(market && market.market_cap_rank);
+    text('focusRank', Number.isFinite(marketRank) ? '#' + marketRank : '--');
     text('focusNarrative', ctx.narrative || 'Ativo acompanhado por mercado, fluxo, noticias e contexto global.');
-    text('focusMarketCap', market ? compactUsd(+market.market_cap) : '--');
-    text('focusChange', market ? percent(+market.price_change_percentage_7d_in_currency, 2) + ' / ' + percent(+market.price_change_percentage_30d_in_currency, 2) : '--');
-    text('focusVolume', market ? compactUsd(+market.total_volume) : '--');
-    text('focusShortChange', market ? percent(+market.price_change_percentage_1h_in_currency, 2) + ' / ' + percent(+market.price_change_percentage_24h_in_currency, 2) : '--');
-    text('focusAth', market && Number.isFinite(+market.ath_change_percentage) ? percent(+market.ath_change_percentage, 1) : '--');
-    text('focusSupply', market ? compactNumber(+market.circulating_supply) + (market.max_supply ? ' / ' + compactNumber(+market.max_supply) : '') : '--');
+    text('focusMarketCap', market ? compactUsd(finiteNumber(market.market_cap)) : '--');
+    text('focusChange', market ? percent(finiteNumber(market.price_change_percentage_7d_in_currency), 2) + ' / ' + percent(finiteNumber(market.price_change_percentage_30d_in_currency), 2) : '--');
+    text('focusVolume', market ? compactUsd(finiteNumber(market.total_volume)) : '--');
+    text('focusShortChange', market ? percent(finiteNumber(market.price_change_percentage_1h_in_currency), 2) + ' / ' + percent(finiteNumber(market.price_change_percentage_24h_in_currency), 2) : '--');
+    var athChange = finiteNumber(market && market.ath_change_percentage);
+    text('focusAth', Number.isFinite(athChange) ? percent(athChange, 1) : '--');
+    var circulatingSupply = finiteNumber(market && market.circulating_supply), maxSupply = finiteNumber(market && market.max_supply);
+    text('focusSupply', market ? compactNumber(circulatingSupply) + (Number.isFinite(maxSupply) && maxSupply > 0 ? ' / ' + compactNumber(maxSupply) : '') : '--');
     text('focusChain', chain ? chain.name : (ctx.chain || '--'));
-    text('focusChainTvl', chain ? compactUsd(+chain.tvl) + ' TVL | 7d ' + (AnalyticsCore.toFiniteNumber(chain.change_7d) === null ? '--' : percent(+chain.change_7d, 2)) : 'Sem TVL direto');
+    text('focusChainTvl', chain ? compactUsd(finiteNumber(chain.tvl)) + ' TVL | 7d ' + (AnalyticsCore.toFiniteNumber(chain.change_7d) === null ? '--' : percent(finiteNumber(chain.change_7d), 2)) : 'Sem TVL direto');
     text('focusProtocol', protocol ? protocol.name : (ctx.protocol || '--'));
-    text('focusProtocolTvl', protocol ? compactUsd(+protocol.tvl) + ' TVL | 7d ' + (AnalyticsCore.toFiniteNumber(protocol.change_7d) === null ? '--' : percent(+protocol.change_7d, 2)) : 'Sem protocolo direto');
+    text('focusProtocolTvl', protocol ? compactUsd(finiteNumber(protocol.tvl)) + ' TVL | 7d ' + (AnalyticsCore.toFiniteNumber(protocol.change_7d) === null ? '--' : percent(finiteNumber(protocol.change_7d), 2)) : 'Sem protocolo direto');
     renderGlobalContext(ext);
     renderSourceHealth(ext);
   }
   function renderGlobalContext(ext) {
-    var global = eligibleDataset(ext.marketData) ? (ext.global || {}) : {};
+    var global = activeGlobalMarket(ext) || {};
     var paprika = ext.paprikaGlobal || {};
-    var totalMcap = global.total_market_cap && global.total_market_cap.usd ? +global.total_market_cap.usd : +paprika.market_cap_usd;
-    var totalVol = global.total_volume && global.total_volume.usd ? +global.total_volume.usd : +paprika.volume_24h_usd;
-    var globalChange = Number.isFinite(+global.market_cap_change_percentage_24h_usd) ? +global.market_cap_change_percentage_24h_usd : +paprika.market_cap_change_24h;
+    var totalMcap = firstFinite([global.total_market_cap && global.total_market_cap.usd, paprika.market_cap_usd]);
+    var totalVol = firstFinite([global.total_volume && global.total_volume.usd, paprika.volume_24h_usd]);
+    var globalChange = firstFinite([global.market_cap_change_percentage_24h_usd, paprika.market_cap_change_24h]);
     var btcDom = btcDominanceValue(ext);
     text('globalMarketCap', compactUsd(totalMcap));
     text('globalVolume', compactUsd(totalVol));
     text('btcDominance', Number.isFinite(btcDom) ? percent(btcDom, 2).replace('+', '') : '--');
-    text('defiTvl', compactUsd(+ext.defiTvl));
-    text('stablecoinCap', compactUsd(+ext.stablecoinCap));
-    text('dexVolume', compactUsd(+ext.dexVolume));
-    text('fees24h', compactUsd(+ext.fees24h));
-    text('defiPerpsOi', compactUsd(+ext.perpsOpenInterest));
+    text('defiTvl', compactUsd(finiteNumber(ext.defiTvl)));
+    text('stablecoinCap', compactUsd(finiteNumber(ext.stablecoinCap)));
+    text('dexVolume', compactUsd(finiteNumber(ext.dexVolume)));
+    text('fees24h', compactUsd(finiteNumber(ext.fees24h)));
+    text('defiPerpsOi', compactUsd(finiteNumber(ext.perpsOpenInterest)));
     var macroParts = activeMacroParts(ext.macro);
     var treasury = macroParts.treasury;
     var vix = macroParts.vix;
@@ -2730,15 +3053,16 @@
       else if (a.funding < -0.0001) { risk += 1; reasons.push({ tone: 'neutral', text: 'Funding negativo pode favorecer short squeeze, mas nao e gatilho isolado.' }); }
       else reasons.push({ tone: 'good', text: 'Funding sem excesso relevante.' });
     }
-    if (Number.isFinite(detail.oiChangePct)) {
-      if (detail.oiChangePct > 4 && a.roc12 < 0) { risk -= 3; reasons.push({ tone: 'bad', text: 'OI cresce com preco caindo: possivel formacao de shorts.' }); }
-      else if (detail.oiChangePct > 4 && a.roc12 > 0) { risk += 2; reasons.push({ tone: 'good', text: 'OI cresce com preco subindo: novos longs, com risco de liquidacao se perder suporte.' }); }
+    if (Number.isFinite(detail.oiChangePct) && Number.isFinite(a.oiPriceChangePct)) {
+      if (detail.oiChangePct > 4 && a.oiPriceChangePct < 0) { risk -= 3; reasons.push({ tone: 'bad', text: 'OI cresce com preco caindo na mesma janela: possivel formacao de shorts.' }); }
+      else if (detail.oiChangePct > 4 && a.oiPriceChangePct > 0) { risk += 2; reasons.push({ tone: 'good', text: 'OI cresce com preco subindo na mesma janela: novos longs, com risco de liquidacao se perder suporte.' }); }
       else reasons.push({ tone: 'neutral', text: 'OI sem expansao extrema no periodo.' });
     }
     if (Number.isFinite(detail.longShortRatio) && detail.longShortRatio > 1.7) { risk -= 2; reasons.push({ tone: 'bad', text: 'Long/short muito inclinado para long aumenta risco contrarian.' }); }
     if (Number.isFinite(detail.topPositionRatio) && detail.topPositionRatio > 1.7) { risk -= 2; reasons.push({ tone: 'bad', text: 'Posicoes dos top traders estao concentradas em long.' }); }
     text('futuresRegime', smart.oiPhase);
-    text('futuresOi', a.oi && Number.isFinite(+a.oi.openInterest) ? compactNumber(+a.oi.openInterest) + ' | ' + percent(detail.oiChangePct, 2) : '--');
+    var futuresOi = finiteNumber(a.oi && a.oi.openInterest);
+    text('futuresOi', Number.isFinite(futuresOi) ? compactNumber(futuresOi) + ' | ' + percent(detail.oiChangePct, 2) : '--');
     // percentiles vem do detail CRU (scoreableDerivativeDetail so copia as metricas pontuaveis).
     var rawPercentiles = a.derivativeDetail && a.derivativeDetail.percentiles ? a.derivativeDetail.percentiles : {};
     var carryInfo = AnalyticsCore.calculateCarryRegime({ fundingAvg: detail.fundingAvg, oiPercentile: rawPercentiles.oi });
@@ -2752,9 +3076,9 @@
     if (node) node.innerHTML = reasons.length ? reasons.map(function (item) { return '<div class="reason-item"><span class="reason-dot ' + (item.tone === 'good' ? 'good' : item.tone === 'bad' ? 'bad' : '') + '"></span><span>' + escapeHTML(item.text) + '</span></div>'; }).join('') : '<div class="reason-item"><span class="reason-dot"></span><span>Dados insuficientes para classificar o risco.</span></div>';
   }
   function liquidationSummary() {
-    var cutoffHour = Date.now() - 60 * 60 * 1000;
-    var rows = state.liquidations.filter(function (row) { return row.symbol === state.symbol && row.time >= cutoffHour; });
-    var cutoff15 = Date.now() - 15 * 60 * 1000;
+    var now = Date.now(), cutoffHour = now - 60 * 60 * 1000, futureLimit = now + AnalyticsCore.RULESET.clockSkewToleranceMs;
+    var rows = state.liquidations.filter(function (row) { return row.symbol === state.symbol && row.time >= cutoffHour && row.time <= futureLimit; });
+    var cutoff15 = now - 15 * 60 * 1000;
     var recent = rows.filter(function (row) { return row.time >= cutoff15; });
     var longValue = recent.filter(function (row) { return row.side === 'long'; }).reduce(function (sum, row) { return sum + row.notional; }, 0);
     var shortValue = recent.filter(function (row) { return row.side === 'short'; }).reduce(function (sum, row) { return sum + row.notional; }, 0);
@@ -2780,22 +3104,27 @@
   function formatGreeks(book) {
     var greeks = book && book.greeks;
     if (!greeks) return '--';
-    return 'D ' + num(+greeks.delta, 2) + ' | G ' + num(+greeks.gamma, 5) + ' | V ' + num(+greeks.vega, 2) + ' | T ' + num(+greeks.theta, 2);
+    return 'D ' + num(finiteNumber(greeks.delta), 2) + ' | G ' + num(finiteNumber(greeks.gamma), 5) + ' | V ' + num(finiteNumber(greeks.vega), 2) + ' | T ' + num(finiteNumber(greeks.theta), 2);
   }
   function renderOptions() {
     var data = state.options, nearest = data && data.nearest, market = data && data.market, dvol = data && data.dvol;
     text('optionsStatus', data ? data.currency + (data.isProxy ? ' proxy informativo | ' + datasetStatus(data) + ' | fora do Setup Score' : ' nativo | ' + datasetStatus(data) + (!eligibleDataset(data) ? ' | fora do score' : '')) : 'sem leitura');
     // toFiniteNumber: +null coage para 0 e o painel afirmaria "DVOL 0.00" quando o indice
     // simplesmente nao existe (caso SOL na Deribit).
-    text('dvolLine', dvol && AnalyticsCore.toFiniteNumber(dvol.latest) !== null ? num(+dvol.latest, 2) + ' | 7d ' + (AnalyticsCore.toFiniteNumber(dvol.change7d) !== null ? percent(+dvol.change7d, 1) : '--') : '--');
-    text('atmIvLine', nearest && Number.isFinite(+nearest.atmIv) ? num(+nearest.atmIv, 2) + '% @ ' + money(+nearest.atmStrike) : '--');
-    text('putCallOiLine', market && Number.isFinite(+market.putCallOi) ? num(+market.putCallOi, 2) + 'x | OI ' + num((+market.putOi || 0), 1) + '/' + num((+market.callOi || 0), 1) : '--');
-    text('putCallVolumeLine', market && Number.isFinite(+market.putCallVolume) ? num(+market.putCallVolume, 2) + 'x | ' + compactMoney(+market.putVolumeUsd || 0) + '/' + compactMoney(+market.callVolumeUsd || 0) : '--');
-    text('maxPainLine', nearest && Number.isFinite(+nearest.maxPain) ? money(+nearest.maxPain) : '--');
-    text('expectedMoveLine', nearest && Number.isFinite(+nearest.expectedMove) ? '+/- ' + money(+nearest.expectedMove) + ' | ' + money(+nearest.expectedLow) + ' a ' + money(+nearest.expectedHigh) : '--');
+    text('dvolLine', dvol && AnalyticsCore.toFiniteNumber(dvol.latest) !== null ? num(finiteNumber(dvol.latest), 2) + ' | 7d ' + (AnalyticsCore.toFiniteNumber(dvol.change7d) !== null ? percent(finiteNumber(dvol.change7d), 1) : '--') : '--');
+    var atmIv = finiteNumber(nearest && nearest.atmIv), atmStrike = finiteNumber(nearest && nearest.atmStrike);
+    var putCallOi = finiteNumber(market && market.putCallOi), putOi = finiteNumber(market && market.putOi), callOi = finiteNumber(market && market.callOi);
+    var putCallVolume = finiteNumber(market && market.putCallVolume), putVolume = finiteNumber(market && market.putVolumeUsd), callVolume = finiteNumber(market && market.callVolumeUsd);
+    var maxPain = finiteNumber(nearest && nearest.maxPain), expectedMove = finiteNumber(nearest && nearest.expectedMove), expectedLow = finiteNumber(nearest && nearest.expectedLow), expectedHigh = finiteNumber(nearest && nearest.expectedHigh);
+    text('atmIvLine', Number.isFinite(atmIv) ? num(atmIv, 2) + '% @ ' + money(atmStrike) : '--');
+    text('putCallOiLine', Number.isFinite(putCallOi) ? num(putCallOi, 2) + 'x | OI ' + num(putOi, 1) + '/' + num(callOi, 1) : '--');
+    text('putCallVolumeLine', Number.isFinite(putCallVolume) ? num(putCallVolume, 2) + 'x | ' + compactMoney(putVolume) + '/' + compactMoney(callVolume) : '--');
+    text('maxPainLine', Number.isFinite(maxPain) ? money(maxPain) : '--');
+    text('expectedMoveLine', Number.isFinite(expectedMove) ? '+/- ' + money(expectedMove) + ' | ' + money(expectedLow) + ' a ' + money(expectedHigh) : '--');
     text('callGreeksLine', nearest ? formatGreeks(nearest.call) : '--');
     text('putGreeksLine', nearest ? formatGreeks(nearest.put) : '--');
-    text('optionsCaption', nearest ? (data.isProxy ? 'Proxy BTC para contexto visual de ' + data.requestedAsset + '; contribuicao e Data Confidence iguais a zero. ' : '') + 'Vencimento ' + new Date(+nearest.expiry).toLocaleDateString('pt-BR') + ' (' + num(+nearest.daysToExpiry, 1) + ' dias) | ' + market.instruments + ' instrumentos ativos | expected move por IV ATM.' : 'Opcoes indisponiveis para o ativo; nenhum valor e imputado ao score.');
+    var optionExpiry = finiteNumber(nearest && nearest.expiry), daysToExpiry = finiteNumber(nearest && nearest.daysToExpiry), optionInstruments = finiteNumber(market && market.instruments);
+    text('optionsCaption', nearest ? (data.isProxy ? 'Proxy BTC para contexto visual de ' + data.requestedAsset + '; contribuicao e Data Confidence iguais a zero. ' : '') + 'Vencimento ' + (Number.isFinite(optionExpiry) ? new Date(optionExpiry).toLocaleDateString('pt-BR') : '--') + ' (' + num(daysToExpiry, 1) + ' dias) | ' + (Number.isFinite(optionInstruments) ? optionInstruments : '--') + ' instrumentos ativos | expected move por IV ATM.' : 'Opcoes indisponiveis para o ativo; nenhum valor e imputado ao score.');
   }
   function renderExchangeFlows(a) {
     var metrics = a && a.coinMetrics, flow = metrics && metrics.exchangeFlow;
@@ -2809,25 +3138,40 @@
     var signal = !hasFlow ? 'Indisponivel' : !Number.isFinite(flow.netflow7d) ? 'Cobertura insuficiente' : flow.netflow7d > 0 ? 'Net inflow / oferta potencial' : flow.netflow7d < 0 ? 'Net outflow / retirada liquida' : 'Equilibrado';
     text('exchangeFlowSignal', signal);
   }
-  function nestedRows(payload) {
-    if (!payload) return [];
+  function nestedRows(payload, depth) {
+    if (!payload || (depth || 0) > 6) return [];
     if (Array.isArray(payload)) return payload;
-    var keys = ['data', 'flows', 'items', 'results', 'history', 'days'];
-    for (var i = 0; i < keys.length; i++) if (Array.isArray(payload[keys[i]])) return payload[keys[i]];
+    var keys = ['data', 'flows', 'items', 'results', 'history', 'days', 'rows'];
+    for (var i = 0; i < keys.length; i++) if (Array.isArray(payload[keys[i]]) && payload[keys[i]].length) return payload[keys[i]];
+    for (var j = 0; j < keys.length; j++) {
+      var nested = payload[keys[j]];
+      if (nested && typeof nested === 'object') {
+        var rows = nestedRows(nested, (depth || 0) + 1);
+        if (rows.length) return rows;
+      }
+    }
     return [];
   }
   function etfFlowValue(row) {
     if (!row) return NaN;
-    if (Number.isFinite(+row.netFlowUsdM)) return +row.netFlowUsdM * 1000000;
+    var millions = finiteNumber(row.netFlowUsdM);
+    if (Number.isFinite(millions)) return millions * 1000000;
     var candidates = [row.flow_usd, row.net_flow_usd, row.netFlowUsd, row.net_flow, row.flow, row.total];
-    for (var i = 0; i < candidates.length; i++) if (Number.isFinite(+candidates[i])) return +candidates[i];
+    for (var i = 0; i < candidates.length; i++) {
+      var value = finiteNumber(candidates[i]);
+      if (Number.isFinite(value)) return value;
+    }
     return NaN;
+  }
+  function etfReportedRow(row) {
+    return !!AnalyticsCore.classifyEtfFlowObservation(row, etfFlowValue(row)).reported;
   }
   function latestEtfFlow(institutional) {
     if (!eligibleDataset(institutional)) return NaN;
     var rows = institutional && institutional.etf ? nestedRows(institutional.etf.flows) : [];
-    var reported = rows.filter(function (row) { return etfFlowValue(row) !== 0; });
-    return reported.length ? etfFlowValue(reported[reported.length - 1]) : rows.length ? etfFlowValue(rows[rows.length - 1]) : NaN;
+    var reported = rows.filter(etfReportedRow);
+    var latest = AnalyticsCore.latestTimestampedRow(reported, ['date', 'day', 'timestamp', 'time'], Date.now());
+    return latest ? etfFlowValue(latest) : NaN;
   }
   function renderInstitutional() {
     var data = state.institutional || { configured: {} }, configured = data.configured || {};
@@ -2838,8 +3182,8 @@
     var etfNode = $('etfStatus');
     if (etfNode) etfNode.className = etfEligible ? 'status-ready' : etfReady ? 'status-key' : configured.etf ? 'status-fail' : 'status-key';
     var etfRows = data.etf ? nestedRows(data.etf.flows) : [];
-    var displayEtfRows = etfRows.filter(function (row) { return etfFlowValue(row) !== 0; });
-    if (!displayEtfRows.length) displayEtfRows = etfRows;
+    var displayEtfRows = etfRows.filter(etfReportedRow);
+    displayEtfRows = displayEtfRows.slice().sort(function (a, b) { return timestampMs(a && (a.date || a.day || a.timestamp || a.time)) - timestampMs(b && (b.date || b.day || b.timestamp || b.time)); });
     var etfList = $('etfFlowList');
     if (etfList) etfList.innerHTML = displayEtfRows.length ? displayEtfRows.slice(-10).reverse().map(function (row) {
       var date = row.date || row.day || row.timestamp || row.time || '--';
@@ -2847,26 +3191,37 @@
       return '<div class="institutional-row"><div><strong>' + escapeHTML(String(date).slice(0, 10)) + '</strong><span>' + escapeHTML(row.asset || baseAsset(state.symbol)) + ' ETF net flow</span></div><strong class="' + (flow >= 0 ? 'up' : 'down') + '">' + compactMoney(flow) + '</strong></div>';
     }).join('') : '<div class="institutional-row"><div><strong>' + (configured.etf ? 'Sem fluxos retornados' : 'Ativo sem ETF coberto') + '</strong><span>A fonte publica cobre BTC, ETH, SOL, XRP e HYPE.</span></div></div>';
     var errors = data.errors || {};
-    text('institutionalCaption', errors.etf ? 'CryptoETF publico: ' + errors.etf + '.' : 'Dados obtidos por uma fonte publica sem chave de API.');
+    text('institutionalCaption', errors.etf ? 'CryptoETF publico: ' + errors.etf + '.' : 'Dados obtidos por fonte publica sem chave; placeholders de fins de semana e feriados dos EUA ficam fora do score.');
+    var cftc = data.cftc && data.cftc.latest;
+    var cftcObservedAt = finiteNumber(data.cftc && data.cftc.observedAt);
+    var cftcFresh = AnalyticsCore.classifyFreshness(cftcObservedAt, 10 * 24 * 60 * 60 * 1000, Date.now()).eligibleForScore;
+    text('cftcStatus', cftc ? (cftcFresh ? 'Semanal fresh | informativo' : 'Stale | informativo') : 'Indisponivel');
+    var nonCommNet = finiteNumber(cftc && cftc.nonCommercialNet), nonCommChange = finiteNumber(cftc && cftc.changeNonCommercialNet), commercialNet = finiteNumber(cftc && cftc.commercialNet), cftcOi = finiteNumber(cftc && cftc.openInterest);
+    text('cftcNonCommNet', Number.isFinite(nonCommNet) ? signed(nonCommNet) + ' contratos' : '--');
+    text('cftcNonCommChange', Number.isFinite(nonCommChange) ? signed(nonCommChange) + ' contratos' : '--');
+    text('cftcCommercialNet', Number.isFinite(commercialNet) ? signed(commercialNet) + ' contratos' : '--');
+    text('cftcOpenInterest', Number.isFinite(cftcOi) ? num(cftcOi, 0) + ' contratos' : '--');
+    text('cftcCaption', cftc ? 'CFTC Legacy Futures Only, CME Bitcoin, data do relatorio ' + new Date(cftcObservedAt).toLocaleDateString('pt-BR') + '. Contratos nao equivalem diretamente a BTC ou USD e ainda nao alteram os scores.' : errors.cftc ? 'CFTC: ' + errors.cftc + '.' : 'CFTC sem leitura.');
   }
   function renderMacroFlow(a) {
     var ext = state.external || {}, markets = ext.coinMarkets || {};
-    function marketChange(id, field) { var row = markets[id]; return row && Number.isFinite(+row[field]) ? +row[field] : NaN; }
+    function marketChange(id, field) { var row = markets[id]; return finiteNumber(row && row[field]); }
     var btc7 = marketChange('bitcoin', 'price_change_percentage_7d_in_currency');
     var eth7 = marketChange('ethereum', 'price_change_percentage_7d_in_currency');
     var selected7 = marketChange(contextFor(state.symbol).gecko, 'price_change_percentage_7d_in_currency');
     var stable7 = ext.stablecoinChanges ? ext.stablecoinChanges.week : NaN;
-    var defi7Rows = (ext.chains || []).filter(function (row) { return Number.isFinite(+row.change_7d) && +row.tvl > 100000000; }).slice(0, 20);
+    var defi7Rows = (ext.chains || []).filter(function (row) { return Number.isFinite(finiteNumber(row && row.change_7d)) && finiteNumber(row && row.tvl) > 100000000; }).slice(0, 20);
     var defi7 = defi7Rows.length ? avg(defi7Rows.map(function (row) { return +row.change_7d; })) : NaN;
     var nodes = [
       { name: 'Bitcoin', value: btc7, suffix: '7d' },
       { name: 'Ethereum', value: eth7, suffix: '7d' },
-      { name: baseAsset(state.symbol), value: selected7, suffix: '7d' },
       { name: 'Stablecoins', value: stable7, suffix: 'supply 7d' },
       { name: 'DeFi chains', value: defi7, suffix: 'TVL 7d' },
       { name: 'DEX', value: ext.dexChange, suffix: 'volume 24h' }
     ];
-    var rotation = Number.isFinite(btc7) && Number.isFinite(selected7) ? (selected7 > btc7 + 4 ? 'Rotacao para alts' : btc7 > selected7 + 4 ? 'Preferencia por BTC' : 'Fluxo equilibrado') : 'Cobertura parcial';
+    if (state.symbol !== 'BTCUSDT' && state.symbol !== 'ETHUSDT') nodes.splice(2, 0, { name: baseAsset(state.symbol), value: selected7, suffix: '7d' });
+    var rotationComparator = state.symbol === 'BTCUSDT' ? eth7 : selected7;
+    var rotation = Number.isFinite(btc7) && Number.isFinite(rotationComparator) ? (rotationComparator > btc7 + 4 ? 'Rotacao para alts' : btc7 > rotationComparator + 4 ? 'Preferencia por BTC' : 'Fluxo equilibrado') : 'Cobertura parcial';
     text('moneyFlowRegime', rotation);
     var grid = $('moneyFlowGrid');
     if (grid) grid.innerHTML = nodes.map(function (item) {
@@ -2877,19 +3232,49 @@
     text('tradfiStatus', tradfi.length ? tradfi.length + ' mercados EOD' : 'sem leitura');
     var tradfiGrid = $('tradfiGrid');
     if (tradfiGrid) tradfiGrid.innerHTML = tradfi.length ? tradfi.map(function (item) {
-      return '<div class="tradfi-item"><span>' + escapeHTML(item.symbol + ' | ' + item.group) + '</span><strong>' + money(+item.close) + ' | 5d ' + percent(+item.change5d, 2) + '</strong></div>';
+      return '<div class="tradfi-item"><span>' + escapeHTML(item.symbol + ' | ' + item.group) + '</span><strong>' + money(finiteNumber(item.close)) + ' | 5d ' + percent(finiteNumber(item.change5d), 2) + '</strong></div>';
     }).join('') : '<div class="tradfi-item"><span>Fonte EOD</span><strong>Indisponivel agora</strong></div>';
+    renderMicrostructure(a);
     renderCoverage(a);
+  }
+  function renderMicrostructure(a) {
+    var data = a && a.microstructure || state.microstructure;
+    var eligible = eligibleDataset(data);
+    var flow = data && data.orderFlow || {};
+    var flowEligible = eligible && sourceObservationFresh(flow.observedAt || flow.lastTradeAt, MICROSTRUCTURE_STALE_MS);
+    var venuesEligible = eligible && sourceObservationFresh(data && data.venuesObservedAt, MICROSTRUCTURE_STALE_MS);
+    var venueCount = data && Array.isArray(data.venues) ? data.venues.length : 0;
+    var failedSources = data && data.errors ? Object.keys(data.errors) : [];
+    text('microstructureStatus', data ? datasetStatus(data) + ' | ' + venueCount + '/4 venues | informativo' : 'sem leitura');
+    var cvdUsd = finiteNumber(flow.cvdUsd), imbalancePct = finiteNumber(flow.imbalancePct), coinbasePremium = finiteNumber(data && data.coinbasePremiumBps), dispersion = finiteNumber(data && data.dispersionBps);
+    text('cvdUsdLine', flowEligible && Number.isFinite(cvdUsd) ? compactMoney(cvdUsd) : '--');
+    text('takerImbalanceLine', flowEligible && Number.isFinite(imbalancePct) ? percent(imbalancePct, 1) : '--');
+    text('coinbasePremiumLine', venuesEligible && Number.isFinite(coinbasePremium) ? num(coinbasePremium, 2) + ' bps' : '--');
+    text('venueDispersionLine', venuesEligible && Number.isFinite(dispersion) ? num(dispersion, 2) + ' bps' : '--');
+    var rows = $('venuePriceRows');
+    if (rows) rows.innerHTML = venuesEligible && data && Array.isArray(data.venues) && data.venues.length ? data.venues.map(function (venue) {
+      var price = finiteNumber(venue.price), premiumBps = finiteNumber(venue.premiumBps);
+      return '<div class="institutional-row"><div><strong>' + escapeHTML(venue.name) + '</strong><span>premium vs mediana | ' + escapeHTML(venue.quoteCurrency || 'USDT') + '</span></div><strong>' + money(price) + ' | ' + (Number.isFinite(premiumBps) ? num(premiumBps, 2) + ' bps' : '--') + '</strong></div>';
+    }).join('') : '<div class="institutional-row"><div><strong>Sem venues</strong><span>Fonte publica indisponivel agora</span></div></div>';
+    var failureNote = failedSources.length ? ' Fontes indisponiveis: ' + failedSources.join(', ') + '.' : '';
+    var firstTradeAt = finiteNumber(flow.firstTradeAt), lastTradeAt = finiteNumber(flow.lastTradeAt);
+    var comparisonNote = ' Coinbase USD e convertido pela cotacao USDT-USD; venues fora da janela de 30s sao excluidos.';
+    text('microstructureCaption', (flowEligible && Number.isFinite(firstTradeAt) && Number.isFinite(lastTradeAt)
+      ? flow.trades + ' aggTrades Binance entre ' + new Date(firstTradeAt).toLocaleTimeString('pt-BR') + ' e ' + new Date(lastTradeAt).toLocaleTimeString('pt-BR') + '. CVD e premiums sao informativos e nao alteram o Setup Score.'
+      : 'CVD e premiums sao informativos e nao alteram o Setup Score.') + comparisonNote + failureNote);
   }
   function renderCoverage(a) {
     var freshNewsCount = freshNewsItems().length;
+    var derivativeCoverageInfo = AnalyticsCore.derivativeCoverage(scoreableDerivativeDetail(a.derivativeDetail));
     var checks = [
       { name: 'Candles Binance', ok: state.klines.length >= 220, detail: state.klines.length + ' candles' },
       { name: 'Multi-timeframe', ok: !!(state.mtf && state.mtf.rows.length >= 5), detail: state.mtf ? state.mtf.rows.length + ' TFs' : 'aguardando' },
       { name: 'Historico completo', ok: historyFresh(a.history), detail: historyFresh(a.history) ? a.history.candles + ' dias' : 'carregando ou stale' },
-      { name: 'Derivativos', ok: hasDerivativeData(a.derivativeDetail), detail: 'OI, funding, L/S, taker' },
-      { name: 'On-chain no score', ok: eligibleDataset(a.coinMetrics), detail: a.coinMetrics ? a.coinMetrics.asset.toUpperCase() + ' | ' + datasetStatus(a.coinMetrics) : 'sem cobertura' },
+      // UX-001: status por metrica real — nada de OR de 6 metricas com rotulo estatico.
+      { name: 'Derivativos', ok: derivativeCoverageInfo.state === 'ok', warn: derivativeCoverageInfo.state === 'partial', detail: derivativeCoverageInfo.label },
+      { name: 'On-chain no score', ok: eligibleDataset(a.coinMetrics) || !!(a.mempoolContext && a.mempoolContext.eligibleForScore), detail: a.coinMetrics ? a.coinMetrics.asset.toUpperCase() + ' | ' + datasetStatus(a.coinMetrics) : a.mempoolContext && a.mempoolContext.eligibleForScore ? 'mempool BTC nativo' : 'sem cobertura' },
       { name: 'Livro e execucao', ok: Number.isFinite(a.spreadBps), detail: Number.isFinite(a.spreadBps) ? num(a.spreadBps, 2) + ' bps' : 'sem leitura' },
+      { name: 'Microestrutura informativa', ok: !!(a.microstructure && eligibleDataset(a.microstructure)), detail: a.microstructure && Array.isArray(a.microstructure.venues) ? a.microstructure.venues.length + ' venues + CVD' : 'sem leitura' },
       { name: 'Noticias', ok: freshNewsCount > 0, detail: freshNewsCount + ' itens fresh' },
       { name: 'Macro oficial', ok: externalContextFresh() && macroSourceAvailable(state.external.macro), detail: externalContextFresh() && macroSourceAvailable(state.external.macro) ? 'Treasury / VIX' : 'stale' },
       { name: 'TradFi', ok: externalContextFresh() && activeTradFiAssets(state.external.tradfi).length > 0, detail: externalContextFresh() && activeTradFiAssets(state.external.tradfi).length ? 'acoes e ETFs EOD' : 'stale' },
@@ -2901,7 +3286,11 @@
     var covered = checks.filter(function (check) { return check.ok; }).length;
     text('coverageSummary', covered + '/' + checks.length + ' blocos');
     var grid = $('coverageGrid');
-    if (grid) grid.innerHTML = checks.map(function (check) { return '<div class="coverage-item ' + (check.ok ? 'ok' : 'fail') + '"><span>' + escapeHTML(check.name) + '</span><strong>' + escapeHTML(check.ok ? 'Coberto | ' + check.detail : check.detail) + '</strong></div>'; }).join('');
+    if (grid) grid.innerHTML = checks.map(function (check) {
+      var stateClass = check.ok ? 'ok' : check.warn ? 'warn' : 'fail';
+      var prefix = check.ok ? 'Coberto | ' : check.warn ? 'Parcial | ' : '';
+      return '<div class="coverage-item ' + stateClass + '"><span>' + escapeHTML(check.name) + '</span><strong>' + escapeHTML(prefix + check.detail) + '</strong></div>';
+    }).join('');
   }
   function calculatorNumber(id) { var node = $(id); if (!node || String(node.value).trim() === '') return NaN; var value = +node.value; return Number.isFinite(value) ? value : NaN; }
   function calculatorValue(id, fallback) { var value = calculatorNumber(id); return Number.isFinite(value) ? value : fallback; }
@@ -2915,18 +3304,19 @@
     }
     var currentQty = calculatorNumber('calcCurrentQty');
     var currentPrice = calculatorNumber('calcCurrentPrice');
-    var addMultiple = calculatorValue('calcAddMultiple', 0);
+    var rawAddMultiple = calculatorValue('calcAddMultiple', 0);
+    var addMultiple = Math.max(0, rawAddMultiple);
     var addPrice = calculatorNumber('calcAddPrice');
-    var addLegIncomplete = addMultiple > 0 && !Number.isFinite(addPrice);
+    var addLegIncomplete = addMultiple > 0 && (!Number.isFinite(addPrice) || addPrice <= 0);
     if (addLegIncomplete) addMultiple = 0;
-    var baseIncomplete = !Number.isFinite(currentQty) || !Number.isFinite(currentPrice);
+    var baseIncomplete = !Number.isFinite(currentQty) || currentQty <= 0 || !Number.isFinite(currentPrice) || currentPrice <= 0;
     if (baseIncomplete) {
       ['calcFinalQty', 'calcAveragePrice', 'calcNotional', 'calcFees', 'calcMargin', 'calcBreakEven', 'calcLiquidation'].forEach(function (id) { text(id, '--'); });
       text('calculatorModeLabel', calculatorMode === 'futures' ? 'Futuros' : 'Spot');
-      text('calculatorNote', 'Preencha quantidade e preco atuais para calcular a posicao.');
+      text('calculatorNote', 'Preencha quantidade e preco atuais com valores maiores que zero para calcular a posicao.');
       return;
     }
-    var result = AnalyticsCore.calculatePosition({
+    var rawCalculator = {
       mode: calculatorMode,
       side: sideNode ? sideNode.value : 'long',
       currentQty: currentQty,
@@ -2939,16 +3329,27 @@
       fundingRatePct: calculatorValue('calcFunding', 0),
       fundingPeriods: calculatorValue('calcFundingPeriods', 0),
       maintenancePct: calculatorValue('calcMaintenance', 0)
-    });
-    text('calculatorModeLabel', result.mode === 'futures' ? 'Futuros ' + num(Math.max(1, calculatorValue('calcLeverage', 1)), 0) + 'x' : 'Spot');
+    };
+    var result = AnalyticsCore.calculatePosition(rawCalculator);
+    var boundsAdjusted = result.currentQty !== rawCalculator.currentQty
+      || result.currentPrice !== rawCalculator.currentPrice
+      || result.addMultiple !== rawCalculator.addMultiple
+      || result.addPrice !== rawCalculator.addPrice
+      || result.entryFeePct !== rawCalculator.entryFeePct
+      || result.exitFeePct !== rawCalculator.exitFeePct
+      || result.leverage !== rawCalculator.leverage
+      || result.fundingRatePct !== rawCalculator.fundingRatePct
+      || result.fundingPeriods !== Math.floor(rawCalculator.fundingPeriods)
+      || result.maintenancePct !== rawCalculator.maintenancePct;
+    text('calculatorModeLabel', result.mode === 'futures' ? 'Futuros ' + num(result.leverage, 0) + 'x' : 'Spot');
     text('calcFinalQty', num(result.quantity, 8) + ' ' + baseAsset(state.symbol));
     text('calcAveragePrice', money(result.averageWithEntryFee));
     text('calcNotional', compactMoney(result.notional));
     text('calcFees', money(result.totalCosts));
     text('calcMargin', money(result.margin));
     text('calcBreakEven', money(result.breakEven));
-    text('calcLiquidation', Number.isFinite(result.liquidationPrice) && calculatorValue('calcLeverage', 1) > 1 ? money(Math.max(0, result.liquidationPrice)) + ' aprox.' : '--');
-    text('calculatorNote', (addLegIncomplete ? 'Preco da nova entrada vazio; calculando sem a nova perna. ' : '') + 'Funding positivo: long paga e short recebe; funding negativo inverte os lados. Custos liquidos positivos sao pagos pela posicao e negativos representam credito. Liquidacao continua aproximada.');
+    text('calcLiquidation', Number.isFinite(result.liquidationPrice) && result.leverage > 1 ? money(Math.max(0, result.liquidationPrice)) + ' aprox.' : '--');
+    text('calculatorNote', (boundsAdjusted ? 'Valores fora dos limites declarados foram ajustados antes do calculo. ' : '') + (rawAddMultiple < 0 ? 'Multiplo negativo ajustado para zero. ' : '') + (addLegIncomplete ? 'Preco da nova entrada vazio ou invalido; calculando sem a nova perna. ' : '') + 'Funding positivo: long paga e short recebe; funding negativo inverte os lados. Custos liquidos positivos sao pagos pela posicao e negativos representam credito. Liquidacao continua aproximada.');
   }
   function applyIndicatorHelp() {
     var help = {
@@ -3007,24 +3408,24 @@
     var scored = rows.filter(function (item) { return Number.isFinite(item.analysis.score); });
     var best = scored[0], worst = scored[scored.length - 1];
     var ext = state.external || {};
-    var global = eligibleDataset(ext.marketData) ? (ext.global || {}) : {};
+    var global = activeGlobalMarket(ext) || {};
     var paprika = ext.paprikaGlobal || {};
-    var totalMcap = global.total_market_cap && global.total_market_cap.usd ? +global.total_market_cap.usd : +paprika.market_cap_usd;
-    var globalChange = Number.isFinite(+global.market_cap_change_percentage_24h_usd) ? +global.market_cap_change_percentage_24h_usd : +paprika.market_cap_change_24h;
+    var totalMcap = firstFinite([global.total_market_cap && global.total_market_cap.usd, paprika.market_cap_usd]);
+    var globalChange = firstFinite([global.market_cap_change_percentage_24h_usd, paprika.market_cap_change_24h]);
     text('overviewBestAsset', best ? baseAsset(best.symbol) : '--');
     text('overviewBestScore', best ? 'Radar Score ' + signed(best.analysis.score) + ' | ' + best.analysis.bias + ' | DC preview ' + best.analysis.radar.dataConfidence + '%' : '--');
     text('overviewRiskAsset', worst ? baseAsset(worst.symbol) : '--');
     text('overviewRiskScore', worst ? 'Radar Score ' + signed(worst.analysis.score) + ' | ' + worst.analysis.bias + ' | DC preview ' + worst.analysis.radar.dataConfidence + '%' : '--');
     text('overviewMarketCap', compactUsd(totalMcap));
     text('overviewMarketMove', Number.isFinite(globalChange) ? '24h ' + percent(globalChange, 2) : '--');
-    text('overviewDefiTvl', compactUsd(+ext.defiTvl));
-    text('overviewDexVolume', 'DEX 24h ' + compactUsd(+ext.dexVolume));
+    text('overviewDefiTvl', compactUsd(finiteNumber(ext.defiTvl)));
+    text('overviewDexVolume', 'DEX 24h ' + compactUsd(finiteNumber(ext.dexVolume)));
     text('overviewFearGreed', fearGreedEligible(ext) ? ext.fearGreed.value + ' ' + ext.fearGreed.label : '--');
     text('overviewContextScore', 'Contexto ' + (state.analysis && eligibleDataset(state.analysis.external) ? signed(state.analysis.external.total) : '--'));
     text('overviewUpdated', ext.fetchedAt ? (externalContextFresh() ? 'Atualizado ' : 'Stale desde ') + new Date(ext.fetchedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '--');
     var bulls = rows.filter(function (x) { return x.analysis.score >= 35; }).length;
     var bears = rows.filter(function (x) { return x.analysis.score <= -35; }).length;
-    text('overviewSummary', bulls + ' ativos com viés comprador, ' + bears + ' com pressão vendedora. Clique em um ativo para abrir a análise individual.');
+    text('overviewSummary', counted(bulls, 'ativo com viés comprador', 'ativos com viés comprador') + ', ' + counted(bears, 'ativo com pressão vendedora', 'ativos com pressão vendedora') + '. Clique em um ativo para abrir a análise individual.');
     renderOverviewList('overviewLeaders', rows.slice(0, 5), true);
     renderOverviewList('overviewRisks', rows.slice(-5).reverse(), false);
     text('leadersCount', String(Math.min(5, rows.length)));
@@ -3081,18 +3482,21 @@
   }
   function setupCanvas(canvas) {
     var box = canvas.getBoundingClientRect(); var dpr = window.devicePixelRatio || 1;
+    if (box.width < 1 || box.height < 1) return null;
     canvas.width = Math.max(320, Math.floor(box.width * dpr)); canvas.height = Math.max(220, Math.floor(box.height * dpr));
     var ctx = canvas.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); return { ctx: ctx, w: box.width, h: box.height };
   }
   function drawPriceChart() {
     var canvas = $('priceCanvas'); if (!canvas || !state.klines.length) return;
-    var c = setupCanvas(canvas), ctx = c.ctx, w = c.w, h = c.h;
+    var c = setupCanvas(canvas); if (!c) return;
+    var ctx = c.ctx, w = c.w, h = c.h;
     ctx.clearRect(0, 0, w, h); ctx.fillStyle = '#101318'; ctx.fillRect(0, 0, w, h);
     var allCandles = state.klines, visibleCount = clamp(+state.chart.candles || 120, 30, 500);
     var candles = allCandles.slice(-visibleCount), closeSeries = allCandles.map(function (q) { return q.close; });
     var ema9Rows = emaSeries(closeSeries, 9), ema21Rows = emaSeries(closeSeries, 21), ema50Rows = emaSeries(closeSeries, 50), ema200Rows = emaSeries(closeSeries, 200);
     var bb = bollinger(closeSeries, 20, 2), vwapRows = rollingVwapSeries(allCandles, 48);
-    var pad = { l: 58, r: 78, t: 42, b: 94 }, ch = h - pad.t - pad.b;
+    var compactChart = w < 500;
+    var pad = compactChart ? { l: 18, r: 64, t: 42, b: 78 } : { l: 58, r: 78, t: 42, b: 94 }, ch = h - pad.t - pad.b;
     var highs = candles.map(function (x) { return x.high; }), lows = candles.map(function (x) { return x.low; });
     var overlayValues = [];
     [state.chart.ema9 ? ema9Rows : [], state.chart.ema21 ? ema21Rows : [], state.chart.ema50 ? ema50Rows : [], state.chart.ema200 ? ema200Rows : [], state.chart.vwap ? vwapRows : [], state.chart.bb ? bb.upper : [], state.chart.bb ? bb.lower : []].forEach(function (series) {
@@ -3103,14 +3507,15 @@
     function y(p) { return pad.t + (max - p) / (max - min) * ch; }
     function x(i) { return pad.l + i * ((w - pad.l - pad.r) / Math.max(1, candles.length - 1)); }
     ctx.strokeStyle = '#232a33'; ctx.lineWidth = 1; ctx.font = '12px Inter, sans-serif'; ctx.fillStyle = '#9da7b3';
-    for (var g = 0; g <= 5; g++) { var yy = pad.t + ch * g / 5; ctx.beginPath(); ctx.moveTo(pad.l, yy); ctx.lineTo(w - pad.r + 18, yy); ctx.stroke(); var price = max - (max - min) * g / 5; ctx.fillText(money(price), w - pad.r + 24, yy + 4); }
-    var dateTicks = Math.min(6, candles.length);
+    for (var g = 0; g <= 5; g++) { var yy = pad.t + ch * g / 5; ctx.beginPath(); ctx.moveTo(pad.l, yy); ctx.lineTo(w - pad.r, yy); ctx.stroke(); var price = max - (max - min) * g / 5; ctx.textAlign = 'right'; ctx.fillText(money(price), w - 4, yy + 4); }
+    var dateTicks = Math.min(compactChart ? 3 : 6, candles.length);
     for (var tick = 0; tick < dateTicks; tick++) {
       var index = Math.round(tick * (candles.length - 1) / Math.max(1, dateTicks - 1)), xxTick = x(index);
       ctx.strokeStyle = 'rgba(48,55,65,.42)'; ctx.beginPath(); ctx.moveTo(xxTick, pad.t); ctx.lineTo(xxTick, h - pad.b + 58); ctx.stroke();
       var date = new Date(candles[index].time);
-      var dateLabel = ['1d', '3d', '1w', '1M'].indexOf(state.interval) !== -1 ? date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' }) : date.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-      ctx.fillStyle = '#8f99a6'; ctx.font = '11px Inter, sans-serif'; ctx.textAlign = tick === 0 ? 'left' : tick === dateTicks - 1 ? 'right' : 'center'; ctx.fillText(dateLabel, xxTick, h - 10);
+      var isDailyChart = ['1d', '3d', '1w', '1M'].indexOf(state.interval) !== -1;
+      var dateLabel = isDailyChart ? date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' }) : compactChart ? date.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit' }).replace(',', '') + 'h' : date.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+      ctx.fillStyle = '#8f99a6'; ctx.font = (compactChart ? '10px' : '11px') + ' Inter, sans-serif'; ctx.textAlign = tick === 0 ? 'left' : tick === dateTicks - 1 ? 'right' : 'center'; ctx.fillText(dateLabel, xxTick, h - 10);
     }
     ctx.textAlign = 'left';
     var bw = Math.max(3, ((w - pad.l - pad.r) / candles.length) * 0.58);
@@ -3126,16 +3531,16 @@
     }
     if (state.chart.vwap) drawLine(ctx, candles, vwapRows, x, y, '#f07aa6');
     var a = state.analysis;
-    ctx.setLineDash([6, 5]); ctx.strokeStyle = '#f4f0e8'; ctx.beginPath(); ctx.moveTo(pad.l, y(a.close)); ctx.lineTo(w - pad.r + 18, y(a.close)); ctx.stroke(); ctx.setLineDash([]);
-    if (state.chart.levels) a.supports.concat(a.resistances).forEach(function (level) { ctx.strokeStyle = level < a.close ? 'rgba(34,199,131,.55)' : 'rgba(255,92,112,.55)'; ctx.beginPath(); ctx.moveTo(pad.l, y(level)); ctx.lineTo(w - pad.r + 18, y(level)); ctx.stroke(); });
+    ctx.setLineDash([6, 5]); ctx.strokeStyle = '#f4f0e8'; ctx.beginPath(); ctx.moveTo(pad.l, y(a.close)); ctx.lineTo(w - pad.r, y(a.close)); ctx.stroke(); ctx.setLineDash([]);
+    if (state.chart.levels) a.supports.concat(a.resistances).forEach(function (level) { ctx.strokeStyle = level < a.close ? 'rgba(34,199,131,.55)' : 'rgba(255,92,112,.55)'; ctx.beginPath(); ctx.moveTo(pad.l, y(level)); ctx.lineTo(w - pad.r, y(level)); ctx.stroke(); });
     if (state.chart.supertrend && Number.isFinite(a.supertrend.value)) {
-      ctx.setLineDash([4, 4]); ctx.strokeStyle = a.supertrend.trend === 'Alta' ? '#22c783' : '#ff5c70'; ctx.beginPath(); ctx.moveTo(pad.l, y(a.supertrend.value)); ctx.lineTo(w - pad.r + 18, y(a.supertrend.value)); ctx.stroke(); ctx.setLineDash([]);
+      ctx.setLineDash([4, 4]); ctx.strokeStyle = a.supertrend.trend === 'Alta' ? '#22c783' : '#ff5c70'; ctx.beginPath(); ctx.moveTo(pad.l, y(a.supertrend.value)); ctx.lineTo(w - pad.r, y(a.supertrend.value)); ctx.stroke(); ctx.setLineDash([]);
     }
     if (state.chart.fib) {
       var swingHigh = Math.max.apply(null, candles.map(function (bar) { return bar.high; })), swingLow = Math.min.apply(null, candles.map(function (bar) { return bar.low; }));
       [0.236, 0.382, 0.5, 0.618, 0.786].forEach(function (ratio) {
         var level = swingHigh - (swingHigh - swingLow) * ratio;
-        ctx.strokeStyle = 'rgba(245,184,75,.32)'; ctx.beginPath(); ctx.moveTo(pad.l, y(level)); ctx.lineTo(w - pad.r + 18, y(level)); ctx.stroke();
+        ctx.strokeStyle = 'rgba(245,184,75,.32)'; ctx.beginPath(); ctx.moveTo(pad.l, y(level)); ctx.lineTo(w - pad.r, y(level)); ctx.stroke();
         ctx.fillStyle = '#c8a65c'; ctx.font = '10px Inter, sans-serif'; ctx.fillText('Fib ' + ratio, pad.l + 4, y(level) - 3);
       });
     }
@@ -3173,7 +3578,8 @@
   function drawLine(ctx, candles, series, x, y, color) { ctx.strokeStyle = color; ctx.lineWidth = 1.6; ctx.beginPath(); var started = false; series.slice(-candles.length).forEach(function (v, i) { if (v == null) return; if (!started) { ctx.moveTo(x(i), y(v)); started = true; } else ctx.lineTo(x(i), y(v)); }); ctx.stroke(); }
   function drawFlowChart() {
     var canvas = $('flowCanvas'); if (!canvas || !state.klines.length) return;
-    var c = setupCanvas(canvas), ctx = c.ctx, w = c.w, h = c.h; ctx.clearRect(0, 0, w, h); ctx.fillStyle = '#101318'; ctx.fillRect(0, 0, w, h);
+    var c = setupCanvas(canvas); if (!c) return;
+    var ctx = c.ctx, w = c.w, h = c.h; ctx.clearRect(0, 0, w, h); ctx.fillStyle = '#101318'; ctx.fillRect(0, 0, w, h);
     var rows = state.klines.slice(-48).map(function (bar) {
       if (!Number.isFinite(bar.takerBuy) || !Number.isFinite(bar.volume)) return null;
       return bar.takerBuy - Math.max(0, bar.volume - bar.takerBuy);
@@ -3187,7 +3593,8 @@
   }
   function drawRsiChart() {
     var canvas = $('rsiCanvas'); if (!canvas || !state.analysis) return;
-    var c = setupCanvas(canvas), ctx = c.ctx, w = c.w, h = c.h;
+    var c = setupCanvas(canvas); if (!c) return;
+    var ctx = c.ctx, w = c.w, h = c.h;
     ctx.clearRect(0, 0, w, h); ctx.fillStyle = '#11161d'; ctx.fillRect(0, 0, w, h);
     var values = state.analysis.rsiValues.slice(-120);
     var pad = { l: 28, r: 18, t: 10, b: 20 };
@@ -3208,7 +3615,8 @@
   }
   function drawMacdChart() {
     var canvas = $('macdCanvas'); if (!canvas || !state.analysis) return;
-    var c = setupCanvas(canvas), ctx = c.ctx, w = c.w, h = c.h;
+    var c = setupCanvas(canvas); if (!c) return;
+    var ctx = c.ctx, w = c.w, h = c.h;
     ctx.clearRect(0, 0, w, h); ctx.fillStyle = '#11161d'; ctx.fillRect(0, 0, w, h);
     var data = state.analysis.macdData;
     var line = data.line.slice(-120), signal = data.signal.slice(-120), hist = data.hist.slice(-120);
@@ -3231,7 +3639,8 @@
   }
   function drawVolumeChart() {
     var canvas = $('volumeCanvas'); if (!canvas || !state.klines.length) return;
-    var c = setupCanvas(canvas), ctx = c.ctx, w = c.w, h = c.h;
+    var c = setupCanvas(canvas); if (!c) return;
+    var ctx = c.ctx, w = c.w, h = c.h;
     ctx.clearRect(0, 0, w, h); ctx.fillStyle = '#11161d'; ctx.fillRect(0, 0, w, h);
     var rows = state.klines.slice(-96);
     var maxVol = Math.max.apply(null, rows.map(function (bar) { return bar.volume; }).concat([1]));
@@ -3263,32 +3672,43 @@
     if (BINANCE_INTERVALS.indexOf(interval) === -1) return;
     state.interval = interval; $('intervalSelect').value = interval;
     if (state.boardRefreshing) state.boardPendingRefresh = true;
-    Array.from($('timeTabs').querySelectorAll('button')).forEach(function (btn) { btn.classList.toggle('active', btn.dataset.interval === interval); });
+    syncIntervalButtons(interval);
     renderBoard();
     refresh(true);
   }
+  function syncIntervalButtons(interval) {
+    Array.from($('timeTabs').querySelectorAll('button')).forEach(function (btn) { var active = btn.dataset.interval === interval; btn.classList.toggle('active', active); btn.setAttribute('aria-pressed', String(active)); });
+  }
+  function syncSortButtons(sort) {
+    [['sortScoreButton', 'score'], ['sortChangeButton', 'change'], ['sortVolumeButton', 'volume']].forEach(function (entry) {
+      var button = $(entry[0]); if (!button) return;
+      var active = sort === entry[1]; button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active));
+    });
+  }
   function setSort(sort) {
     state.sort = sort;
-    $('sortScoreButton').classList.toggle('active', sort === 'score');
-    $('sortChangeButton').classList.toggle('active', sort === 'change');
-    $('sortVolumeButton').classList.toggle('active', sort === 'volume');
+    syncSortButtons(sort);
     renderBoard();
   }
   function setView(view) {
     state.view = view === 'asset' ? 'asset' : 'dashboard';
     document.body.setAttribute('data-view', state.view);
     var dashboard = $('viewDashboardButton'), asset = $('viewAssetButton');
-    if (dashboard) dashboard.classList.toggle('active', state.view === 'dashboard');
-    if (asset) asset.classList.toggle('active', state.view === 'asset');
+    if (dashboard) { dashboard.classList.toggle('active', state.view === 'dashboard'); dashboard.setAttribute('aria-pressed', String(state.view === 'dashboard')); }
+    if (asset) { asset.classList.toggle('active', state.view === 'asset'); asset.setAttribute('aria-pressed', String(state.view === 'asset')); }
     setTimeout(function () { drawPriceChart(); drawRsiChart(); drawMacdChart(); drawVolumeChart(); drawFlowChart(); }, 0);
   }
-  function setAssetTab(tab) {
+  function setAssetTab(tab, reveal) {
     var allowed = ['summary', 'chart', 'history', 'futures', 'institutional', 'macro', 'signals', 'calculator'];
     state.assetTab = allowed.indexOf(tab) === -1 ? 'summary' : tab;
     document.body.setAttribute('data-asset-tab', state.assetTab);
-    document.querySelectorAll('#assetTabs [data-asset-tab]').forEach(function (button) { button.classList.toggle('active', button.dataset.assetTab === state.assetTab); });
+    document.querySelectorAll('#assetTabs [data-asset-tab]').forEach(function (button) { var active = button.dataset.assetTab === state.assetTab; button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active)); });
     if (state.assetTab === 'chart') setTimeout(function () { drawPriceChart(); drawRsiChart(); drawMacdChart(); drawVolumeChart(); drawFlowChart(); }, 0);
     if (state.assetTab === 'signals') renderSignals();
+    if (reveal !== false) setTimeout(function () {
+      var tabs = $('assetTabs');
+      if (tabs && state.view === 'asset') tabs.scrollIntoView({ block: 'start', behavior: 'auto' });
+    }, 0);
   }
   function selectSymbol(symbol, openAsset) {
     var nextSymbol = normalizeSymbol(symbol);
@@ -3311,41 +3731,53 @@
     select.value = state.symbol;
   }
   var SIGNAL_JOURNAL_KEY = 'cld-signal-journal:' + MODEL_VERSION;
+  var SIGNAL_SYNC_ID_KEY = 'cld-signal-sync-id:v1';
+  var SIGNAL_JOURNAL_LOCK = 'cld-signal-journal-lock:' + MODEL_VERSION;
+  var SIGNAL_MACHINE_LOCK = 'cld-signal-machine-lock:' + MODEL_VERSION;
+  var signalSyncClient = null;
   // ===== Motor de sinais v2 (Ciclo C): state machine por par+TF, trades simulados =====
   var SIGNAL_MACHINE_KEY = 'cld-signal-machine:' + MODEL_VERSION;
   var TRADE_JOURNAL_KEY = 'cld-signal-trades:' + MODEL_VERSION;
   var TRADE_JOURNAL_CAP = 500;
-  function loadMachineStates() { return safeStorageGet(SIGNAL_MACHINE_KEY) || {}; }
+  function loadMachineStates() { return AnalyticsCore.normalizeSignalMachineMap(safeStorageGet(SIGNAL_MACHINE_KEY)); }
   function saveMachineStates(map) { safeStorageSet(SIGNAL_MACHINE_KEY, map); }
-  function loadTradeJournal() {
-    var rows = safeStorageGet(TRADE_JOURNAL_KEY);
-    return Array.isArray(rows) ? rows.filter(function (row) { return row && Number.isFinite(+row.pnlPct); }) : [];
+  function normalizeTradeJournal(rows) {
+    var byIdentity = new Map();
+    (Array.isArray(rows) ? rows : []).forEach(function (row) {
+      var entryTime = finiteNumber(row && row.entryTime), exitTime = finiteNumber(row && row.exitTime);
+      var valid = row && (row.side === 'long' || row.side === 'short')
+        && typeof row.symbol === 'string' && /^[A-Z0-9]{1,15}USDT$/.test(row.symbol)
+        && BINANCE_INTERVALS.indexOf(row.interval) !== -1
+        && finiteNumber(row.entryPrice) > 0 && finiteNumber(row.exitPrice) > 0
+        && Number.isFinite(finiteNumber(row.pnlPct))
+        && Number.isFinite(entryTime) && Number.isFinite(exitTime) && entryTime >= 0 && exitTime >= entryTime;
+      if (!valid) return;
+      var identity = [row.symbol, row.interval, row.side, entryTime, exitTime].join(':');
+      // The first persisted exit is canonical. Concurrent tabs that observe the same transition
+      // cannot create duplicate evidence or replace its fill assumptions afterward.
+      if (!byIdentity.has(identity)) byIdentity.set(identity, row);
+    });
+    return Array.from(byIdentity.values()).slice(-TRADE_JOURNAL_CAP);
   }
-  function saveTradeJournal(records) { safeStorageSet(TRADE_JOURNAL_KEY, records.slice(-TRADE_JOURNAL_CAP)); }
+  function loadTradeJournal() { return normalizeTradeJournal(safeStorageGet(TRADE_JOURNAL_KEY)); }
+  function saveTradeJournal(records) { safeStorageSet(TRADE_JOURNAL_KEY, normalizeTradeJournal(records)); }
   /**
    * One evaluation per CLOSED candle per par+TF. The machine consumes the same confluence the
    * panel shows (score, gates, veto) plus the closed candle OHLC — no intra-candle churn.
    */
   function runSignalMachine(analysis) {
     if (!analysis || !analysis.signalCandle || !Number.isFinite(analysis.signalCandle.closeTime)) return;
-    var key = state.symbol + ':' + state.interval;
+    var machineSymbol = analysis.snapshot && analysis.snapshot.symbol || state.symbol;
+    var machineInterval = analysis.snapshot && analysis.snapshot.interval || state.interval;
+    var key = machineSymbol + ':' + machineInterval;
     var closeTime = analysis.signalCandle.closeTime;
     if (state.signalMachineEval[key] === closeTime) return;
-    var machines = loadMachineStates();
-    var persisted = machines[key] || null;
-    // Idempotencia PERSISTIDA: tanto o estado ACTIVE quanto o tombstone FLAT guardam o ultimo
-    // candle processado — reload/multi-aba nunca reavalia o mesmo candle (nem re-entra no
-    // candle que acabou de gerar um exit).
-    if (persisted && Number.isFinite(persisted.lastCloseTime) && closeTime <= persisted.lastCloseTime) return;
-    var activeState = persisted && persisted.phase === 'ACTIVE' ? persisted : null;
     var confluence = confluenceFor(analysis);
-    // DC<40 bloqueia ENTRADAS; uma posicao ativa continua sendo gerida (stop/alvo/tempo sao
-    // leituras de preco do candle fechado — congelar exits distorceria as base rates).
-    if (!activeState && confluence.dataConfidence < 40) return;
-    var snapshot = {
-      symbol: state.symbol,
-      interval: state.interval,
+    var transitionSnapshot = {
+      symbol: machineSymbol,
+      interval: machineInterval,
       total: confluence.total,
+      open: analysis.signalCandle.open,
       close: analysis.signalCandle.close,
       high: analysis.signalCandle.high,
       low: analysis.signalCandle.low,
@@ -3361,7 +3793,25 @@
       gates: confluence.gates,
       inputSnapshotId: analysis.snapshot ? analysis.snapshot.inputSnapshotId : null
     };
-    var result = AnalyticsCore.evaluateSignalTransition(activeState, snapshot);
+    return withCrossTabLock(SIGNAL_MACHINE_LOCK, function runSignalMachineExclusive() {
+      if (state.signalMachineEval[key] === closeTime) return;
+    var machines = loadMachineStates();
+    var persisted = machines[key] || null;
+    // Idempotencia PERSISTIDA: tanto o estado ACTIVE quanto o tombstone FLAT guardam o ultimo
+    // candle processado. Web Locks serializa abas compativeis; o tombstone tambem protege reload
+    // e repeticoes sequenciais do candle que acabou de gerar um exit.
+    if (persisted && Number.isFinite(persisted.lastCloseTime) && closeTime <= persisted.lastCloseTime) return;
+    var activeState = persisted && persisted.phase === 'ACTIVE' ? persisted : null;
+    // DC<40 bloqueia ENTRADAS; uma posicao ativa continua sendo gerida (stop/alvo/tempo sao
+    // leituras de preco do candle fechado — congelar exits distorceria as base rates).
+    if (!activeState && confluence.dataConfidence < 40) {
+      state.signalMachineEval[key] = closeTime;
+      machines[key] = { phase: 'FLAT', lastCloseTime: closeTime };
+      saveMachineStates(machines);
+      renderTradeEngine();
+      return;
+    }
+    var result = AnalyticsCore.evaluateSignalTransition(activeState, transitionSnapshot);
     state.signalMachineEval[key] = closeTime;
     // FLAT vira tombstone com o carimbo do candle (nunca delete: o marcador de idempotencia
     // precisa sobreviver ao exit).
@@ -3373,6 +3823,9 @@
       saveTradeJournal(journal);
     }
     renderTradeEngine();
+    }).catch(function (error) {
+      health('Concorrencia multiaba', false, 'falha ao serializar motor de sinais: ' + (error && error.message || 'erro'));
+    });
   }
   function renderTradeEngine() {
     var machines = loadMachineStates();
@@ -3385,7 +3838,8 @@
     var rowsNode = $('tradeRows');
     if (rowsNode) {
       rowsNode.innerHTML = journal.length ? journal.slice(-25).reverse().map(function (row) {
-        return '<tr><td>' + escapeHTML(new Date(row.exitTime).toLocaleString('pt-BR')) + '</td><td>' + escapeHTML(baseAsset(row.symbol || '')) + '</td><td>' + escapeHTML(intervalLabel(row.interval || '--')) + '</td><td>' + escapeHTML(row.side || '--') + '</td><td>' + escapeHTML(row.trigger || '--') + '</td><td>' + escapeHTML(row.regime || '--') + '</td><td class="' + (+row.pnlPct >= 0 ? 'up' : 'down') + '">' + percent(+row.pnlPct, 2) + '</td><td>' + (Number.isFinite(+row.rMultiple) ? num(+row.rMultiple, 2) + 'R' : '--') + '</td><td>' + percent(+row.maePct, 1) + ' / ' + percent(+row.mfePct, 1) + '</td><td>' + (Number.isFinite(+row.durationBars) ? +row.durationBars : '--') + '</td><td>' + escapeHTML(row.exitReason || '--') + '</td></tr>';
+        var pnl = finiteNumber(row.pnlPct), rMultiple = finiteNumber(row.rMultiple), mae = finiteNumber(row.maePct), mfe = finiteNumber(row.mfePct), duration = finiteNumber(row.durationBars);
+        return '<tr><td>' + escapeHTML(AnalyticsCore.formatDisplayTimestamp(row.exitTime, DISPLAY_TIME_ZONE, 'full')) + '</td><td>' + escapeHTML(baseAsset(row.symbol || '')) + '</td><td>' + escapeHTML(intervalLabel(row.interval || '--')) + '</td><td>' + escapeHTML(row.side || '--') + '</td><td>' + escapeHTML(row.trigger || '--') + '</td><td>' + escapeHTML(row.regime || '--') + '</td><td class="' + (pnl >= 0 ? 'up' : 'down') + '">' + percent(pnl, 2) + '</td><td>' + (Number.isFinite(rMultiple) ? num(rMultiple, 2) + 'R' : '--') + '</td><td>' + percent(mae, 1) + ' / ' + percent(mfe, 1) + '</td><td>' + (Number.isFinite(duration) ? duration : '--') + '</td><td>' + escapeHTML(row.exitReason || '--') + '</td></tr>';
       }).join('') : '<tr><td colspan="11">Nenhum trade simulado fechado nesta versao do modelo.</td></tr>';
     }
     var summaryNode = $('tradeSummaryRows');
@@ -3413,29 +3867,76 @@
   }
   var SIGNAL_JOURNAL_CAP = 500;
   function validSignalRecord(record) {
+    var closeTime = finiteNumber(record && record.signalCloseTime), price = finiteNumber(record && record.price);
     return !!(record && typeof record === 'object'
-      && typeof record.symbol === 'string' && record.symbol
-      && typeof record.interval === 'string' && record.interval
-      && Number.isFinite(+record.signalCloseTime)
-      && Number.isFinite(+record.price));
+      && typeof record.symbol === 'string' && /^[A-Z0-9]{1,15}USDT$/.test(record.symbol)
+      && BINANCE_INTERVALS.indexOf(record.interval) !== -1
+      && Number.isFinite(closeTime) && closeTime >= 0 && closeTime <= Date.now() + AnalyticsCore.RULESET.clockSkewToleranceMs
+      && Number.isFinite(price) && price > 0);
   }
   function loadSignalJournal() {
     var records = safeStorageGet(SIGNAL_JOURNAL_KEY);
     return Array.isArray(records) ? records.filter(validSignalRecord) : [];
   }
-  function saveSignalJournal(records) {
-    safeStorageSet(SIGNAL_JOURNAL_KEY, records.slice(-SIGNAL_JOURNAL_CAP));
+  function validSignalSyncId(value) { return SignalSync.validSyncId(value); }
+  function setSignalSyncStatus(message, configured) {
+    text('signalSyncStatus', message);
+  }
+  function handleSignalSyncStatus(status) {
+    var messages = {
+      syncing: 'Sincronizando journal com o servidor...',
+      synced: (status.details.count || 0) + ' sinais persistidos no servidor e conciliados neste dispositivo.',
+      unconfigured: 'Armazenamento duravel ainda nao provisionado; o journal local foi preservado.',
+      'sync-failed': 'Falha na sincronizacao duravel; o journal local foi preservado.',
+      cleared: 'Journal removido do servidor e deste dispositivo.',
+      'clear-unconfigured': 'Servidor duravel nao provisionado; apenas o journal local foi limpo.',
+      'clear-failed': 'Exclusao duravel falhou; o journal local foi restaurado para permitir nova tentativa.'
+    };
+    setSignalSyncStatus(messages[status.code] || 'Estado de sincronizacao desconhecido.', status.configured);
+  }
+  function createSignalSyncClient() {
+    return SignalSync.createClient({
+      fetchJSON: fetchJSON,
+      validRecord: validSignalRecord,
+      compactRecords: function (records, asOf) { return AnalyticsCore.compactSignalJournal(records, asOf, SIGNAL_JOURNAL_CAP); },
+      mergeOutcome: AnalyticsCore.mergeSignalOutcome,
+      readRecords: loadSignalJournal,
+      writeRecords: function (records) {
+        if (!safeStorageSet(SIGNAL_JOURNAL_KEY, records)) setSignalSyncStatus('Journal disponivel apenas nesta sessao; o armazenamento local esta indisponivel.', false);
+      },
+      readSyncId: function () { return safeStorageGet(SIGNAL_SYNC_ID_KEY); },
+      writeSyncId: function (id) {
+        if (!safeStorageSet(SIGNAL_SYNC_ID_KEY, id)) setSignalSyncStatus('Codigo privado disponivel apenas nesta sessao; copie-o antes de recarregar.', false);
+      },
+      runExclusive: function (task) { return withCrossTabLock(SIGNAL_JOURNAL_LOCK, task); },
+      cryptoApi: window.crypto,
+      onStatus: handleSignalSyncStatus,
+      onRecordsUpdated: function () { if (state.assetTab === 'signals') renderSignals(); }
+    });
+  }
+  function currentSignalSyncClient() {
+    if (!signalSyncClient) signalSyncClient = createSignalSyncClient();
+    return signalSyncClient;
+  }
+  function signalSyncId() { return currentSignalSyncClient().syncId(); }
+  function syncDurableSignalJournal(records) { return currentSignalSyncClient().sync(records); }
+  function scheduleDurableSignalSync(records) { currentSignalSyncClient().schedule(records); }
+  function clearDurableSignalJournal() { return currentSignalSyncClient().clear(); }
+  function initDurableSignalSync() {
+    var id = signalSyncId();
+    var input = $('signalSyncCode');
+    if (input) input.value = id;
+    syncDurableSignalJournal(loadSignalJournal());
+  }
+  function saveSignalJournal(records, options) {
+    var compacted = AnalyticsCore.compactSignalJournal(records, Date.now(), SIGNAL_JOURNAL_CAP);
+    if (!safeStorageSet(SIGNAL_JOURNAL_KEY, compacted)) setSignalSyncStatus('Journal disponivel apenas nesta sessao; o armazenamento local esta indisponivel.', false);
+    if (!options || options.durable !== false) scheduleDurableSignalSync(compacted);
   }
   function maybeRecordSignal(analysis, confluence) {
     if (!analysis || !confluence || !analysis.snapshot) return;
-    var records = loadSignalJournal();
-    var lastForPair = null;
-    for (var index = records.length - 1; index >= 0; index -= 1) {
-      if (records[index].symbol === analysis.snapshot.symbol && records[index].interval === analysis.snapshot.interval) { lastForPair = records[index]; break; }
-    }
     var candidate = { symbol: analysis.snapshot.symbol, interval: analysis.snapshot.interval, signalCloseTime: analysis.snapshot.signalCloseTime };
-    if (!AnalyticsCore.shouldRecordSignal(lastForPair, candidate)) return;
-    records.push({
+    var candidateRecord = {
       recordedAt: Date.now(),
       inputSnapshotId: analysis.snapshot.inputSnapshotId,
       modelVersion: MODEL_VERSION,
@@ -3448,10 +3949,28 @@
       radarScore: analysis.radar ? analysis.radar.score : null,
       dataConfidence: confluence.dataConfidence,
       decision: confluence.decision,
+      schemaVersion: 2,
+      inputComponents: analysis.snapshot.inputComponents || null,
+      inputComponentsHash: AnalyticsCore.stableHash(analysis.snapshot.inputComponents || {}),
+      scoreComponents: (confluence.components || []).map(function (component) { return { name: component.name, ruleId: component.ruleId, contribution: component.contribution, cap: component.max, status: component.status, scope: component.scope, isProxy: component.isProxy, sources: component.sources }; }),
+      gates: confluence.gates || null,
       outcome: null
+    };
+    return withCrossTabLock(SIGNAL_JOURNAL_LOCK, function recordSignalExclusive() {
+      var records = loadSignalJournal();
+      var lastForPair = null;
+      for (var index = records.length - 1; index >= 0; index -= 1) {
+        if (records[index].symbol === candidate.symbol && records[index].interval === candidate.interval) { lastForPair = records[index]; break; }
+      }
+      if (!AnalyticsCore.shouldRecordSignal(lastForPair, candidate)) return false;
+      records.push(candidateRecord);
+      saveSignalJournal(records);
+      if (state.assetTab === 'signals') renderSignals();
+      return true;
+    }).catch(function (error) {
+      health('Concorrencia multiaba', false, 'falha ao serializar journal de sinais: ' + (error && error.message || 'erro'));
+      return false;
     });
-    saveSignalJournal(records);
-    if (state.assetTab === 'signals') renderSignals();
   }
   function renderSignals() {
     var rows = $('signalRows');
@@ -3459,15 +3978,18 @@
     renderTradeEngine();
     var records = loadSignalJournal();
     var visible = records.slice(-40).reverse();
-    var pct = function (value) { return value === null || value === undefined ? '--' : percent(+value, 2); };
+    var pct = function (value) { var parsed = finiteNumber(value); return Number.isFinite(parsed) ? percent(parsed, 2) : '--'; };
     rows.innerHTML = visible.length ? visible.map(function (record) {
       // "Quando" e o fechamento do candle que confirmou o sinal (a identidade do sinal), nao a
-      // hora em que o navegador gravou o registro.
+      // hora em que o navegador gravou o registro. Formatacao com fuso explicito (UX-005).
       var when = Number.isFinite(+record.signalCloseTime) ? +record.signalCloseTime : record.recordedAt;
-      return '<tr><td>' + new Date(when).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + '</td><td>' + escapeHTML(baseAsset(record.symbol)) + '</td><td>' + escapeHTML(intervalLabel(record.interval)) + '</td><td>' + (Number.isFinite(+record.setupScore) ? signed(+record.setupScore) : '--') + '</td><td>' + (Number.isFinite(+record.dataConfidence) ? num(+record.dataConfidence, 0) : '--') + '%</td><td>' + escapeHTML(record.decision) + '</td><td>' + money(record.price) + '</td><td>' + pct(record.outcome && record.outcome.r1h) + '</td><td>' + pct(record.outcome && record.outcome.r24h) + '</td><td>' + pct(record.outcome && record.outcome.r7d) + '</td></tr>';
+      var setupScore = finiteNumber(record.setupScore), confidence = finiteNumber(record.dataConfidence);
+      return '<tr><td>' + AnalyticsCore.formatDisplayTimestamp(when, DISPLAY_TIME_ZONE, 'short') + '</td><td>' + escapeHTML(baseAsset(record.symbol)) + '</td><td>' + escapeHTML(intervalLabel(record.interval)) + '</td><td>' + (Number.isFinite(setupScore) ? signed(setupScore) : '--') + '</td><td>' + (Number.isFinite(confidence) ? num(confidence, 0) : '--') + '%</td><td>' + escapeHTML(record.decision) + '</td><td>' + money(finiteNumber(record.price)) + '</td><td>' + pct(record.outcome && record.outcome.r1h) + '</td><td>' + pct(record.outcome && record.outcome.r24h) + '</td><td>' + pct(record.outcome && record.outcome.r7d) + '</td></tr>';
     }).join('') : '<tr><td colspan="10">Nenhum sinal registrado ainda nesta versao do modelo.</td></tr>';
-    var pending = records.filter(function (record) { return AnalyticsCore.signalOutcomePending(record, Date.now()); }).length;
-    text('signalsStatus', records.length + ' sinais registrados (' + MODEL_VERSION + ') | ' + pending + ' aguardando avaliacao | avaliacao busca candles 1h da Binance sob demanda.');
+    var signalNow = Date.now();
+    var due = records.filter(function (record) { return AnalyticsCore.signalOutcomeState(record, signalNow) === 'due'; }).length;
+    var waiting = records.filter(function (record) { return AnalyticsCore.signalOutcomeState(record, signalNow) === 'waiting'; }).length;
+    text('signalsStatus', records.length + ' sinais registrados (' + MODEL_VERSION + ') | ' + due + ' prontos para avaliacao | ' + waiting + ' aguardando o horizonte | avaliacao usa candles 1m para 1h e candles 15m para 24h/7d | horarios em ' + DISPLAY_TIME_ZONE + '.');
     var summaryRows = $('signalSummaryRows');
     if (summaryRows) {
       var summary = AnalyticsCore.summarizeSignalJournal(records);
@@ -3478,50 +4000,68 @@
     }
   }
   async function evaluateSignalOutcomes() {
+    if (state.evaluatingSignals) { text('signalsStatus', 'Avaliacao de sinais ja esta em andamento.'); return; }
+    state.evaluatingSignals = true;
+    var evaluateButton = $('evaluateSignalsButton');
+    if (evaluateButton) evaluateButton.disabled = true;
     try {
       var records = loadSignalJournal();
-      var pending = records.filter(function (record) { return AnalyticsCore.signalOutcomePending(record, Date.now()); });
-      if (!pending.length) { text('signalsStatus', 'Nenhum sinal pendente: todos os horizontes ja decorridos foram avaliados.'); return; }
-      // Um fetch por SIMBOLO cobre todos os pendentes daquele par (1000 candles 1h ~ 41 dias a
-      // partir do sinal mais antigo), em vez de um fetch por registro limitado a 10 por clique.
-      // Sinais fora da janela ficam com horizonte null, continuam pendentes e o status informa.
-      var bySymbol = {};
-      pending.forEach(function (record) { (bySymbol[record.symbol] = bySymbol[record.symbol] || []).push(record); });
-      var symbols = Object.keys(bySymbol);
-      text('signalsStatus', 'Avaliando ' + pending.length + ' sinais de ' + symbols.length + ' par(es)...');
-      var evaluatedCount = 0, deferred = 0;
-      for (var index = 0; index < symbols.length; index += 1) {
-        var symbol = symbols[index];
-        var group = bySymbol[symbol].slice().sort(function (a, b) { return a.signalCloseTime - b.signalCloseTime; });
-        try {
-          var rows = await fetchSpotJSON('/api/v3/klines?symbol=' + encodeURIComponent(symbol) + '&interval=1h&startTime=' + group[0].signalCloseTime + '&limit=1000', 12000, 'Binance spot');
-          var candles = AnalyticsCore.selectClosedCandles(parseKlines(rows), Date.now());
+      var evaluationNow = Date.now();
+      var pending = records.filter(function (record) { return AnalyticsCore.signalOutcomePending(record, evaluationNow); }).slice(0, 10);
+      if (!pending.length) {
+        var waiting = records.filter(function (record) { return AnalyticsCore.signalOutcomeState(record, evaluationNow) === 'waiting'; }).length;
+        text('signalsStatus', waiting ? 'Nenhum horizonte venceu ainda; ' + waiting + ' sinal(is) aguardando o tempo minimo.' : 'Nenhum sinal pendente: todos os horizontes decorridos foram avaliados.');
+        return;
+      }
+      text('signalsStatus', 'Avaliando ' + pending.length + ' sinais...');
+      var deferred = 0;
+      for (var index = 0; index < pending.length; index += 1) {
+        var record = pending[index];
+        var existing = record.outcome || {};
+        var needs1h = AnalyticsCore.toFiniteNumber(existing.r1h) === null && record.signalCloseTime + 3600000 <= evaluationNow;
+        var needsLong = (AnalyticsCore.toFiniteNumber(existing.r24h) === null && record.signalCloseTime + 86400000 <= evaluationNow)
+          || (AnalyticsCore.toFiniteNumber(existing.r7d) === null && record.signalCloseTime + 7 * 86400000 <= evaluationNow);
+        var requests = [];
+        if (needs1h) {
+          var minuteStart = record.signalCloseTime + 3600000 - 60000;
+          requests.push({ interval: '1m', promise: fetchSpotJSON('/api/v3/klines?symbol=' + encodeURIComponent(record.symbol) + '&interval=1m&startTime=' + minuteStart + '&limit=3', 10000, 'Binance spot') });
+        }
+        // 15m keeps the 24h/7d marks within one quarter-hour while still fitting the full 7-day
+        // horizon in Binance's 1000-row limit (672 bars). The former 1h series could evaluate a
+        // horizon almost 60 minutes late solely because exchange candles are clock-aligned.
+        if (needsLong) requests.push({ interval: '15m', promise: fetchSpotJSON('/api/v3/klines?symbol=' + encodeURIComponent(record.symbol) + '&interval=15m&startTime=' + record.signalCloseTime + '&limit=700', 12000, 'Binance spot') });
+        var results = await Promise.allSettled(requests.map(function (request) { return request.promise; }));
+        var outcome = existing;
+        var signalDeferred = false;
+        results.forEach(function (result, resultIndex) {
+          if (result.status !== 'fulfilled') { signalDeferred = true; return; }
+          var candles = AnalyticsCore.selectClosedCandles(parseKlines(result.value), Date.now());
+          var request = requests[resultIndex];
+          var horizons = request.interval === '1m' ? ['r1h'] : ['r24h', 'r7d'];
+          var intervalMs = request.interval === '1m' ? 60000 : 15 * 60000;
+          outcome = AnalyticsCore.mergeSignalOutcome(outcome, AnalyticsCore.evaluateSignalOutcome(record, candles, {
+            horizons: horizons,
+            maxLagMs: intervalMs + AnalyticsCore.RULESET.clockSkewToleranceMs
+          }));
+        });
+        if (signalDeferred) deferred += 1;
+        await withCrossTabLock(SIGNAL_JOURNAL_LOCK, function saveEvaluatedSignalExclusive() {
           var stored = loadSignalJournal();
-          var changed = false;
-          group.forEach(function (record) {
-            var outcome = AnalyticsCore.evaluateSignalOutcome(record, candles);
-            if (!outcome) return;
-            // Um fetch vazio/insuficiente devolve um outcome todo-null (truthy): sem este guard o
-            // status contaria o sinal como "avaliado" sem nenhum horizonte preenchido.
-            var filledAny = Object.keys(outcome).some(function (name) { return AnalyticsCore.toFiniteNumber(outcome[name]) !== null; });
-            if (!filledAny) return;
-            var match = stored.find(function (row) { return row.inputSnapshotId === record.inputSnapshotId && row.signalCloseTime === record.signalCloseTime; });
-            if (!match) return;
+          var match = stored.find(function (row) { return row.inputSnapshotId === record.inputSnapshotId && row.signalCloseTime === record.signalCloseTime; });
+          if (match) {
             match.outcome = AnalyticsCore.mergeSignalOutcome(match.outcome, outcome);
             match.evaluatedAt = Date.now();
-            changed = true;
-            evaluatedCount += 1;
-          });
-          if (changed) saveSignalJournal(stored);
-        } catch (error) { deferred += group.length; /* fonte indisponivel; tenta na proxima avaliacao */ }
+            saveSignalJournal(stored);
+          }
+        });
       }
       renderSignals();
-      var still = loadSignalJournal().filter(function (record) { return AnalyticsCore.signalOutcomePending(record, Date.now()); }).length;
-      text('signalsStatus', evaluatedCount + ' sinais avaliados'
-        + (deferred ? ' | ' + deferred + ' adiados (fonte indisponivel)' : '')
-        + (still ? ' | ' + still + ' ainda pendentes; clique novamente para a proxima janela' : ' | nenhum pendente'));
+      if (deferred) text('signalsStatus', deferred + ' de ' + pending.length + ' sinais tiveram ao menos um horizonte adiado por fonte indisponivel; tente novamente em instantes.');
     } catch (error) {
       text('signalsStatus', 'Falha ao avaliar sinais: ' + (error && error.message || 'erro inesperado'));
+    } finally {
+      state.evaluatingSignals = false;
+      if (evaluateButton) evaluateButton.disabled = false;
     }
   }
   function exportSignalsJournal() {
@@ -3622,8 +4162,10 @@
       coinMetrics: analysis.coinMetrics ? { status: datasetStatus(analysis.coinMetrics), observedAt: analysis.coinMetrics.observedAt || null } : null,
       options: analysis.options ? { status: datasetStatus(analysis.options), observedAt: analysis.options.observedAt || null, isProxy: !!analysis.options.isProxy } : null,
       institutional: analysis.institutional ? { status: datasetStatus(analysis.institutional), observedAt: analysis.institutional.observedAt || null } : null,
-      external: state.external && state.external.fetchedAt ? { fetchedAt: state.external.fetchedAt, dataStatus: state.external.dataStatus || 'fresh' } : null,
-      news: { fetchedAt: state.newsFetchedAt || null, mode: state.newsMode }
+      microstructure: analysis.microstructure ? { status: datasetStatus(analysis.microstructure), observedAt: analysis.microstructure.observedAt || null, informational: true } : null,
+      cftc: analysis.institutional && analysis.institutional.cftc ? { observedAt: analysis.institutional.cftc.observedAt || null, informational: true } : null,
+      external: state.external && state.external.fetchedAt ? { observedAt: state.external.observedAt || null, observedAtProvenance: state.external.observedAtProvenance || null, fetchedAt: state.external.fetchedAt, dataStatus: state.external.dataStatus || 'fresh' } : null,
+      news: { fetchedAt: state.newsFetchedAt || null, mode: state.newsMode, provenance: state.newsMode === 'auto' ? 'rss-auto' : 'manual-user-session', overrideAt: state.newsOverrideAt, overrideAuthor: state.newsOverrideAuthor, overrideReason: state.newsOverrideReason }
     };
     var payload = AnalyticsCore.buildAnalyticsExport({
       exportedAt: Date.now(),
@@ -3632,7 +4174,9 @@
       snapshot: analysis.snapshot,
       confluence: confluence,
       radar: analysis.radar || null,
-      datasets: datasets
+      datasets: datasets,
+      evidence: analysis.snapshot ? analysis.snapshot.inputComponents : null,
+      rawEvidence: analysis.rawEvidence || null
     });
     var json = JSON.stringify(payload, null, 2);
     try {
@@ -3650,7 +4194,7 @@
   }
   function boardClosedCandles(symbol) {
     var item = state.board.find(function (row) { return row.symbol === symbol; });
-    return item && Array.isArray(item.candles) ? selectClosedCandles(item.candles) : null;
+    return item && item.interval === state.interval && Array.isArray(item.candles) ? selectClosedCandles(item.candles) : null;
   }
   function dailyDateKey(candle) { return new Date(candle.time).toISOString().slice(0, 10); }
   function renderCorrelation(a) {
@@ -3698,8 +4242,10 @@
   }
   function bind() {
     populateAssetSelect();
-    setAssetTab(state.assetTab);
+    setAssetTab(state.assetTab, false);
     setView(state.view);
+    syncIntervalButtons(state.interval);
+    syncSortButtons(state.sort);
     on('viewDashboardButton', 'click', function () { setView('dashboard'); });
     on('viewAssetButton', 'click', function () { setView('asset'); });
     on('refreshButton', 'click', function () { refresh(true); });
@@ -3721,13 +4267,42 @@
     on('sortChangeButton', 'click', function () { setSort('change'); });
     on('sortVolumeButton', 'click', function () { setSort('volume'); });
     on('newsModeSelect', 'change', function (e) {
-      state.newsMode = e.target.value;
-      if (state.analysis && analysisMatchesSelection(state.analysis)) {
-        stampAnalysisSnapshot(state.analysis, 'news-mode');
-        renderConfluence(state.analysis);
-        renderWrittenAnalysis(state.analysis);
-        updateScore(state.analysis);
+      var manual = e.target.value !== 'auto';
+      showNewsOverrideEditor(manual);
+      if (!manual) {
+        applyNewsMode('auto');
+        var author = $('newsOverrideAuthor'), reason = $('newsOverrideReason');
+        if (author) { author.value = ''; author.removeAttribute('aria-invalid'); }
+        if (reason) { reason.value = ''; reason.removeAttribute('aria-invalid'); }
+        setNewsOverrideFeedback('Modo automatico restaurado; autoria e motivo foram removidos do snapshot.', false);
+      } else {
+        var authorInput = $('newsOverrideAuthor'), reasonInput = $('newsOverrideReason');
+        if (authorInput && state.newsOverrideAuthor) authorInput.value = state.newsOverrideAuthor;
+        if (reasonInput && state.newsOverrideReason) reasonInput.value = state.newsOverrideReason;
+        setNewsOverrideFeedback('Preencha autoria e motivo; o score so muda depois de aplicar.', false);
+        if (authorInput) authorInput.focus();
       }
+    });
+    on('newsOverridePanel', 'submit', function (e) {
+      e.preventDefault();
+      var authorInput = $('newsOverrideAuthor'), reasonInput = $('newsOverrideReason'), selector = $('newsModeSelect');
+      var author = cleanNewsOverrideText(authorInput && authorInput.value, 80);
+      var reason = cleanNewsOverrideText(reasonInput && reasonInput.value, 180);
+      if (authorInput) authorInput.setAttribute('aria-invalid', author ? 'false' : 'true');
+      if (reasonInput) reasonInput.setAttribute('aria-invalid', reason ? 'false' : 'true');
+      if (!author || !reason || !selector || selector.value === 'auto') {
+        setNewsOverrideFeedback('Informe autor e motivo antes de aplicar o override.', true);
+        if (!author && authorInput) authorInput.focus(); else if (!reason && reasonInput) reasonInput.focus();
+        return;
+      }
+      authorInput.value = author;
+      reasonInput.value = reason;
+      if (applyNewsMode(selector.value, author, reason)) setNewsOverrideFeedback('Override aplicado e registrado no snapshot/export.', false);
+    });
+    ['newsOverrideAuthor', 'newsOverrideReason'].forEach(function (id) {
+      on(id, 'input', function (e) {
+        if (cleanNewsOverrideText(e.target.value, id === 'newsOverrideAuthor' ? 80 : 180)) e.target.setAttribute('aria-invalid', 'false');
+      });
     });
     on('newsRefreshButton', 'click', async function () {
       text('newsStatus', 'Atualizando noticias e macro...');
@@ -3753,9 +4328,38 @@
     on('candleCountSelect', 'change', function (e) { state.chart.candles = +e.target.value || 120; drawPriceChart(); });
     on('evaluateSignalsButton', 'click', evaluateSignalOutcomes);
     on('exportSignalsButton', 'click', exportSignalsJournal);
-    on('clearSignalsButton', 'click', function () { saveSignalJournal([]); renderSignals(); });
+    on('syncSignalsButton', 'click', function () {
+      var input = $('signalSyncCode');
+      var id = String(input && input.value || '').trim();
+      if (!validSignalSyncId(id)) { setSignalSyncStatus('Codigo invalido: use de 32 a 128 letras, numeros, _ ou -.', false); return; }
+      currentSignalSyncClient().setSyncId(id);
+      syncDurableSignalJournal(loadSignalJournal());
+    });
+    on('copySignalSyncCodeButton', 'click', function () {
+      var id = signalSyncId();
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(id).then(function () { setSignalSyncStatus('Codigo privado copiado. Guarde-o como uma senha.', currentSignalSyncClient().state.configured); }).catch(function () { setSignalSyncStatus('Nao foi possivel copiar o codigo automaticamente.', false); });
+    });
+    on('clearSignalsButton', 'click', async function () {
+      if (state.evaluatingSignals) { text('signalsStatus', 'Aguarde a avaliacao em andamento antes de limpar o journal.'); return; }
+      if (!window.confirm('Limpar definitivamente o registro local e o journal duravel deste codigo?')) return;
+      currentSignalSyncClient().cancelScheduled();
+      await clearDurableSignalJournal();
+      renderSignals();
+    });
     on('lagBacktestButton', 'click', runLagBacktest);
-    on('clearTradesButton', 'click', function () { saveTradeJournal([]); saveMachineStates({}); renderTradeEngine(); });
+    on('clearTradesButton', 'click', async function () {
+      if (!window.confirm('Limpar definitivamente os trades simulados e os estados de posicao deste modelo?')) return;
+      try {
+        await withCrossTabLock(SIGNAL_MACHINE_LOCK, function clearTradesExclusive() {
+          saveTradeJournal([]);
+          saveMachineStates({});
+        });
+      } catch (error) {
+        health('Concorrencia multiaba', false, 'falha ao limpar trades: ' + (error && error.message || 'erro'));
+        return;
+      }
+      renderTradeEngine();
+    });
     on('exportSnapshotButton', 'click', exportSnapshot);
     on('alertsEnabled', 'change', function (e) {
       if (!e.target.checked) { alertState.enabled = false; text('alertsStatus', 'Desativados'); return; }
@@ -3765,15 +4369,24 @@
         alertState.enabled = permission === 'granted';
         e.target.checked = alertState.enabled;
         text('alertsStatus', alertState.enabled ? 'Ativos' : 'Permissao negada');
+      }).catch(function () {
+        alertState.enabled = false;
+        e.target.checked = false;
+        text('alertsStatus', 'Falha ao solicitar permissao');
       });
     });
     document.querySelectorAll('.position-calculator input').forEach(function (input) { input.addEventListener('input', calculatePosition); });
     document.querySelectorAll('.position-calculator select').forEach(function (select) { select.addEventListener('change', calculatePosition); });
     applyIndicatorHelp();
     calculatePosition();
-    window.addEventListener('resize', function () { drawPriceChart(); drawRsiChart(); drawMacdChart(); drawVolumeChart(); drawFlowChart(); });
+    var resizeDrawTimer = null;
+    window.addEventListener('resize', function () {
+      if (resizeDrawTimer) clearTimeout(resizeDrawTimer);
+      resizeDrawTimer = setTimeout(function () { drawPriceChart(); drawRsiChart(); drawMacdChart(); drawVolumeChart(); drawFlowChart(); }, 100);
+    });
     window.addEventListener('beforeunload', closeLiquidationStream);
-    state.timer = setInterval(function () { if (state.live) refresh(); }, REFRESH_MS);
+    document.addEventListener('visibilitychange', function () { if (state.live && !document.hidden) refresh(true); });
+    state.timer = setInterval(function () { if (state.live && !document.hidden) refresh(); }, REFRESH_MS);
   }
   function runQuantSelfCheck() {
     var rising = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
@@ -3783,6 +4396,11 @@
     var bbTest = bollinger(flat, 20, 2);
     var noDerivativeData = buildCoreAnalysis(sampleCandles, null, null, { interval: '1M' });
     var radarTest = buildRadarScore('BTCUSDT', noDerivativeData);
+    var derivativeNow = Date.now();
+    var derivativeOrderTest = normalizeDerivativeDetail([
+      { timestamp: derivativeNow - 1_000, sumOpenInterestValue: '200' },
+      { timestamp: derivativeNow - 2_000, sumOpenInterestValue: '100' }
+    ], [], [], [], [], [], []);
     var checks = [
       lastFinite(emaTest) === 4,
       rsi(rising, 14) === 100,
@@ -3791,12 +4409,13 @@
       williamsR(sampleCandles, 14) <= 0 && williamsR(sampleCandles, 14) >= -100,
       noDerivativeData.derivScore === 0,
       radarTest.radar.components.find(function (part) { return part.name === 'Derivativos'; }).available === false,
+      derivativeOrderTest.oiChangePct === 100 && derivativeOrderTest.oiWindowStart === derivativeNow - 2_000,
+      normalizeSymbol('eth') === 'ETHUSDT' && normalizeSymbol('X'.repeat(100)) === 'BTCUSDT',
       Math.abs(((98000 + 3 * 60000) / 4) - 69500) < 0.000001
     ];
     return { ok: checks.every(Boolean), passed: checks.filter(Boolean).length, total: checks.length };
   }
   state.quantChecks = runQuantSelfCheck();
-  purgeStaleStorage();
-  bind(); refresh();
-  setTimeout(warmHistoricalProfiles, 1800);
+  reportLegacyStorage();
+  bind(); initDurableSignalSync(); refresh();
 })();

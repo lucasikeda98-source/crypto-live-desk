@@ -16,15 +16,24 @@ jobs:
   deterministic-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22, 24]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Use Node.js 22
+      - name: Use Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
-          node-version: 22
-      - name: Run deterministic tests
-        run: npm test
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Audit locked dependencies
+        run: npm audit --audit-level=low
+      - name: Run deterministic tests with coverage floors
+        run: npm run test:coverage
 
   # BLOQUEANTE e independente de Binance: valida boot no Chromium (zero excecoes do app
   # sob falha total de rede), DOM esperado e layout 390px. Complementa a suite deterministica
@@ -46,10 +55,11 @@ jobs:
       - name: Run browser boot check
         run: node scripts/browser-boot-check.cjs
 
-  # Informativo: runners hospedados do GitHub ficam em regiao onde a Binance
-  # responde HTTP 451 (geo-restricao), entao o carregamento completo do painel
-  # nao e alcancavel a partir do CI. O gate autoritativo do smoke roda local
-  # (npm run test:browser) e contra o deploy, antes de cada release.
+  # LIMITACAO DOCUMENTADA (OPS-003/REV-CC-01): o smoke busca klines direto da Binance e
+  # runners hospedados do GitHub podem receber HTTP 451 (geo-bloqueio) independente do codigo.
+  # Por isso o job e ADVISORY (continue-on-error) ate os dados serem proxyados pela camada /api
+  # com fixture de CI; o gate de navegador BLOQUEANTE e o browser-boot acima (independente de
+  # rede) e o smoke autoritativo roda local (npm run test:browser) antes de cada release.
   browser-smoke:
     runs-on: windows-latest
     timeout-minutes: 15
@@ -57,10 +67,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Use Node.js 22
+      - name: Use Node.js 24
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
       - name: Run browser smoke (Edge headless, 1 retry)
         shell: pwsh
         env:

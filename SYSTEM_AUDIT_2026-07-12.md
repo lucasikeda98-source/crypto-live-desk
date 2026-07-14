@@ -2,6 +2,8 @@
 
 Data: 2026-07-12
 
+> **Registro historico substituido:** este documento preserva o resultado pontual da auditoria original, mas nao representa o estado atual nem aprovacao definitiva. Uma rodada posterior do Codex confirmou inconsistencias que contradizem algumas conclusoes abaixo. O protocolo vigente esta em `AUDIT_LOOP.md` e os achados abertos em `AUDIT_LEDGER.md`. Estado: **AGUARDANDO CLAUDE CODE**.
+
 ## Escopo
 
 - Dashboard geral e radar multiativos.

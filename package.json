@@ -1,15 +1,24 @@
 {
   "name": "crypto-live-desk",
-  "version": "1.0.0-preview.6",
+  "version": "1.0.0-preview.8",
   "private": true,
   "description": "Crypto Live Desk analytics contracts",
   "scripts": {
     "dev": "node scripts/dev-server.cjs",
     "test": "node --test",
     "test:boot": "node scripts/browser-boot-check.cjs",
-    "test:browser": "node scripts/browser-smoke.cjs"
+    "test:browser": "node scripts/browser-smoke.cjs",
+    "test:coverage": "node --experimental-test-coverage --test --test-coverage-lines=95 --test-coverage-branches=75 --test-coverage-functions=90",
+    "audit:inventory": "node scripts/audit-inventory.cjs --write"
   },
   "engines": {
     "node": ">=22"
+  },
+  "dependencies": {
+    "@upstash/ratelimit": "^2.0.8",
+    "@upstash/redis": "^1.38.0"
+  },
+  "devDependencies": {
+    "fengari": "^0.1.5"
   }
 }

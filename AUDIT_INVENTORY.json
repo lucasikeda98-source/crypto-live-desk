@@ -1,0 +1,908 @@
+{
+  "schemaVersion": 1,
+  "branch": "codex/cycle-d-sources",
+  "head": "887ec57bccbd176d8052a38b471d21b9c1dfa0c2",
+  "totals": {
+    "files": 61,
+    "lines": 18274,
+    "bytes": 1068161
+  },
+  "byCategory": {
+    "repository": {
+      "files": 4,
+      "lines": 41,
+      "bytes": 694
+    },
+    "ci": {
+      "files": 1,
+      "lines": 63,
+      "bytes": 1788
+    },
+    "documentation": {
+      "files": 10,
+      "lines": 1811,
+      "bytes": 136736
+    },
+    "api": {
+      "files": 10,
+      "lines": 1581,
+      "bytes": 74521
+    },
+    "application": {
+      "files": 1,
+      "lines": 4338,
+      "bytes": 316001
+    },
+    "ui": {
+      "files": 2,
+      "lines": 931,
+      "bytes": 79327
+    },
+    "analytics-core": {
+      "files": 1,
+      "lines": 2618,
+      "bytes": 139124
+    },
+    "library": {
+      "files": 6,
+      "lines": 1313,
+      "bytes": 59631
+    },
+    "configuration": {
+      "files": 3,
+      "lines": 151,
+      "bytes": 4560
+    },
+    "tooling": {
+      "files": 3,
+      "lines": 631,
+      "bytes": 26139
+    },
+    "test": {
+      "files": 20,
+      "lines": 4796,
+      "bytes": 229640
+    }
+  },
+  "files": [
+    {
+      "path": ".env.example",
+      "category": "repository",
+      "lines": 6,
+      "bytes": 206,
+      "sha256": "1bab1968c62facf0f5069e975a93e8b942231a8b97960d55c7c5472a071f411e",
+      "requiredPasses": [
+        "static",
+        "consistency"
+      ]
+    },
+    {
+      "path": ".gitattributes",
+      "category": "repository",
+      "lines": 4,
+      "bytes": 58,
+      "sha256": "8480c5b5d6bb83ecee84d438a26dfaf0cca8cf8441387bbd9720d6da92630d4e",
+      "requiredPasses": [
+        "static",
+        "consistency"
+      ]
+    },
+    {
+      "path": ".github/workflows/quality.yml",
+      "category": "ci",
+      "lines": 63,
+      "bytes": 1788,
+      "sha256": "d1a1dff588bb4c53bedb7bfdfc01bcb7e43d60e813d380e5199701b458ce711b",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "release"
+      ]
+    },
+    {
+      "path": ".gitignore",
+      "category": "repository",
+      "lines": 13,
+      "bytes": 170,
+      "sha256": "c148ddee7db5f972c792c26cc202d19b9de5ccf805b3a6d44c83e17b69bdfa3a",
+      "requiredPasses": [
+        "static",
+        "consistency"
+      ]
+    },
+    {
+      "path": ".vercelignore",
+      "category": "repository",
+      "lines": 18,
+      "bytes": 260,
+      "sha256": "10fc22825ee7fde1c94df64b63da1af7b05cbb21cd21887a0bd4ae131990617d",
+      "requiredPasses": [
+        "static",
+        "consistency"
+      ]
+    },
+    {
+      "path": "AGENTS.md",
+      "category": "documentation",
+      "lines": 13,
+      "bytes": 707,
+      "sha256": "c05f6bf5c197780863d15e1d6320619c71d85dd0419e00459ad8021d42d17ded",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "runtime-reconciliation"
+      ]
+    },
+    {
+      "path": "ANALYTIC_CONTRACT_V1.md",
+      "category": "documentation",
+      "lines": 432,
+      "bytes": 26046,
+      "sha256": "73ddf6a051dfb4af55d5bfb8cf42383a30584703c3d741ba64bd72a866c4997f",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "runtime-reconciliation"
+      ]
+    },
+    {
+      "path": "ANALYTICS_COVERAGE.md",
+      "category": "documentation",
+      "lines": 324,
+      "bytes": 17607,
+      "sha256": "b3ad66095538671543b97031699e70b94ca53b1d5f6fcb84a1dd3b555c39ed44",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "runtime-reconciliation"
+      ]
+    },
+    {
+      "path": "api/defillama.js",
+      "category": "api",
+      "lines": 124,
+      "bytes": 4945,
+      "sha256": "25c2443021b78870fe8aec713e593decff9eb40d33537b65c6c25be29b3c799b",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance",
+        "integration",
+        "resilience"
+      ]
+    },
+    {
+      "path": "api/institutional.js",
+      "category": "api",
+      "lines": 188,
+      "bytes": 8400,
+      "sha256": "55f7b30dbc7b7a2f598056d93ed3e88c31edddbc0967a28f6a7a74f92b32fc02",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance",
+        "integration",
+        "resilience"
+      ]
+    },
+    {
+      "path": "api/macro.js",
+      "category": "api",
+      "lines": 102,
+      "bytes": 5273,
+      "sha256": "7c1e7004e042f8d93faab07544954431174321e83cfed46b4ef1f15b39e3a1a1",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance",
+        "integration",
+        "resilience"
+      ]
+    },
+    {
+      "path": "api/market-microstructure.js",
+      "category": "api",
+      "lines": 226,
+      "bytes": 11468,
+      "sha256": "4e1c3ad0d2864963b0b138b1d904c528fed13bcaf05b286bd4e1366dd645e5be",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance",
+        "integration",
+        "resilience"
+      ]
+    },
+    {
+      "path": "api/market.js",
+      "category": "api",
+      "lines": 185,
+      "bytes": 8395,
+      "sha256": "4038fbac3d18b73116ade83a7f284d49739df78412c84105cda6225abb162f1d",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance",
+        "integration",
+        "resilience"
+      ]
+    },
+    {
+      "path": "api/news.js",
+      "category": "api",
+      "lines": 91,
+      "bytes": 3612,
+      "sha256": "95a7670d875beaaa99466b49307913b837db3d2d2ca79de3bc07c9c0a7618be2",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance",
+        "integration",
+        "resilience"
+      ]
+    },
+    {
+      "path": "api/options.js",
+      "category": "api",
+      "lines": 271,
+      "bytes": 14162,
+      "sha256": "1f8bec848b62be3f9ea99ebf7913c87236c246b1e1d4e717286bec8304547735",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance",
+        "integration",
+        "resilience"
+      ]
+    },
+    {
+      "path": "api/signal-worker.js",
+      "category": "api",
+      "lines": 229,
+      "bytes": 10555,
+      "sha256": "37155f864306ef3d3b01b1f958414fc1e8512e5caeb50fc006c58cf0c7328abe",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance",
+        "integration",
+        "resilience"
+      ]
+    },
+    {
+      "path": "api/signals.js",
+      "category": "api",
+      "lines": 110,
+      "bytes": 4663,
+      "sha256": "aa9e597e5eb5c4369889bed4f297d63085fe846209993355c56eaae30708fbb5",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance",
+        "integration",
+        "resilience"
+      ]
+    },
+    {
+      "path": "api/tradfi.js",
+      "category": "api",
+      "lines": 55,
+      "bytes": 3048,
+      "sha256": "6dfbe5a117b7655578fe318e6e7167f99da937b72ce5d29ee7b60d787913edea",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance",
+        "integration",
+        "resilience"
+      ]
+    },
+    {
+      "path": "app.js",
+      "category": "application",
+      "lines": 4338,
+      "bytes": 316001,
+      "sha256": "26cd7163a0abfe1dbf51c393103b4239d6937d494cf8aab721e96dc9f9cd2cc1",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance",
+        "browser-desktop",
+        "browser-mobile",
+        "accessibility"
+      ]
+    },
+    {
+      "path": "AUDIT_LEDGER.md",
+      "category": "documentation",
+      "lines": 169,
+      "bytes": 26122,
+      "sha256": "0b6abc7e7c74881e0409f0d4a54f72654d04e4ce7f6c6762fdf8971f7c3df7e9",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "runtime-reconciliation"
+      ]
+    },
+    {
+      "path": "AUDIT_LOOP.md",
+      "category": "documentation",
+      "lines": 128,
+      "bytes": 5469,
+      "sha256": "e2d43ae09b1c9e6759d44a3c12254b2b6fb9cbe09a0f544ca04ab42c14dc053c",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "runtime-reconciliation"
+      ]
+    },
+    {
+      "path": "CLAUDE.md",
+      "category": "documentation",
+      "lines": 14,
+      "bytes": 879,
+      "sha256": "5ee422740e608e56e89b139975ffae1e06cca5c0e9af09263a185f17ea56391d",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "runtime-reconciliation"
+      ]
+    },
+    {
+      "path": "CODEX_HANDOFF.md",
+      "category": "documentation",
+      "lines": 431,
+      "bytes": 40468,
+      "sha256": "17eab4b3917f2304dddac5c2ac876e75c3b71a8b40040ad39d2b843c4435e804",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "runtime-reconciliation"
+      ]
+    },
+    {
+      "path": "index.html",
+      "category": "ui",
+      "lines": 593,
+      "bytes": 45616,
+      "sha256": "b05f4bf397a8f0ae388a149051f3104e84b7734ddb3e82b3ca5db1042298c7ee",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "browser-desktop",
+        "browser-mobile",
+        "accessibility"
+      ]
+    },
+    {
+      "path": "lib/analytics-core.js",
+      "category": "analytics-core",
+      "lines": 2618,
+      "bytes": 139124,
+      "sha256": "fbdcb231a970feb748348ac29d969205a031cc951e05b79eef25205cd71dca07",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance",
+        "property-tests",
+        "numerical"
+      ]
+    },
+    {
+      "path": "lib/api-guard.js",
+      "category": "library",
+      "lines": 192,
+      "bytes": 8951,
+      "sha256": "7a6fda228ee2e1eca2875d0997dd79557889c6dc69aad18ecc59015086476cf5",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance"
+      ]
+    },
+    {
+      "path": "lib/cross-tab-lock.js",
+      "category": "library",
+      "lines": 150,
+      "bytes": 6327,
+      "sha256": "b4a45869962da8bbc958700ffbcb6f3e82c43466fd8b72a7b20978b182390c74",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance"
+      ]
+    },
+    {
+      "path": "lib/durable-signals.js",
+      "category": "library",
+      "lines": 535,
+      "bytes": 24986,
+      "sha256": "139badb77c6aded3a7999c46e27a9f140a12d4bcf116fd8dca5ad3eae78aeb89",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance"
+      ]
+    },
+    {
+      "path": "lib/redis-runtime.js",
+      "category": "library",
+      "lines": 30,
+      "bytes": 905,
+      "sha256": "4e8f83f6e24a80a87a5f3ebc7bab3c03313b92d191d7202e399fd659ca3b4e3e",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance"
+      ]
+    },
+    {
+      "path": "lib/request-client.js",
+      "category": "library",
+      "lines": 92,
+      "bytes": 4634,
+      "sha256": "189b0c70a15fdd24d3f6582344cf16fd2658c5edd4dea6616837c75c82decb00",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance"
+      ]
+    },
+    {
+      "path": "lib/signal-sync-client.js",
+      "category": "library",
+      "lines": 314,
+      "bytes": 13828,
+      "sha256": "f4a7b82875266ceb6ced5dcd6a468a5904db235a5756698d40bd4bae7fe9c217",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance"
+      ]
+    },
+    {
+      "path": "OPERATIONS_RUNBOOK.md",
+      "category": "documentation",
+      "lines": 135,
+      "bytes": 7772,
+      "sha256": "c47d93b499a0818ff76064789f6b2f3f507fa96309f5a2e3b0bdeaef37b07bd6",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "runtime-reconciliation"
+      ]
+    },
+    {
+      "path": "package-lock.json",
+      "category": "configuration",
+      "lines": 58,
+      "bytes": 1930,
+      "sha256": "39999757448c4b1c4830ea2e2a0c953f575d73b422b78c163338662a7522b3a1",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "release"
+      ]
+    },
+    {
+      "path": "package.json",
+      "category": "configuration",
+      "lines": 20,
+      "bytes": 637,
+      "sha256": "867d5355cab12ddc78c2736aa6b9c0ddda7b7e6844ed40704d9ce424c07e78c1",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "release"
+      ]
+    },
+    {
+      "path": "README.md",
+      "category": "documentation",
+      "lines": 92,
+      "bytes": 8332,
+      "sha256": "df6788a4a548d191b9b8f8f2448345de91615abf427cb2c288eac547cd7ad29e",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "runtime-reconciliation"
+      ]
+    },
+    {
+      "path": "scripts/audit-inventory.cjs",
+      "category": "tooling",
+      "lines": 109,
+      "bytes": 3838,
+      "sha256": "934efcdfe2109e2c3d461b4ed8f7953459703a647b67c900ef7b358c5721f5b8",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance"
+      ]
+    },
+    {
+      "path": "scripts/browser-smoke.cjs",
+      "category": "tooling",
+      "lines": 399,
+      "bytes": 17827,
+      "sha256": "b22ac3b7fdb791f405a65b9c199de6892aad89dd710003cc73f6af4312b45d4c",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance"
+      ]
+    },
+    {
+      "path": "scripts/dev-server.cjs",
+      "category": "tooling",
+      "lines": 123,
+      "bytes": 4474,
+      "sha256": "a33254e6f86cc92fdd8faab46f2e9013e5a5d2ce7bd00bf18e6979bae5ecf064",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance"
+      ]
+    },
+    {
+      "path": "styles.css",
+      "category": "ui",
+      "lines": 338,
+      "bytes": 33711,
+      "sha256": "cf6d84c3792c45f66902fa441e640ddc7d068a8f06e096f22dba293e0ce3b027",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "browser-desktop",
+        "browser-mobile",
+        "accessibility"
+      ]
+    },
+    {
+      "path": "SYSTEM_AUDIT_2026-07-12.md",
+      "category": "documentation",
+      "lines": 73,
+      "bytes": 3334,
+      "sha256": "c186314b05a3d5c832cf76ae62efcfb18ea24b9d2414ee526d4d5cec7b50c80f",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "runtime-reconciliation"
+      ]
+    },
+    {
+      "path": "test/analytics-core.test.js",
+      "category": "test",
+      "lines": 1372,
+      "bytes": 70655,
+      "sha256": "d963d3f376ba3c9b87f0d051d2d7e7c3cce4730fce0facbef6ae6afd2961c04c",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance"
+      ]
+    },
+    {
+      "path": "test/api-guard.test.js",
+      "category": "test",
+      "lines": 175,
+      "bytes": 8892,
+      "sha256": "020223ce2c132c000725642fffde6d5ff582eaba2ed601e7abb755847f55f22b",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance"
+      ]
+    },
+    {
+      "path": "test/contract-v1.test.js",
+      "category": "test",
+      "lines": 159,
+      "bytes": 8936,
+      "sha256": "6bc22534ca2ad2cbce066468d04963e6818a7c0b8c3ff2b97137f9e73a6bb8fe",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance"
+      ]
+    },
+    {
+      "path": "test/cross-tab-lock.test.js",
+      "category": "test",
+      "lines": 113,
+      "bytes": 5301,
+      "sha256": "ea4a423ecad125a37974c7cbcb53a31e79f4c15620fa919ef8e1f501e42c70f2",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance"
+      ]
+    },
+    {
+      "path": "test/defillama-api.test.js",
+      "category": "test",
+      "lines": 124,
+      "bytes": 5104,
+      "sha256": "6728afca05e96df7b698cd7a1e6a9b2e0ba2d978267f38bfb9661700b4ae8acd",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance"
+      ]
+    },
+    {
+      "path": "test/dev-server.test.js",
+      "category": "test",
+      "lines": 88,
+      "bytes": 3890,
+      "sha256": "83ab1742650a830f27fe84bd886cec57937a10863a64ceae7a5bb5511e932773",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance"
+      ]
+    },
+    {
+      "path": "test/durable-signals.test.js",
+      "category": "test",
+      "lines": 303,
+      "bytes": 13199,
+      "sha256": "2fc86503391caa28e56a9f671801aa4c3e9e375afd02bd11f9d1fbb7a516d74a",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance"
+      ]
+    },
+    {
+      "path": "test/features.test.js",
+      "category": "test",
+      "lines": 318,
+      "bytes": 20573,
+      "sha256": "92f79fc5dab8dae301a10f6a87e938d7349f4af61410da6fb77b36b9fdd6ba00",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance"
+      ]
+    },
+    {
+      "path": "test/fuzz-invariants.test.js",
+      "category": "test",
+      "lines": 118,
+      "bytes": 5560,
+      "sha256": "1e4c9609cfd51ff49435e782571faa270bf5206d674dc07793545e72926e446b",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance"
+      ]
+    },
+    {
+      "path": "test/institutional-api.test.js",
+      "category": "test",
+      "lines": 155,
+      "bytes": 7422,
+      "sha256": "888a46240f6cb5be845970b6f8fe4f6c733c0bd92c6a23ac1460f63e42d7f23b",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance"
+      ]
+    },
+    {
+      "path": "test/macro-api.test.js",
+      "category": "test",
+      "lines": 120,
+      "bytes": 4726,
+      "sha256": "6518e4ea172542085ad3263fdb9a933e2d4a07b1421bf514f6373b793c392e68",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance"
+      ]
+    },
+    {
+      "path": "test/market-api.test.js",
+      "category": "test",
+      "lines": 170,
+      "bytes": 7713,
+      "sha256": "a655480acebb02675e1ee755c49ecd4498ebd81703534cf6ecbc11e78850b600",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance"
+      ]
+    },
+    {
+      "path": "test/market-microstructure-api.test.js",
+      "category": "test",
+      "lines": 176,
+      "bytes": 8506,
+      "sha256": "98f3acbf0a83fd445ab10ac6420c569fe9f7e4bc40d366d8595ab706307b44ad",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance"
+      ]
+    },
+    {
+      "path": "test/news-api.test.js",
+      "category": "test",
+      "lines": 69,
+      "bytes": 2742,
+      "sha256": "3cceca40d339f09fac894e344edbe53399a6f190c41fc37f545f0808ccba75a8",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance"
+      ]
+    },
+    {
+      "path": "test/options-api.test.js",
+      "category": "test",
+      "lines": 146,
+      "bytes": 7136,
+      "sha256": "78a890982da12d75b8fe9ded06d4a48674b1519926c1d0ce3424ffd74e1ceb40",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance"
+      ]
+    },
+    {
+      "path": "test/request-client.test.js",
+      "category": "test",
+      "lines": 100,
+      "bytes": 4285,
+      "sha256": "166677bb5940508251e803597236904b328b83aec6b9100d1a7faea725107867",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance"
+      ]
+    },
+    {
+      "path": "test/signal-sync-client.test.js",
+      "category": "test",
+      "lines": 513,
+      "bytes": 20702,
+      "sha256": "949095ee33646e15f8271af917f8ab233bea7e4940d65744c810848afc35a63e",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance"
+      ]
+    },
+    {
+      "path": "test/signal-worker-api.test.js",
+      "category": "test",
+      "lines": 297,
+      "bytes": 12920,
+      "sha256": "5806c7c717ff1d454aa5694f10a0618e9ded108aa1efb7a2023a5acfebf2ecaa",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance"
+      ]
+    },
+    {
+      "path": "test/signals-api.test.js",
+      "category": "test",
+      "lines": 158,
+      "bytes": 7238,
+      "sha256": "98dcd6bb44337683f6848211a573409d696bcd358936c61efeea21b9197bc55c",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance"
+      ]
+    },
+    {
+      "path": "test/tradfi-api.test.js",
+      "category": "test",
+      "lines": 122,
+      "bytes": 4140,
+      "sha256": "77b3618c9fc8be8ac0c464ebf45c92383fef5aa8073d5475365abbbf5411f842",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "tests",
+        "security",
+        "performance"
+      ]
+    },
+    {
+      "path": "vercel.json",
+      "category": "configuration",
+      "lines": 73,
+      "bytes": 1993,
+      "sha256": "9e27493f6f1167ee8af21990d791d0ced7542d67adde1cf34e8f433a5025f12a",
+      "requiredPasses": [
+        "static",
+        "consistency",
+        "release"
+      ]
+    }
+  ]
+}

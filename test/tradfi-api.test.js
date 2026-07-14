@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const handler = require('../api/tradfi');
+const core = require('../lib/analytics-core');
 
 function responseMock() {
   return {
@@ -92,4 +93,30 @@ test('rota TradFi rejeita metodos diferentes de GET', async () => {
 
   assert.equal(response.statusCode, 405);
   assert.equal(response.headers.Allow, 'GET');
+});
+
+test('score macro exclui COIN, MSTR e mineradoras para evitar proxy circular de cripto', () => {
+  assert.equal(handler.scoreMacroAssets([
+    { symbol: 'COIN', change5d: 30 },
+    { symbol: 'MSTR', change5d: 30 },
+    { symbol: 'MARA', change5d: 30 }
+  ]), 0);
+  assert.equal(handler.scoreMacroAssets([
+    { symbol: 'QQQ', change5d: 3 },
+    { symbol: 'SPY', change5d: -3 },
+    { symbol: 'NVDA', change5d: 4 }
+  ]), 1);
+});
+
+test('normalizador TradFi descarta timestamp futuro ou fora do alcance de Date sem derrubar a rota', () => {
+  const payload = yahooPayload();
+  payload.chart.result[0].timestamp.push(9e15, 1_900_000_000);
+  payload.chart.result[0].indicators.quote[0].close.push(999, 999);
+  payload.chart.result[0].indicators.quote[0].open.push(999, 999);
+  payload.chart.result[0].indicators.quote[0].high.push(999, 999);
+  payload.chart.result[0].indicators.quote[0].low.push(999, 999);
+  payload.chart.result[0].indicators.quote[0].volume.push(1, 1);
+  const rows = core.normalizeTradFiRows(payload, 1_800_000_000_000);
+  assert.equal(rows.length, 2);
+  assert.equal(rows.every((row) => row.close !== 999), true);
 });

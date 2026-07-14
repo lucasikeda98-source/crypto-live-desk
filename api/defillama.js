@@ -1,3 +1,6 @@
+const { toFiniteNumber } = require('../lib/analytics-core');
+const { applyApiPolicyAsync } = require('../lib/api-guard');
+
 // Proxy for DeFiLlama /protocols. The upstream list is ~10-15MB (every DeFi protocol);
 // the client only ever matches a handful by name/slug/symbol/gecko_id and needs tvl >= $1M
 // to score. We fetch server-side, keep the fields the client reads, drop anything below the
@@ -6,6 +9,7 @@
 const FIELDS = ['name', 'slug', 'symbol', 'gecko_id', 'tvl', 'change_1d', 'change_7d'];
 const MIN_TVL = 1_000_000; // mirrors RULESET.protocolMinTvl: below it nothing can match on fallback
 const MAX_ROWS = 500; // top-by-TVL cap for fallback matches (gecko/name), all high-TVL
+const RETRY_BACKOFF_MS = 15_000;
 // Explicit protocol mappings in the client's ASSET_CONTEXT match WITHOUT a TVL floor, so they
 // must be pinned even when their DeFiLlama TVL is low/zero (e.g. Chainlink, an oracle).
 // Keep in sync with the `protocol:` keys in app.js ASSET_CONTEXT.
@@ -22,6 +26,8 @@ function isPinned(protocol) {
 
 let cachedPayload = null;
 let cachedAt = 0;
+let refreshPromise = null;
+let retryAfterAt = 0;
 
 async function getJson(url) {
   const response = await fetch(url, {
@@ -43,39 +49,76 @@ function slim(protocol) {
   return row;
 }
 
+function protocolIdentity(protocol) {
+  return normalizeKey(protocol && (protocol.slug || protocol.gecko_id || protocol.name || protocol.symbol));
+}
+
 async function loadProtocols() {
   const all = await getJson('https://api.llama.fi/protocols');
   const rows = Array.isArray(all) ? all : [];
-  const byTvl = rows
-    .filter((protocol) => protocol && Number(protocol.tvl) >= MIN_TVL)
-    .sort((a, b) => Number(b.tvl || 0) - Number(a.tvl || 0))
-    .slice(0, MAX_ROWS);
+  const sorted = rows
+    .filter((protocol) => protocol && toFiniteNumber(protocol.tvl) !== null && toFiniteNumber(protocol.tvl) >= MIN_TVL)
+    .sort((a, b) => toFiniteNumber(b.tvl) - toFiniteNumber(a.tvl));
+  const identities = new Set();
+  const byTvl = [];
+  for (const protocol of sorted) {
+    const identity = protocolIdentity(protocol);
+    if (!identity || identities.has(identity)) continue;
+    identities.add(identity);
+    byTvl.push(protocol);
+    if (byTvl.length >= MAX_ROWS) break;
+  }
   const included = new Set(byTvl);
-  const pinned = rows.filter((protocol) => protocol && !included.has(protocol) && isPinned(protocol));
+  const pinned = [];
+  for (const wanted of ALWAYS_INCLUDE) {
+    const protocol = rows.find((candidate) => candidate && !included.has(candidate)
+      && !identities.has(protocolIdentity(candidate))
+      && [candidate.slug, candidate.name, candidate.symbol, candidate.gecko_id].map(normalizeKey).includes(wanted));
+    if (!protocol) continue;
+    identities.add(protocolIdentity(protocol));
+    pinned.push(protocol);
+  }
   const protocols = byTvl.concat(pinned).map(slim);
-  return { protocols, count: protocols.length, source: 'DeFiLlama /protocols (filtrado)', fetchedAt: Date.now(), stale: false };
+  const acquiredAt = Date.now();
+  return { protocols, count: protocols.length, source: 'DeFiLlama /protocols (filtrado)', observedAt: acquiredAt, observedAtProvenance: 'server-acquired-live-snapshot', fetchedAt: acquiredAt, stale: false, errors: {} };
 }
 
-module.exports = async function handler(request, response) {
+function refreshProtocols() {
+  if (!refreshPromise) {
+    refreshPromise = loadProtocols().then((payload) => {
+      cachedPayload = payload;
+      cachedAt = Date.now();
+      retryAfterAt = 0;
+      return payload;
+    }).finally(() => { refreshPromise = null; });
+  }
+  return refreshPromise;
+}
+
+async function handler(request, response) {
+  if (!await applyApiPolicyAsync(request, response, { cacheControl: 'public, s-maxage=120, stale-while-revalidate=600' })) return;
   if (request.method !== 'GET') {
     response.setHeader('Allow', 'GET');
     return response.status(405).json({ error: 'Method not allowed' });
   }
 
-  response.setHeader('Cache-Control', 'public, s-maxage=120, stale-while-revalidate=600');
-  response.setHeader('Access-Control-Allow-Origin', '*');
 
-  if (cachedPayload && Date.now() - cachedAt < 120000) {
+  if (cachedPayload && (Date.now() - cachedAt < 120000 || Date.now() < retryAfterAt)) {
     return response.status(200).json(cachedPayload);
   }
 
   try {
-    cachedPayload = await loadProtocols();
-    cachedAt = Date.now();
+    await refreshProtocols();
   } catch (error) {
     if (!cachedPayload) return response.status(503).json({ error: String(error && error.message || error) });
-    cachedPayload = { ...cachedPayload, stale: true };
+    retryAfterAt = Date.now() + RETRY_BACKOFF_MS;
+    cachedPayload = { ...cachedPayload, stale: true, errors: { ...cachedPayload.errors, refresh: String(error && error.message || error) } };
   }
 
   return response.status(200).json(cachedPayload);
-};
+}
+
+module.exports = handler;
+module.exports.loadProtocols = loadProtocols;
+module.exports.isPinned = isPinned;
+module.exports.slim = slim;
