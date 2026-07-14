@@ -126,13 +126,6 @@
       node.title = snapshot.updateReason ? 'Ultima mudanca do snapshot: ' + snapshot.updateReason : '';
     }
   }
-  function datasetInputStamp(dataset) {
-    if (!dataset) return 'na';
-    var observed = timestampMs(dataset.observedAt);
-    if (Number.isFinite(observed)) return String(observed);
-    var fetched = timestampMs(dataset.fetchedAt);
-    return Number.isFinite(fetched) ? 'f' + fetched : 'na';
-  }
   function mtfInputStamp() {
     var multi = state.mtf;
     if (!multi || !multi.rows || !multi.rows.length) return 'na';
@@ -269,24 +262,25 @@
    * observations. Calculation time stays excluded: identical inputs still produce the same id.
    */
   function buildInputSnapshotId(analysis, snapshot) {
-    return [
-      MODEL_VERSION,
-      RULESET_HASH,
-      snapshot.symbol || state.symbol,
-      snapshot.interval || state.interval,
-      snapshot.signalCloseTime || 0,
-      'drv' + datasetInputStamp(analysis.derivativeDetail),
-      'cm' + datasetInputStamp(analysis.coinMetrics),
-      'opt' + datasetInputStamp(analysis.options),
-      'etf' + datasetInputStamp(analysis.institutional),
-      'ext' + (state.external && state.external.fetchedAt ? state.external.fetchedAt : 'na'),
-      'news' + (state.newsFetchedAt || 'na'),
-      'mode' + state.newsMode,
-      'override' + (state.newsOverrideAt || 'na'),
-      'mtf' + mtfInputStamp(),
-      'hist' + (analysis.history && Number.isFinite(timestampMs(analysis.history.observedAt)) ? timestampMs(analysis.history.observedAt) : 'na'),
-      'inputs' + AnalyticsCore.stableHash(snapshot.inputComponents || scoreInputComponents(analysis))
-    ].join(':');
+    // ANL-001: identidade calculada pelo core (testavel); aqui so montamos o spec do estado.
+    return AnalyticsCore.buildInputSnapshotId({
+      modelVersion: MODEL_VERSION,
+      rulesetHash: RULESET_HASH,
+      symbol: snapshot.symbol || state.symbol,
+      interval: snapshot.interval || state.interval,
+      signalCloseTime: snapshot.signalCloseTime || 0,
+      derivativeDetail: analysis.derivativeDetail,
+      coinMetrics: analysis.coinMetrics,
+      options: analysis.options,
+      institutional: analysis.institutional,
+      externalFetchedAt: state.external && state.external.fetchedAt ? state.external.fetchedAt : null,
+      newsFetchedAt: state.newsFetchedAt,
+      newsMode: state.newsMode,
+      newsOverrideAt: state.newsOverrideAt,
+      mtfStamp: mtfInputStamp(),
+      history: analysis.history,
+      inputComponents: snapshot.inputComponents || scoreInputComponents(analysis)
+    });
   }
   function stampAnalysisSnapshot(analysis, reason, fields) {
     if (!analysis) return null;
@@ -1990,7 +1984,7 @@
     if (newsList) {
       var rows = c.news.items.length ? c.news.items.map(function (x) { return x.item; }) : freshNewsItems().slice(0, 5);
       newsList.innerHTML = rows.length ? rows.slice(0, 5).map(function (item) {
-        var time = item.published ? new Date(item.published).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+        var time = item.published ? AnalyticsCore.formatDisplayTimestamp(item.published, DISPLAY_TIME_ZONE, 'short') : '';
         return '<div class="news-item"><a href="' + escapeHTML(safeURL(item.url)) + '" target="_blank" rel="noreferrer">' + escapeHTML(item.title || 'Sem titulo') + '</a><small>' + escapeHTML(item.source || 'Fonte') + (time ? ' | ' + escapeHTML(time) : '') + '</small></div>';
       }).join('') : '<div class="news-item"><small>Sem noticias carregadas agora. Use o botao para tentar atualizar.</small></div>';
     }
@@ -1998,7 +1992,7 @@
     var status = state.newsMode !== 'auto'
       ? 'Noticias/macro: override ' + c.news.label.replace(/^manual /, '') + ' por ' + (state.newsOverrideAuthor || 'autor nao registrado') + (Number.isFinite(overrideTime) ? ' em ' + new Date(overrideTime).toLocaleString('pt-BR') : '') + '. Motivo: ' + (state.newsOverrideReason || 'nao registrado') + '.'
       : state.newsFetchedAt
-        ? 'Noticias/macro: auto a cada 5 min. Ultima leitura ' + new Date(state.newsFetchedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + '.'
+        ? 'Noticias/macro: auto a cada 5 min. Ultima leitura ' + AnalyticsCore.formatDisplayTimestamp(state.newsFetchedAt, DISPLAY_TIME_ZONE, 'time') + ' (' + DISPLAY_TIME_ZONE + ').'
         : 'Noticias/macro: tentando carregar fontes externas.';
     text('newsStatus', status);
   }
@@ -3240,11 +3234,13 @@
   }
   function renderCoverage(a) {
     var freshNewsCount = freshNewsItems().length;
+    var derivativeCoverageInfo = AnalyticsCore.derivativeCoverage(scoreableDerivativeDetail(a.derivativeDetail));
     var checks = [
       { name: 'Candles Binance', ok: state.klines.length >= 220, detail: state.klines.length + ' candles' },
       { name: 'Multi-timeframe', ok: !!(state.mtf && state.mtf.rows.length >= 5), detail: state.mtf ? state.mtf.rows.length + ' TFs' : 'aguardando' },
       { name: 'Historico completo', ok: historyFresh(a.history), detail: historyFresh(a.history) ? a.history.candles + ' dias' : 'carregando ou stale' },
-      { name: 'Derivativos', ok: hasDerivativeData(a.derivativeDetail), detail: 'OI, funding, L/S, taker' },
+      // UX-001: status por metrica real — nada de OR de 6 metricas com rotulo estatico.
+      { name: 'Derivativos', ok: derivativeCoverageInfo.state === 'ok', warn: derivativeCoverageInfo.state === 'partial', detail: derivativeCoverageInfo.label },
       { name: 'On-chain no score', ok: eligibleDataset(a.coinMetrics) || !!(a.mempoolContext && a.mempoolContext.eligibleForScore), detail: a.coinMetrics ? a.coinMetrics.asset.toUpperCase() + ' | ' + datasetStatus(a.coinMetrics) : a.mempoolContext && a.mempoolContext.eligibleForScore ? 'mempool BTC nativo' : 'sem cobertura' },
       { name: 'Livro e execucao', ok: Number.isFinite(a.spreadBps), detail: Number.isFinite(a.spreadBps) ? num(a.spreadBps, 2) + ' bps' : 'sem leitura' },
       { name: 'Microestrutura informativa', ok: !!(a.microstructure && eligibleDataset(a.microstructure)), detail: a.microstructure && Array.isArray(a.microstructure.venues) ? a.microstructure.venues.length + ' venues + CVD' : 'sem leitura' },
@@ -3259,7 +3255,11 @@
     var covered = checks.filter(function (check) { return check.ok; }).length;
     text('coverageSummary', covered + '/' + checks.length + ' blocos');
     var grid = $('coverageGrid');
-    if (grid) grid.innerHTML = checks.map(function (check) { return '<div class="coverage-item ' + (check.ok ? 'ok' : 'fail') + '"><span>' + escapeHTML(check.name) + '</span><strong>' + escapeHTML(check.ok ? 'Coberto | ' + check.detail : check.detail) + '</strong></div>'; }).join('');
+    if (grid) grid.innerHTML = checks.map(function (check) {
+      var stateClass = check.ok ? 'ok' : check.warn ? 'warn' : 'fail';
+      var prefix = check.ok ? 'Coberto | ' : check.warn ? 'Parcial | ' : '';
+      return '<div class="coverage-item ' + stateClass + '"><span>' + escapeHTML(check.name) + '</span><strong>' + escapeHTML(prefix + check.detail) + '</strong></div>';
+    }).join('');
   }
   function calculatorNumber(id) { var node = $(id); if (!node || String(node.value).trim() === '') return NaN; var value = +node.value; return Number.isFinite(value) ? value : NaN; }
   function calculatorValue(id, fallback) { var value = calculatorNumber(id); return Number.isFinite(value) ? value : fallback; }
@@ -3808,7 +3808,7 @@
     if (rowsNode) {
       rowsNode.innerHTML = journal.length ? journal.slice(-25).reverse().map(function (row) {
         var pnl = finiteNumber(row.pnlPct), rMultiple = finiteNumber(row.rMultiple), mae = finiteNumber(row.maePct), mfe = finiteNumber(row.mfePct), duration = finiteNumber(row.durationBars);
-        return '<tr><td>' + escapeHTML(new Date(row.exitTime).toLocaleString('pt-BR')) + '</td><td>' + escapeHTML(baseAsset(row.symbol || '')) + '</td><td>' + escapeHTML(intervalLabel(row.interval || '--')) + '</td><td>' + escapeHTML(row.side || '--') + '</td><td>' + escapeHTML(row.trigger || '--') + '</td><td>' + escapeHTML(row.regime || '--') + '</td><td class="' + (pnl >= 0 ? 'up' : 'down') + '">' + percent(pnl, 2) + '</td><td>' + (Number.isFinite(rMultiple) ? num(rMultiple, 2) + 'R' : '--') + '</td><td>' + percent(mae, 1) + ' / ' + percent(mfe, 1) + '</td><td>' + (Number.isFinite(duration) ? duration : '--') + '</td><td>' + escapeHTML(row.exitReason || '--') + '</td></tr>';
+        return '<tr><td>' + escapeHTML(AnalyticsCore.formatDisplayTimestamp(row.exitTime, DISPLAY_TIME_ZONE, 'full')) + '</td><td>' + escapeHTML(baseAsset(row.symbol || '')) + '</td><td>' + escapeHTML(intervalLabel(row.interval || '--')) + '</td><td>' + escapeHTML(row.side || '--') + '</td><td>' + escapeHTML(row.trigger || '--') + '</td><td>' + escapeHTML(row.regime || '--') + '</td><td class="' + (pnl >= 0 ? 'up' : 'down') + '">' + percent(pnl, 2) + '</td><td>' + (Number.isFinite(rMultiple) ? num(rMultiple, 2) + 'R' : '--') + '</td><td>' + percent(mae, 1) + ' / ' + percent(mfe, 1) + '</td><td>' + (Number.isFinite(duration) ? duration : '--') + '</td><td>' + escapeHTML(row.exitReason || '--') + '</td></tr>';
       }).join('') : '<tr><td colspan="11">Nenhum trade simulado fechado nesta versao do modelo.</td></tr>';
     }
     var summaryNode = $('tradeSummaryRows');
@@ -3950,12 +3950,12 @@
     var pct = function (value) { var parsed = finiteNumber(value); return Number.isFinite(parsed) ? percent(parsed, 2) : '--'; };
     rows.innerHTML = visible.length ? visible.map(function (record) {
       var setupScore = finiteNumber(record.setupScore), confidence = finiteNumber(record.dataConfidence);
-      return '<tr><td>' + new Date(record.recordedAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + '</td><td>' + escapeHTML(baseAsset(record.symbol)) + '</td><td>' + escapeHTML(intervalLabel(record.interval)) + '</td><td>' + (Number.isFinite(setupScore) ? signed(setupScore) : '--') + '</td><td>' + (Number.isFinite(confidence) ? num(confidence, 0) : '--') + '%</td><td>' + escapeHTML(record.decision) + '</td><td>' + money(finiteNumber(record.price)) + '</td><td>' + pct(record.outcome && record.outcome.r1h) + '</td><td>' + pct(record.outcome && record.outcome.r24h) + '</td><td>' + pct(record.outcome && record.outcome.r7d) + '</td></tr>';
+      return '<tr><td>' + AnalyticsCore.formatDisplayTimestamp(record.recordedAt, DISPLAY_TIME_ZONE, 'short') + '</td><td>' + escapeHTML(baseAsset(record.symbol)) + '</td><td>' + escapeHTML(intervalLabel(record.interval)) + '</td><td>' + (Number.isFinite(setupScore) ? signed(setupScore) : '--') + '</td><td>' + (Number.isFinite(confidence) ? num(confidence, 0) : '--') + '%</td><td>' + escapeHTML(record.decision) + '</td><td>' + money(finiteNumber(record.price)) + '</td><td>' + pct(record.outcome && record.outcome.r1h) + '</td><td>' + pct(record.outcome && record.outcome.r24h) + '</td><td>' + pct(record.outcome && record.outcome.r7d) + '</td></tr>';
     }).join('') : '<tr><td colspan="10">Nenhum sinal registrado ainda nesta versao do modelo.</td></tr>';
     var signalNow = Date.now();
     var due = records.filter(function (record) { return AnalyticsCore.signalOutcomeState(record, signalNow) === 'due'; }).length;
     var waiting = records.filter(function (record) { return AnalyticsCore.signalOutcomeState(record, signalNow) === 'waiting'; }).length;
-    text('signalsStatus', records.length + ' sinais registrados (' + MODEL_VERSION + ') | ' + due + ' prontos para avaliacao | ' + waiting + ' aguardando o horizonte | avaliacao usa candles 1m para 1h e candles 15m para 24h/7d.');
+    text('signalsStatus', records.length + ' sinais registrados (' + MODEL_VERSION + ') | ' + due + ' prontos para avaliacao | ' + waiting + ' aguardando o horizonte | avaliacao usa candles 1m para 1h e candles 15m para 24h/7d | horarios em ' + DISPLAY_TIME_ZONE + '.');
     var summaryRows = $('signalSummaryRows');
     if (summaryRows) {
       var summary = AnalyticsCore.summarizeSignalJournal(records);

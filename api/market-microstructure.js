@@ -18,13 +18,14 @@ async function getJson(url) {
   return response.json();
 }
 
-function normalizeVenue(name, lastPrice, bid, ask, observedAt, quoteCurrency) {
+function normalizeVenue(name, lastPrice, bid, ask, observedAt, quoteCurrency, observedAtProvenance) {
   const normalizedBid = finite(bid);
   const normalizedAsk = finite(ask);
   const validBook = normalizedBid !== null && normalizedAsk !== null && normalizedBid > 0 && normalizedAsk >= normalizedBid;
   const midpoint = validBook ? normalizedBid + (normalizedAsk - normalizedBid) / 2 : null;
   const normalizedPrice = validBook && Number.isFinite(midpoint) ? midpoint : finite(lastPrice);
   if (normalizedPrice === null || normalizedPrice <= 0) return null;
+  const normalizedObservedAt = finite(observedAt);
   return {
     name,
     price: normalizedPrice,
@@ -32,7 +33,10 @@ function normalizeVenue(name, lastPrice, bid, ask, observedAt, quoteCurrency) {
     quoteCurrency,
     bid: validBook ? normalizedBid : null,
     ask: validBook ? normalizedAsk : null,
-    observedAt: finite(observedAt),
+    observedAt: normalizedObservedAt,
+    // API-004: 'provider' = timestamp emitido pela propria venue; 'fetch' = hora local da
+    // busca ocupando o campo (caso Binance bookTicker, que nao tem timestamp de provedor).
+    observedAtProvenance: normalizedObservedAt === null ? 'missing' : (observedAtProvenance || 'provider'),
   };
 }
 
@@ -122,17 +126,26 @@ function summarizeVenues(venues) {
   };
 }
 
-function alignVenues(venues, maxSkewMs) {
+function alignVenues(venues, maxSkewMs, reference, maxAgeMs) {
   const valid = (Array.isArray(venues) ? venues : []).filter(Boolean);
   const timed = valid.filter((venue) => Number.isFinite(venue.observedAt));
-  if (!timed.length) return { venues: [], dropped: valid.map((venue) => venue.name), skewMs: null };
-  const latest = Math.max(...timed.map((venue) => venue.observedAt));
+  // API-004: staleness ABSOLUTA contra o relogio da busca, alem do skew mutuo. Sem isso,
+  // um conjunto de venues igualmente velhas passaria (skew ~0) com precos antigos.
+  const ageLimit = Number.isFinite(maxAgeMs) ? maxAgeMs : null;
+  const clock = Number.isFinite(reference) ? reference : null;
+  const staleVenues = ageLimit !== null && clock !== null
+    ? timed.filter((venue) => clock - venue.observedAt > ageLimit)
+    : [];
+  const fresh = timed.filter((venue) => !staleVenues.includes(venue));
+  if (!fresh.length) return { venues: [], dropped: valid.filter((venue) => !staleVenues.includes(venue)).map((venue) => venue.name), stale: staleVenues.map((venue) => venue.name), skewMs: null };
+  const latest = Math.max(...fresh.map((venue) => venue.observedAt));
   const limit = Number.isFinite(maxSkewMs) ? maxSkewMs : 30000;
-  const aligned = timed.filter((venue) => venue.observedAt <= latest + 5000 && latest - venue.observedAt <= limit);
+  const aligned = fresh.filter((venue) => venue.observedAt <= latest + 5000 && latest - venue.observedAt <= limit);
   const observed = aligned.map((venue) => venue.observedAt);
   return {
     venues: aligned,
-    dropped: valid.filter((venue) => !aligned.includes(venue)).map((venue) => venue.name),
+    dropped: valid.filter((venue) => !aligned.includes(venue) && !staleVenues.includes(venue)).map((venue) => venue.name),
+    stale: staleVenues.map((venue) => venue.name),
     skewMs: observed.length > 1 ? Math.max(...observed) - Math.min(...observed) : 0,
   };
 }
@@ -177,12 +190,14 @@ async function loadMarketMicrostructure(symbol) {
     ? normalizeVenue('Coinbase', convertUsdToUsdt(coinbase.price), convertUsdToUsdt(coinbase.bid), convertUsdToUsdt(coinbase.ask), coinbaseObservedAt, 'USDT (convertido de USD)')
     : null;
   const venueAlignment = alignVenues([
-    normalizeVenue('Binance', null, binance.bidPrice, binance.askPrice, fetchedAt, 'USDT'),
+    // Binance bookTicker nao emite timestamp de provedor; o campo carrega a hora da busca.
+    normalizeVenue('Binance', null, binance.bidPrice, binance.askPrice, fetchedAt, 'USDT', 'fetch'),
     coinbaseVenue,
     normalizeVenue('Bybit', bybit.lastPrice, bybit.bid1Price, bybit.ask1Price, venueObservedAt(bybitEnvelope.time, fetchedAt), 'USDT'),
     normalizeVenue('OKX', okx.last, okx.bidPx, okx.askPx, venueObservedAt(okx.ts, fetchedAt), 'USDT'),
-  ], 30000);
+  ], 30000, fetchedAt, 60000);
   if (venueAlignment.dropped.length) errors.venueSkew = 'Fora da janela de 30s: ' + venueAlignment.dropped.join(', ');
+  if (venueAlignment.stale.length) errors.venuesStale = 'Timestamps mais velhos que 60s: ' + venueAlignment.stale.join(', ');
   const venueSummary = summarizeVenues(venueAlignment.venues);
   const orderFlow = summarizeOrderFlow(value(1), fetchedAt);
   if (orderFlow.numericOverflow) errors.orderFlowNumeric = 'Agregado de aggTrades excedeu o intervalo numerico seguro';
@@ -193,6 +208,9 @@ async function loadMarketMicrostructure(symbol) {
     symbol,
     ...venueSummary,
     venueSkewMs: venueAlignment.skewMs,
+    venuesStale: venueAlignment.stale,
+    // API-004: observedAt de topo mistura relogios de provedor com hora de busca (Binance).
+    observedAtProvenance: venueSummary.venues.some((venue) => venue.observedAtProvenance === 'fetch') ? 'mixed' : 'provider',
     usdPerUsdt: validFx ? usdPerUsdt : null,
     orderFlow,
     venuesObservedAt,

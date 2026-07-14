@@ -35,11 +35,15 @@ jobs:
       - name: Run deterministic tests with coverage floors
         run: npm run test:coverage
 
-  # Gate de navegador bloqueante. Uma segunda tentativa absorve oscilacao curta das fontes;
-  # duas falhas consecutivas bloqueiam o merge em vez de mascarar uma regressao.
+  # LIMITACAO DOCUMENTADA (OPS-003/REV-CC-01): o smoke busca klines direto da Binance e
+  # runners hospedados do GitHub podem receber HTTP 451 (geo-bloqueio) independente do codigo.
+  # Por isso o job e ADVISORY (continue-on-error) ate os dados serem proxyados pela camada /api
+  # com fixture de CI. Uma segunda tentativa absorve oscilacao curta das fontes. O gate
+  # bloqueante deterministico e o job deterministic-tests acima.
   browser-smoke:
     runs-on: windows-latest
     timeout-minutes: 15
+    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4

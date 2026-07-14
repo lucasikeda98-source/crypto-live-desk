@@ -174,3 +174,34 @@ test('erros semanticos 200 da Bybit e OKX nao viram venues validos', async () =>
     global.fetch = originalFetch;
   }
 });
+
+test('API-004: proveniencia por venue e rejeicao de staleness absoluta', () => {
+  const fetchedAt = 1_783_924_806_000;
+  const fetchVenue = handler.normalizeVenue('Binance', null, '100', '101', fetchedAt, 'USDT', 'fetch');
+  assert.equal(fetchVenue.observedAtProvenance, 'fetch');
+  const providerVenue = handler.normalizeVenue('OKX', null, '100', '101', fetchedAt - 500, 'USDT');
+  assert.equal(providerVenue.observedAtProvenance, 'provider');
+  const noTimestamp = handler.normalizeVenue('X', '100', null, null, null, 'USDT');
+  assert.equal(noTimestamp.observedAtProvenance, 'missing');
+
+  // Venues igualmente velhas tem skew ~0 entre si; sem limite absoluto passariam com preco antigo.
+  const uniformlyOld = handler.alignVenues([
+    { name: 'A', observedAt: fetchedAt - 120_000 },
+    { name: 'B', observedAt: fetchedAt - 119_000 }
+  ], 30000, fetchedAt, 60000);
+  assert.deepEqual(uniformlyOld.venues, []);
+  assert.deepEqual(uniformlyOld.stale.sort(), ['A', 'B']);
+
+  const mixedAges = handler.alignVenues([
+    { name: 'fresh', observedAt: fetchedAt - 1000 },
+    { name: 'ancient', observedAt: fetchedAt - 90_000 }
+  ], 30000, fetchedAt, 60000);
+  assert.deepEqual(mixedAges.venues.map((venue) => venue.name), ['fresh']);
+  assert.deepEqual(mixedAges.stale, ['ancient']);
+  assert.deepEqual(mixedAges.dropped, []);
+
+  // Sem referencia de relogio o comportamento antigo (so skew mutuo) permanece.
+  const legacy = handler.alignVenues([{ name: 'new', observedAt: 100000 }, { name: 'old', observedAt: 1000 }], 30000);
+  assert.deepEqual(legacy.venues.map((venue) => venue.name), ['new']);
+  assert.deepEqual(legacy.stale, []);
+});

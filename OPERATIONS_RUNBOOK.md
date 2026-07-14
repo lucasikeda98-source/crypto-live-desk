@@ -60,6 +60,8 @@ npm.cmd run audit:inventory
 npm.cmd run test:browser
 ```
 
+Nota (OPS-014): os pisos de cobertura de `test:coverage` (95% linhas, 75% branches, 90% funcoes) medem apenas o codigo carregado pela suite Node (`lib/` e `api/`); `app.js` (UI, roda so no navegador) fica fora do denominador e e coberto pelo smoke de navegador (`test:browser`). Os pisos nao dizem nada sobre a logica de `app.js`.
+
 Depois, verifique manualmente no navegador:
 
 1. console sem erros ou avisos novos;

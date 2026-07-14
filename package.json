@@ -16,5 +16,8 @@
   "dependencies": {
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.0"
+  },
+  "devDependencies": {
+    "fengari": "^0.1.5"
   }
 }

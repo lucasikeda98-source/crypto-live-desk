@@ -1370,3 +1370,84 @@ test('Ichimoku cobre nuvem baixista e export inclui radar rastreavel', () => {
   assert.equal(exported.radar.components[0].ruleId, 'r1');
   assert.equal(exported.radar.components[0].reason, 'fixture');
 });
+
+test('cobertura de derivativos e por metrica: ok pleno, parcial honesto e sem leitura (UX-001)', () => {
+  const full = core.derivativeCoverage({ oiChangePct: 1.2, fundingAvg: 0.0001, longShortRatio: 1.1, takerRatio: 0.9 });
+  assert.equal(full.state, 'ok');
+  assert.equal(full.label, 'OI, funding, L/S, taker');
+
+  const partial = core.derivativeCoverage({ fundingAvg: 0.0001 });
+  assert.equal(partial.state, 'partial');
+  assert.match(partial.label, /^funding \| faltam: OI, L\/S, taker$/);
+  assert.deepEqual(partial.liveMetrics, ['fundingAvg']);
+
+  const extrasOnly = core.derivativeCoverage({ topPositionRatio: 1.4, basisRate: 0.002 });
+  assert.equal(extrasOnly.state, 'partial');
+  assert.match(extrasOnly.label, /faltam: OI, funding, L\/S, taker/);
+
+  assert.equal(core.derivativeCoverage({}).state, 'none');
+  assert.equal(core.derivativeCoverage(null).label, 'sem leitura');
+  assert.equal(core.derivativeCoverage({ fundingAvg: Infinity }).state, 'none');
+});
+
+test('formatDisplayTimestamp respeita o fuso explicito na virada de dia (UX-005)', () => {
+  const nearMidnightUtc = Date.UTC(2026, 6, 13, 2, 30); // 13/07 02:30 UTC
+  const saoPaulo = core.formatDisplayTimestamp(nearMidnightUtc, 'America/Sao_Paulo', 'short');
+  const utc = core.formatDisplayTimestamp(nearMidnightUtc, 'UTC', 'short');
+  assert.match(saoPaulo, /^12\/07/); // UTC-3: ainda e 12/07 23:30
+  assert.match(utc, /^13\/07/);
+  assert.equal(core.formatDisplayTimestamp(null, 'UTC', 'short'), '--');
+  assert.equal(core.formatDisplayTimestamp(Infinity, 'UTC', 'short'), '--');
+  assert.match(core.formatDisplayTimestamp(nearMidnightUtc, 'Fuso/Invalido', 'time'), /^\d{2}:\d{2}:\d{2}$/);
+  assert.match(core.formatDisplayTimestamp(nearMidnightUtc, 'UTC', 'full'), /^13\/07\/2026,? 02:30:00$/);
+});
+
+test('buildInputSnapshotId: mesmo estado gera o mesmo id; qualquer input de score muda o id (ANL-001)', () => {
+  const baseSpec = () => ({
+    modelVersion: '1.0.0-test',
+    rulesetHash: 'abcd1234',
+    symbol: 'BTCUSDT',
+    interval: '5m',
+    signalCloseTime: 1_783_924_800_000,
+    derivativeDetail: { observedAt: 1_783_924_700_000 },
+    coinMetrics: { fetchedAt: 1_783_924_600_000 },
+    options: null,
+    institutional: { observedAt: 1_783_924_500_000 },
+    externalFetchedAt: 1_783_924_400_000,
+    newsFetchedAt: 1_783_924_300_000,
+    newsMode: 'auto',
+    newsOverrideAt: null,
+    mtfStamp: '5m@1:1h@2',
+    history: { observedAt: 1_783_924_200_000 },
+    inputComponents: { book: { spreadBps: 1.5 }, liquidations: { count: 3 } }
+  });
+
+  const identical = core.buildInputSnapshotId(baseSpec());
+  assert.equal(core.buildInputSnapshotId(baseSpec()), identical, 'estado identico deve gerar id identico');
+
+  // Book e liquidacoes entram via inputComponents: mudar SO eles muda o id.
+  const bookChanged = baseSpec();
+  bookChanged.inputComponents = { book: { spreadBps: 2.0 }, liquidations: { count: 3 } };
+  assert.notEqual(core.buildInputSnapshotId(bookChanged), identical, 'book diferente deve mudar o id');
+  const liquidationsChanged = baseSpec();
+  liquidationsChanged.inputComponents = { book: { spreadBps: 1.5 }, liquidations: { count: 4 } };
+  assert.notEqual(core.buildInputSnapshotId(liquidationsChanged), identical, 'liquidacoes diferentes devem mudar o id');
+
+  // Cada dataset carimbado tambem participa da identidade.
+  ['derivativeDetail', 'coinMetrics', 'institutional'].forEach((key) => {
+    const changed = baseSpec();
+    changed[key] = { observedAt: 1_783_999_999_000 };
+    assert.notEqual(core.buildInputSnapshotId(changed), identical, key + ' diferente deve mudar o id');
+  });
+  const optionsChanged = baseSpec();
+  optionsChanged.options = { observedAt: 1_783_924_100_000 };
+  assert.notEqual(core.buildInputSnapshotId(optionsChanged), identical);
+
+  const mtfChanged = baseSpec();
+  mtfChanged.mtfStamp = '5m@1:1h@3';
+  assert.notEqual(core.buildInputSnapshotId(mtfChanged), identical);
+
+  assert.equal(core.datasetInputStamp(null), 'na');
+  assert.equal(core.datasetInputStamp({ observedAt: 5_000_000_000_000 }), '5000000000000');
+  assert.equal(core.datasetInputStamp({ fetchedAt: 5_000_000_000_000 }), 'f5000000000000');
+});

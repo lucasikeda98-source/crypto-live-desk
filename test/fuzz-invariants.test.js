@@ -116,3 +116,40 @@ test('fuzz deterministico: calculadora nunca produz Infinity sob entradas advers
     assert.ok(result.fundingPeriods >= 0 && result.fundingPeriods <= 1e6);
   }
 });
+
+test('fuzz deterministico: funcoes de estabilidade numerica nunca emitem Infinity', () => {
+  const random = seededRandom(0xF1417E);
+  const hostile = [NaN, Infinity, -Infinity, null, undefined, '', 'x', 1e308, -1e308, 1e-308, 0, -1];
+  const value = () => random() < 0.6 ? (random() * 2e6 - 1e6) : pick(random, hostile);
+  const assertNeverInfinity = (label, result) => {
+    if (typeof result === 'number') assert.ok(!(result === Infinity || result === -Infinity), label + ' emitiu Infinity');
+  };
+  for (let round = 0; round < 500; round += 1) {
+    const size = Math.floor(random() * 40);
+    const seriesA = Array.from({ length: size }, value);
+    const seriesB = Array.from({ length: size }, value);
+    const weights = Array.from({ length: size }, value);
+    assertNeverInfinity('pearsonCorrelation', core.pearsonCorrelation(seriesA, seriesB));
+    assertNeverInfinity('betaCoefficient', core.betaCoefficient(seriesA, seriesB));
+    assertNeverInfinity('weightedMedian', core.weightedMedian(seriesA, weights));
+    assertNeverInfinity('realizedVolatility', core.realizedVolatility(seriesA.map((item) => Math.abs(core.toFiniteNumber(item) ?? 1) + 1e-9), 14, 365));
+
+    const step = 60_000;
+    const candles = Array.from({ length: Math.max(4, size) }, (_ignored, index) => ({
+      time: index * step,
+      close: random() < 0.85 ? 1 + random() * 1e5 : pick(random, [1e-308, 1e308, 5e307])
+    }));
+    const end = candles.at(-1).time;
+    const start = candles[Math.floor(random() * candles.length)].time;
+    assertNeverInfinity('priceChangeOverWindow', core.priceChangeOverWindow(candles, start, end));
+  }
+
+  // Caso dirigido da REV-CC-01: razao extrema estourava para Infinity antes da guarda.
+  const extremes = [
+    { time: 0, close: 1e-308 },
+    { time: 60_000, close: 1e-308 },
+    { time: 120_000, close: 1e308 },
+    { time: 180_000, close: 1e308 }
+  ];
+  assert.ok(Number.isNaN(core.priceChangeOverWindow(extremes, 0, 180_000)), 'razao extrema deve virar NaN, nunca Infinity');
+});

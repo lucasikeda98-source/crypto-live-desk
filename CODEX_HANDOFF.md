@@ -6,13 +6,13 @@ Este arquivo evidencia as mudancas realizadas pelo Codex a partir do marco abaix
 
 Revisao pelo Claude Code significa revisao independente de codigo, regras analiticas, testes, documentacao e impactos no modelo. A aprovacao nao deve ser presumida apenas porque os testes passaram.
 
-## Estado atual (2026-07-13) — leia antes de continuar
+## Estado atual (2026-07-13, atualizado por CC-FIX-01) — leia antes de continuar
 
-- Checkpoint: commit `887ec57` (branch `codex/cycle-d-sources`) commitado e pushado ao GitHub; working tree limpo. **Nao deployado** — nao existe preview nem producao para este commit.
-- Revisao: **REV-CC-01** (secao "Revisoes do Claude Code", ao final) — revisao cruzada parcial e independente do Claude Code. Disposicao: 41 `REVISADO PELO CLAUDE CODE`, 24 `AGUARDANDO CLAUDE CODE` com correcao exigida, 7 `CONFIRMADO`.
-- **Nao promover a producao.** Defeitos reais abertos: P1 merge Lua/ANL-027 e OPS-003 (regressao de CI); P2/P3 UX-001, API-004, UX-005, `priceChangeOverWindow`, DEV-dotfile-via-symlink; alem de infra (Redis/`CRON_SECRET`, cron, sair do OneDrive). Ordem de correcao em REV-CC-01 secoes A/B/F.
-- Verificacoes independentes: 250/250 testes, cobertura 97,96/80,03/96,42 (exit 0), `node --check` e `git diff --check` limpos, navegador local com 24 cards e zero erro de console.
-- Proximo passo sugerido: corrigir os P1 (merge Lua e OPS-003) com testes de regressao reais, depois os guardas fracos da secao B, entao provisionar Redis e exercitar os scripts Lua contra Redis real antes de qualquer preview/promocao.
+- Checkpoint anterior: commit `887ec57` (REV-CC-01). Correcoes: **CC-FIX-01** (secao "Revisoes do Claude Code", ao final) fechou TODOS os 8 defeitos da secao A da REV-CC-01 e converteu os guardas fracos da secao B em testes de comportamento. **Nao deployado.**
+- Suite: **303/303** testes, cobertura 97,95/81,46/96,54 (pisos 95/75/90, exit 0). Os 3 scripts Lua de producao agora sao EXECUTADOS por teste (VM Lua fengari, devDependency).
+- Pendencias que continuam abertas (nao sao codigo): provisionar Redis/`CRON_SECRET`, cron do worker, sair do OneDrive, rodar CI em runner hospedado para confirmar o comportamento 451 do browser-smoke (job agora e advisory), exercitar Lua contra Redis real e gerar preview do hash candidato. Ver secao D da REV-CC-01.
+- `rulesetHash` mudou (`4445fcf0` -> `b91fdb37`) por adicoes conscientes ao core (derivativeCoverage, formatDisplayTimestamp, buildInputSnapshotId, guarda finita de priceChangeOverWindow); nenhuma regra de score mudou. Pin de hash-ouro em test/behavior-guards.test.js.
+- **Nao promover a producao** ate cumprir as pendencias de infra acima.
 
 ## Marco inicial
 
@@ -429,3 +429,45 @@ ANL-015 (calendario/flag `reported` de ETF) e OPS-010 (smoke exerce o contrato d
 #### F. Recomendacao
 
 Nao promover a producao. Ordem sugerida: (1) corrigir a secao A (P1 primeiro: merge Lua e OPS-003; depois OPS-009/UX-001); (2) converter os guardas fracos da secao B em testes de comportamento; (3) so entao reexecutar o gate completo, provisionar Redis e exercitar os scripts Lua contra Redis real; (4) gerar preview do hash candidato e reconciliar contrato preview vs producao antes de qualquer promocao. Autoria Codex e limitacoes documentadas preservadas.
+
+### CC-FIX-01 — Correcao integral dos achados da REV-CC-01
+
+- Data: 2026-07-13
+- Autor: Claude Code (Fable 5), sob instrucao do proprietario ("vamos corrigir tudo")
+- Base: `e5d46ce` (docs pos-887ec57)
+- Escopo: fechar os 8 defeitos da secao A da REV-CC-01 e converter os guardas fracos da secao B em testes de comportamento. Autoria e limitacoes do historico Codex preservadas.
+
+#### Secao A — defeitos corrigidos
+
+| Item | Correcao | Regressao (prova de revert) |
+| --- | --- | --- |
+| ANL-027 (P1) | O merge Lua nao invalida mais o registro armazenado por mismatch de `inputSnapshotId`/`rulesetHash`: `current` valido vence sempre (primeiro snapshot canonico), igual ao JS/cliente. Scripts Lua exportados via `LUA_SCRIPTS`. | test/durable-signals-lua.test.js executa os 3 scripts Lua de PRODUCAO numa VM Lua real (fengari, devDependency) com shims fieis de redis.call/cjson (test/helpers/lua-redis.cjs). Revert verificado: reintroduzir o mismatch fez 2 testes falharem. |
+| OPS-003 (P1) | Limitacao documentada de HTTP 451 (geo-block Binance em runner hospedado) RESTAURADA em quality.yml; browser-smoke voltou a ser advisory (`continue-on-error: true`) ate os klines serem proxyados pela camada /api. O gate bloqueante deterministico segue sendo deterministic-tests. | Comentario normativo no proprio workflow; confirmar comportamento em runner hospedado segue pendente (infra). |
+| OPS-009 (P2) | Ja estava fechado no checkpoint `887ec57` (`package-lock.json` versionado; `git ls-files` confirma). | `npm ci` no CI depende do lock versionado. |
+| UX-001 (P2) | Painel de cobertura com status POR METRICA: `AnalyticsCore.derivativeCoverage()` (ok/partial/none, rotulo com metricas vivas e faltantes); app.js usa estado `warn` (classe CSS ja existia) e prefixo "Parcial". | analytics-core.test.js (estado pleno/parcial/none). Verificado ao vivo no navegador: "Parcial \| OI, funding, L/S, top traders, basis \| faltam: taker". |
+| UX-005 (P3) | `AnalyticsCore.formatDisplayTimestamp(ms, timeZone, style)` com fuso explicito aplicado a journal, sinais, noticias e status; rotulo de fuso em signalsStatus/newsStatus/caption de trades. Overclaim corrigido em ANALYTICS_COVERAGE.md. | Teste de virada de dia (America/Sao_Paulo vs UTC) em analytics-core.test.js. |
+| priceChangeOverWindow (P3) | Guarda finita no retorno (`Infinity -> NaN`). | Caso dirigido + fuzz de estabilidade numerica (pearson/beta/weightedMedian/realizedVolatility/priceChangeOverWindow) em fuzz-invariants.test.js. |
+| DEV-dotfile-via-symlink (P3) | Checagem de segmento oculto reaplicada sobre o realpath resolvido (`hasHiddenSegment` exportado). | dev-server.test.js cria symlink real (quando permitido) E junction de diretorio (sempre roda no Windows) apontando para `.github`; revert empirico da checagem fez o teste falhar. Cobre tambem DEV-symlink-realpath da secao B. |
+| API-004 (P2) | `observedAtProvenance` por venue ('provider'/'fetch'/'missing'; Binance bookTicker = 'fetch'), `observedAtProvenance` de topo ('mixed' quando ha relogio de busca no conjunto) e staleness ABSOLUTA (60s vs relogio da busca) com `venuesStale` no payload e em errors. | market-microstructure-api.test.js: venues uniformemente velhas (skew ~0) sao rejeitadas; proveniencia por origem. |
+
+#### Secao B — guardas fracos convertidos em testes de comportamento
+
+- test/behavior-guards.test.js (28 testes): ANL-018 (pin de hash-ouro `b91fdb37` + recompute independente do hash a partir do fonte), ANL-024 (9 superficies narrativas do core sem NaN->direcional), ANL-008 (stop+alvo no mesmo candle sai em stop, long/short/gap), ANL-009/010 (idempotencia de replay, tombstone FLAT, fonte tardia fora do snapshot, maxLagMs), ANL-005 (soma dos setupCaps == 112 + cross-check dos literais de app.js contra o ruleset), ANL-017 (semanticas do validador de klines fixadas: ultima copia valida vence, closeTime==time aceito, volume null nao fabrica fluxo).
+- test/ops-behavior.test.js (5 testes): OPS-002 deadline ABSOLUTO de 30s nas rotas market/options (revert 18s+18s verificado empiricamente como detectado), OPS-001 warmup/single-flight, OPS-007 backoff de outage com cooldown. OPS-014 documentado tambem no OPERATIONS_RUNBOOK.md com doc-guard.
+- test/security-headers.test.js (3 testes): presenca e VALOR dos 6 headers de seguranca do vercel.json + semantica (HSTS >= 2 anos, CSP sem unsafe-eval) + maxDuration 30s.
+- test/a11y-extended.test.js (3 testes): alvo de 44px no summary da explicacao do score (corrigido em styles.css), foco de teclado da calculadora (o `outline: 0` do campo base suprimia o `:focus-visible` global de especificidade zero — regra propria adicionada), disclosure details/summary e regioes roladas focaveis.
+- ANL-001: `buildInputSnapshotId`/`datasetInputStamp` extraidos para o core (app.js monta apenas o spec de estado) + teste de identidade/diferenca incluindo book/liquidacoes via inputComponents.
+
+#### Pendencias remanescentes (sem mudanca de codigo possivel localmente)
+
+- Infra da secao D da REV-CC-01: Redis/`CRON_SECRET`, cron do worker, sair do OneDrive, preview do hash candidato, CI em runner hospedado (confirmar 451), Lua contra Redis real.
+- ANL-015 e OPS-010 seguem sem revisao (secao E da REV-CC-01).
+- Derivar de fato os clamps de `buildConfluence` (app.js) do ruleset — hoje ha cross-check de igualdade por teste; a derivacao e refactor de app.js para rodada propria.
+- Substituicao dos regexes de features.test.js:266,268 por teste de pipeline exigiria harness de DOM para app.js; a metade exportada pelo core esta coberta por comportamento.
+
+#### Gate executado
+
+- `npm run test:coverage`: **303/303** aprovados; cobertura **97,95% linhas / 81,46% branches / 96,54% funcoes** (pisos 95/75/90, exit 0).
+- `node --check` em todos os JS/CJS rastreados: limpo. `git diff --check`: limpo.
+- Navegador local (dev-server): app carregou com dados ao vivo, 24 cards, zero erro de console; painel de cobertura exibindo estado parcial honesto de derivativos.
+- `rulesetHash` mudou de `4445fcf0` para `b91fdb37` (adicoes conscientes ao core; nenhuma regra de score alterada); pin atualizado com justificativa em test/behavior-guards.test.js.

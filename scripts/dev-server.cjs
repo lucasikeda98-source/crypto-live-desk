@@ -34,6 +34,13 @@ function isWithinRoot(basePath, candidatePath) {
   return relative === '' || (!relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative));
 }
 
+// REV-CC-01/DEV-dotfile-via-symlink: o bloqueio de dotfile precisa valer tambem para o
+// caminho REAL resolvido, senao um symlink nao-oculto (public.txt -> .env) e servido.
+function hasHiddenSegment(basePath, candidatePath) {
+  const relative = path.relative(basePath, candidatePath);
+  return relative.split(path.sep).some((segment) => segment.startsWith('.'));
+}
+
 const server = http.createServer((request, response) => {
   Object.entries(securityHeaders).forEach(([name, value]) => response.setHeader(name, value));
   response.setHeader('Cache-Control', 'no-store');
@@ -76,8 +83,7 @@ const server = http.createServer((request, response) => {
     response.writeHead(403).end('Forbidden');
     return;
   }
-  const hasHiddenSegment = relative.split(path.sep).some((segment) => segment.startsWith('.'));
-  if (hasHiddenSegment) {
+  if (hasHiddenSegment(root, filename)) {
     response.writeHead(404).end('Not found');
     return;
   }
@@ -88,6 +94,10 @@ const server = http.createServer((request, response) => {
     }
     if (!isWithinRoot(realRoot, realFilename)) {
       response.writeHead(403).end('Forbidden');
+      return;
+    }
+    if (hasHiddenSegment(realRoot, realFilename)) {
+      response.writeHead(404).end('Not found');
       return;
     }
     fs.readFile(realFilename, (error, data) => {
@@ -120,4 +130,4 @@ if (require.main === module) {
   process.on('SIGTERM', shutdown);
 }
 
-module.exports = { isWithinRoot };
+module.exports = { isWithinRoot, hasHiddenSegment };
