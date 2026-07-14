@@ -47,7 +47,11 @@ const ROOT = path.join(__dirname, '..');
   const checks = [];
   const ok = (name, passed, detail) => checks.push({ name, passed: !!passed, detail: detail || '' });
 
-  ok('titulo carregado', (await page.title()).includes('Crypto Live'), await page.title());
+  // O app troca o titulo para "SYMBOL $preco" quando o ticker carrega; runners do GitHub
+  // alcancam a Binance SPOT (data-api.binance.vision) mesmo com o fapi geo-restringido,
+  // entao ambos os estados sao boots validos.
+  const pageTitle = await page.title();
+  ok('titulo carregado', pageTitle.includes('Crypto Live') || /USDT \$/.test(pageTitle), pageTitle);
   const dom = await page.evaluate(() => ({
     disclaimer: document.body.textContent.includes('nao representam probabilidade nem recomendacao'),
     exportSignals: !!document.getElementById('exportSignalsButton'),
