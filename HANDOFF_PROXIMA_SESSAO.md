@@ -28,10 +28,10 @@ O journal durável hoje degrada para local-only; nada disso é código novo.
 - [x] A6. FEITO 2026-07-13 — rajada de 40 GETs em /api/signals: ~24 aceitos, restante 429 (sliding window distribuído ativo).
 
 ### Fase B — Operação e CI
-- [ ] B1. Observar 1–2 execuções do workflow Quality em runner hospedado: confirmar se o `browser-smoke` sofre HTTP 451 (se sim, manter advisory; alternativa de longo prazo: proxyar klines pela camada /api com fixture de CI).
-- [ ] B2. Confirmar que o job `browser-boot` (Playwright) continua verde com o app mesclado (roda no CI, não local).
-- [ ] B3. Mover o repositório para FORA do OneDrive (clone limpo, repetir o gate do OPERATIONS_RUNBOOK no destino) — OneDrive causa locks e realpath esquisito.
-- [ ] B4. Verificar logs de runtime da Vercel ~24h pós-deploy (endpoints novos: market-microstructure, signals, signal-worker).
+- [x] B1. FEITO 2026-07-13 — causa raiz confirmada nos logs do runner: geo-bloqueio do `fapi.binance.com` (futuros) manifesta-se como CORS/`ERR_FAILED`; o SPOT (`data-api.binance.vision`) FUNCIONA no runner. Advisory correto; melhoria futura: proxyar dados de futuros via /api.
+- [x] B2. FEITO 2026-07-13 — boot falhava porque o assert de titulo nao previa o app com preco ao vivo (runner alcanca a Binance spot); corrigido em `cce607e` (validado local online+offline). Run do CI verde: deterministic-tests 22/24 + browser-boot success.
+- [x] B3. PREPARADO 2026-07-13 — clone limpo em `C:\dev\crypto-live-desk` com gate completo verde (313/313, npm ci ok). Falta apenas o dono passar a trabalhar nesse caminho (a copia do OneDrive vira backup).
+- [x] B4. FEITO 2026-07-13 — zero erros de runtime nas ultimas 24h (janela cobre os endpoints novos exercitados pelas sondas da Fase A). Rechecar apos o primeiro disparo do cron (04:17 UTC).
 
 ### Fase C — Dívidas de revisão remanescentes (código)
 - [ ] C1. ANL-015: revisar calendário/flag `reported` de fluxos ETF (ficou fora da REV-CC-01, seção E).
