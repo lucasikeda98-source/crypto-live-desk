@@ -112,7 +112,10 @@ const ROOT = path.join(__dirname, '..');
   // Assinaturas ANCORADAS de falha de rede do navegador. Alternativas soltas como `fetch`,
   // `ERR_`, `4\d\d` ou `WebSocket` engoliam erros reais do app (ex.: "TypeError: cannot read
   // 'fetch' of undefined" ou qualquer mensagem contendo um numero 4xx) — falso verde.
-  const networkNoise = /(Failed to fetch|net::|NetworkError|Load failed|Failed to load resource|Service Unavailable|WebSocket connection to)/i;
+  // "has been blocked by CORS policy" e a mensagem do Chrome quando o runner geo-restrito
+  // recebe 451 sem Access-Control-Allow-Origin do fapi (CC-FIX-05); e frase do navegador,
+  // nao alcancavel por console.error do app sem ecoa-la de proposito.
+  const networkNoise = /(Failed to fetch|net::|NetworkError|Load failed|Failed to load resource|Service Unavailable|WebSocket connection to|has been blocked by CORS policy)/i;
   const appPageErrors = pageErrors.filter((message) => !networkNoise.test(message));
   const appConsoleErrors = consoleErrors.filter((message) => !networkNoise.test(message));
   ok('zero excecoes nao capturadas do app', appPageErrors.length === 0, JSON.stringify(appPageErrors.slice(0, 3)));

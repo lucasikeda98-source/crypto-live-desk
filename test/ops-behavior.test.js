@@ -289,3 +289,35 @@ test('OPS-014: pisos de cobertura 95/75/90 permanecem versionados e a exclusao d
       file + ' deve documentar que app.js fica fora do denominador de cobertura (OPS-014)');
   }
 });
+
+test('CC-FIX-05: filtro de ruido de rede do boot-check cobre o bloqueio CORS do runner geo-restrito sem reabrir o falso-verde do CC-FIX-03', () => {
+  const root = path.join(__dirname, '..');
+  const source = fs.readFileSync(path.join(root, 'scripts', 'browser-boot-check.cjs'), 'utf8');
+  const literal = source.match(/const networkNoise = (\/(?:[^/\\]|\\.)+\/[a-z]*);/);
+  assert.ok(literal, 'browser-boot-check.cjs deve declarar o regex networkNoise');
+  const networkNoise = new Function('return ' + literal[1] + ';')(); // regex do proprio script, nao uma copia
+
+  // Assinaturas que o NAVEGADOR emite sob falha de rede — no runner geo-restrito do GitHub o
+  // fapi responde 451 sem Access-Control-Allow-Origin e o Chrome loga o bloqueio de CORS.
+  const browserNetworkMessages = [
+    "Access to fetch at 'https://fapi.binance.com/fapi/v1/premiumIndex' from origin 'http://127.0.0.1:5199' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.",
+    'Failed to load resource: net::ERR_FAILED',
+    'TypeError: Failed to fetch',
+    "WebSocket connection to 'wss://fstream.binance.com/ws' failed: Error in connection establishment"
+  ];
+  for (const message of browserNetworkMessages) {
+    assert.match(message, networkNoise, 'assinatura de rede do navegador deve ser filtrada: ' + message.slice(0, 60));
+  }
+
+  // Erros DO APP que o filtro solto pre-CC-FIX-03 engolia (continha `fetch`, `4\d\d`, `CORS`
+  // soltos) — precisam continuar reprovando o boot.
+  const appErrorMessages = [
+    "TypeError: cannot read properties of undefined (reading 'fetch')",
+    'Uncaught ReferenceError: fetchSpotJSON is not defined',
+    'erro no parser: status 451 sem tratamento',
+    'configuracao CORS invalida no api-guard'
+  ];
+  for (const message of appErrorMessages) {
+    assert.doesNotMatch(message, networkNoise, 'erro do app nao pode ser filtrado como ruido: ' + message.slice(0, 60));
+  }
+});
