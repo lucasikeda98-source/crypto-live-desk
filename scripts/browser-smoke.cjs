@@ -343,11 +343,14 @@ async function main() {
       meaningfulPage: dashboardResult.bodyLength > 1000,
       fullRadar: dashboardResult.cards === 24,
       coreLoaded: dashboardResult.modelLoaded,
-      radarNamed: dashboardResult.radarLabel.includes('Radar Score preview'),
+      // CX-014/REV-CC-02: o sufixo 'preview' de VERSAO foi centralizado no selo do modelo
+      // (guardado por features.test, literal unico). Os rotulos dos scores permanecem nomeados
+      // e explicitamente ancorados em candles fechados.
+      radarNamed: dashboardResult.radarLabel.includes('Radar Score:') && dashboardResult.radarLabel.includes('candles fechados'),
       assetView: assetResult.view === 'asset' && assetResult.symbol === 'AVAXUSDT',
       finalRequestWins: assetResult.chartTitle.includes('AVAXUSDT'),
       closedCandleExplained: assetResult.structure.includes('fechamento confirmado'),
-      setupNamed: assetResult.setup.includes('Setup Score preview') && assetResult.setup.includes('Data Confidence preview'),
+      setupNamed: assetResult.setup.includes('Setup Score') && assetResult.setup.includes('Data Confidence'),
       proxyExplained: assetResult.options.includes('proxy informativo'),
       modelStatus: assetResult.status.includes('Modelo ' + PACKAGE_VERSION),
       noValueLeaks: dashboardResult.gridLeaks === false,
