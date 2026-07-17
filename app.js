@@ -1,5 +1,5 @@
 (function cryptoLiveDeskApp() {
-  var MODEL_VERSION = '1.0.0-preview.8';
+  var MODEL_VERSION = '1.0.0-preview.9';
   var AnalyticsCore = window.CryptoAnalyticsCore;
   if (!AnalyticsCore) throw new Error('CryptoAnalyticsCore nao foi carregado.');
   var RequestClient = window.CryptoRequestClient;
