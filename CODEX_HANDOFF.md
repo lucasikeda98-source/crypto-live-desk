@@ -931,3 +931,19 @@ Conclusao: nenhuma reversao exigida; a uniao esta apta a COMMIT como esta (gates
   - `node --check` limpo nos arquivos tocados; varredura marcador-a-marcador confirmou todas as correcoes A-L e o CC-FIX-03 presentes na arvore (OneDrive segue sincronizando; a uniao permanece integra).
 - Estado: as ressalvas da REV-CC-02 estao FECHADAS. Divida remanescente da arvore: apenas `npm run test:browser` (smoke autoritativo) antes de commit/release, e as pendencias de infra ja conhecidas (clone fora do OneDrive, CI hospedado).
 - Nada foi commitado ou publicado.
+
+### RC-010 — Release do 1.0.0-preview.9 em producao (2026-07-17)
+
+- Data: 2026-07-17
+- Responsavel: Claude Code (Fable 5), por instrucao explicita do proprietario ("faca o push e siga a publicacao")
+- Merge: `d385b2c` (claude/rev-cc-02-union -> main; ae2f65b uniao revisada + 80cf502 smoke alinhado + a053a3a bump preview.9)
+- Conteudo: CX-011..CX-014 (REVISADOS COM RESSALVAS, REV-CC-02) + CC-FIX-03 + CC-FIX-04 (correcoes A-L integralmente aplicadas). rulesetVersion do core permanece 1.0.0-preview.8 (pin 4efe8ce2 intacto, nenhuma regra do motor mudou); MODEL_VERSION avanca pela rampa continua do RSI (comportamento de score no app).
+- Gates pre-merge, TODOS executados e verdes: 345/345 testes; cobertura 97,53/82,29/97,02 exit 0; boot-check OK com dados ao vivo e ciclo real de navegacao; **SMOKE AUTORITATIVO 20/20 contra Binance real** (sem excecao de fluxo nesta release); preview Vercel do commit candidato READY com build limpo. Nota: navegacao anonima ao preview bloqueada por Vercel Authentication — verificacao do preview foi por API (commit pinado + build) e a comportamental foi feita direto na producao publica.
+- Verificacao pos-deploy em producao (crypto-live-desk.vercel.app), comportamental e ao vivo:
+  - Painel com preco em tempo real, selo "Modelo 1.0.0-preview.9", 24 cards, ZERO erros de console.
+  - Headers de seguranca completos (CSP, HSTS, nosniff, DENY, referrer).
+  - /api/market: 24 rows, envelope `ok`, schema ANINHADO validando, health scope instance.
+  - /api/macro: fresh, envelope `ok`, `backtestSafe:false`, flags honestas (`availability-inferred-at-retrieval` = correcao B em acao).
+- Journal de sinais rotaciona geracao por design (chaves por MODEL_VERSION); journal do preview.8 permanece arquivado no navegador em que existia.
+- Rollback: Vercel Instant Rollback disponivel (deploy anterior `dpl_Dhq9Uy8EzRwFKptXVGk6ERoHCUV9`, e25ec34/preview.8, marcado rollback candidate).
+- Pendencias pos-release: observar o cron diario do signal-worker (compact Lua agora com ARGV[5]+cap global — retrocompativel, conferir log do primeiro run); infra ja conhecida (clone fora do OneDrive — URGENTE, corrida de sync ocorreu 2x nesta sessao; CI hospedado com o boot-check novo).
