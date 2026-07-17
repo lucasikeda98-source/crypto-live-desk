@@ -947,3 +947,13 @@ Conclusao: nenhuma reversao exigida; a uniao esta apta a COMMIT como esta (gates
 - Journal de sinais rotaciona geracao por design (chaves por MODEL_VERSION); journal do preview.8 permanece arquivado no navegador em que existia.
 - Rollback: Vercel Instant Rollback disponivel (deploy anterior `dpl_Dhq9Uy8EzRwFKptXVGk6ERoHCUV9`, e25ec34/preview.8, marcado rollback candidate).
 - Pendencias pos-release: observar o cron diario do signal-worker (compact Lua agora com ARGV[5]+cap global — retrocompativel, conferir log do primeiro run); infra ja conhecida (clone fora do OneDrive — URGENTE, corrida de sync ocorreu 2x nesta sessao; CI hospedado com o boot-check novo).
+
+### OPS-011 — Migracao do repositorio de trabalho para fora do OneDrive (2026-07-17)
+
+- Data: 2026-07-17
+- Responsavel: Claude Code (Fable 5), por instrucao explicita do proprietario ("vamos migrar o repositorio para fora do OneDrive")
+- Motivo: o diretorio `C:\Users\lucas\OneDrive\Documentos\Binance` sofreu DUAS corridas de sincronizacao na sessao de 2026-07-17 — o OneDrive sobrescreveu arquivos no meio do trabalho (um lote inteiro do Codex chegou durante a aplicacao do CC-FIX-03 e clobberou o analytics-core; um segundo pulso alterou fakes de teste). Ha inclusive restos de conflito antigo (`.git.onedrive-blocked-20260706224250/`). Trabalhar com git dentro de pasta sincronizada e estruturalmente inseguro.
+- Novo local canonico de trabalho: **`C:\dev\crypto-live-desk`** (clone ja validado na Fase B, atualizado para `28417da`).
+- Validacao no novo local: `npm ci` limpo; **345/345 testes**; **BOOT CHECK: OK** (Playwright/Chromium instalado); `.vercel/project.json` transplantado; este proprio commit e a prova de que o push funciona de la.
+- REGRA NOVA (vale para Claude Code E Codex, em qualquer maquina): o canal de sincronizacao entre maquinas passa a ser o **GitHub (git pull/push)** — NUNCA a pasta do OneDrive. A copia do OneDrive fica como arquivo historico com um marcador `AVISO-REPO-MIGRADO.md` (nao rastreado) e nao deve receber trabalho novo. Sessoes novas do Claude Code devem ser abertas em `C:\dev\crypto-live-desk`.
+- Item da Fase 9 do SYSTEM_EVOLUTION_PLAN (antecipado pela emenda 3 da REV-CC-02): CONCLUIDO.
