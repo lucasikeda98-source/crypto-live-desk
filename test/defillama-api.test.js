@@ -84,7 +84,7 @@ test('proxy DeFiLlama falha fechado sem cache e rejeita metodo', async () => {
     const failed = responseMock();
     await freshHandler({ method: 'GET', headers: { 'x-forwarded-for': '203.0.113.44' }, url: '/api/defillama' }, failed);
     assert.equal(failed.statusCode, 503);
-    assert.match(failed.body.error, /indisponivel/);
+    assert.equal(failed.body.error, 'internal error', 'erro arbitrario do runtime nao cruza a API publica');
 
     const method = responseMock();
     await freshHandler({ method: 'POST', headers: { 'x-forwarded-for': '203.0.113.45' }, url: '/api/defillama' }, method);
@@ -114,7 +114,7 @@ test('proxy DeFiLlama aplica backoff ao servir cache stale durante indisponibili
     const stale = responseMock();
     await freshHandler({ method: 'GET', headers: {}, url: '/api/defillama' }, stale);
     assert.equal(stale.body.stale, true);
-    assert.match(stale.body.errors.refresh, /falha temporaria/);
+    assert.equal(stale.body.errors.refresh, 'internal error');
     await freshHandler({ method: 'GET', headers: {}, url: '/api/defillama' }, responseMock());
     assert.equal(calls, 2, 'backoff impede nova chamada imediata ao upstream');
   } finally {

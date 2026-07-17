@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { applyApiPolicy, applyApiPolicyAsync, getDistributedLimiter, originAllowed, resetRateLimits, rateLimitBucketCount } = require('../lib/api-guard');
+const { applyApiPolicy, applyApiPolicyAsync, getDistributedLimiter, originAllowed, publicApiError, publicErrorMessage, resetRateLimits, rateLimitBucketCount } = require('../lib/api-guard');
 const { resetRedisForTests } = require('../lib/redis-runtime');
 
 function responseMock() {
@@ -17,6 +17,19 @@ function responseMock() {
     end() { this.ended = true; }
   };
 }
+
+test('erros publicos exigem marcacao explicita e removem controles', () => {
+  const original = console.error;
+  console.error = () => {};
+  try {
+    assert.equal(publicErrorMessage('redis', new Error('redis://token-secreto@host')), 'internal error');
+    assert.equal(publicErrorMessage('runtime', new TypeError('Cannot read properties of undefined')), 'internal error');
+    assert.equal(publicErrorMessage('upstream', publicApiError('Deribit HTTP 503\ntrace')), 'Deribit HTTP 503 trace');
+    assert.equal(publicErrorMessage('timeout', Object.assign(new Error('detalhe interno'), { name: 'TimeoutError' })), 'timeout');
+  } finally {
+    console.error = original;
+  }
+});
 
 test('politica de API aceita same-origin, reflete origem e aplica headers em todos os caminhos', () => {
   resetRateLimits();

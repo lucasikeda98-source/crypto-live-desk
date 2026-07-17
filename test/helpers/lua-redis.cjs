@@ -149,6 +149,23 @@ function createRedisCall(store) {
         lua.lua_pushnumber(L, removed);
         return 1;
       }
+      case 'ZCARD': {
+        lua.lua_pushnumber(L, store.sorted.get(key)?.size || 0);
+        return 1;
+      }
+      case 'ZREMRANGEBYSCORE': {
+        const minimum = rest[0] === '-inf' ? -Infinity : Number(rest[0]);
+        const maximum = rest[1] === '+inf' ? Infinity : Number(rest[1]);
+        let removed = 0;
+        for (const [member, score] of store.sorted.get(key) || []) {
+          if (score >= minimum && score <= maximum) {
+            store.sorted.get(key).delete(member);
+            removed += 1;
+          }
+        }
+        lua.lua_pushnumber(L, removed);
+        return 1;
+      }
       default:
         return lauxlib.luaL_error(L, to_luastring(`unsupported redis command ${command}`));
     }

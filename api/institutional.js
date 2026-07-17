@@ -1,5 +1,5 @@
 const { classifyEtfFlowObservation, toFiniteNumber } = require('../lib/analytics-core');
-const { applyApiPolicyAsync } = require('../lib/api-guard');
+const { applyApiPolicyAsync, publicApiError, publicErrorMessage } = require('../lib/api-guard');
 
 const ASSET_MAP = {
   BTC: 'btc',
@@ -21,7 +21,7 @@ async function callEtfTool(name, args) {
     body: JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method: 'tools/call', params: { name, arguments: args || {} } }),
     signal: AbortSignal.timeout(18000),
   });
-  if (!response.ok) throw new Error(`ETF MCP HTTP ${response.status}`);
+  if (!response.ok) throw publicApiError(`ETF MCP HTTP ${response.status}`);
   return parseEtfMcpBody(await response.text());
 }
 
@@ -45,11 +45,11 @@ function parseEtfMcpBody(body) {
     }
   }
   const envelope = envelopes.find((item) => item && item.result) || envelopes.find((item) => item && item.error);
-  if (!envelope) throw new Error('ETF MCP sem payload JSON-RPC valido');
-  if (envelope.error) throw new Error('ETF MCP: ' + String(envelope.error.message || envelope.error.code || 'erro semantico'));
+  if (!envelope) throw publicApiError('ETF MCP returned an invalid payload');
+  if (envelope.error) throw publicApiError('ETF MCP returned a semantic error');
   const contentItems = Array.isArray(envelope.result && envelope.result.content) ? envelope.result.content : [];
   const text = contentItems.find((item) => item && typeof item === 'object' && item.type === 'text')?.text;
-  if (!text) throw new Error('ETF MCP sem conteudo');
+  if (!text) throw publicApiError('ETF MCP returned no content');
   return JSON.parse(text);
 }
 
@@ -143,9 +143,9 @@ async function loadCftc() {
     headers: { 'User-Agent': 'CryptoLiveDesk/1.0 (+https://crypto-live-desk.vercel.app)' },
     signal: AbortSignal.timeout(18000),
   });
-  if (!response.ok) throw new Error(`CFTC HTTP ${response.status}`);
+  if (!response.ok) throw publicApiError(`CFTC HTTP ${response.status}`);
   const result = normalizeCftc(await response.json());
-  if (!result.latest) throw new Error('CFTC sem linha BTC valida');
+  if (!result.latest) throw publicApiError('CFTC returned no valid BTC row');
   return result;
 }
 
@@ -176,7 +176,7 @@ module.exports = async function handler(request, response) {
   settled.forEach((item, index) => {
     const key = keys[index];
     if (item.status === 'fulfilled') result[key] = item.value;
-    else result.errors[key] = String(item.reason && item.reason.message || item.reason);
+    else result.errors[key] = publicErrorMessage(`institutional-${key}`, item.reason);
   });
 
   const available = ['etf', 'cftc'].filter((key) => result[key]).length;

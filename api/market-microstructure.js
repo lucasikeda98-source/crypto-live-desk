@@ -1,7 +1,7 @@
 'use strict';
 
 const { toFiniteNumber, toTimestampMs } = require('../lib/analytics-core');
-const { applyApiPolicyAsync } = require('../lib/api-guard');
+const { applyApiPolicyAsync, publicApiError, publicErrorMessage } = require('../lib/api-guard');
 
 const ALLOWED_SYMBOLS = new Set(['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'LINKUSDT', 'TRXUSDT', 'DOTUSDT', 'LTCUSDT', 'BCHUSDT', 'UNIUSDT', 'NEARUSDT', 'ATOMUSDT', 'FILUSDT', 'AAVEUSDT', 'SUIUSDT', 'HBARUSDT', 'XLMUSDT', 'ICPUSDT', 'ARBUSDT', 'OPUSDT']);
 
@@ -14,7 +14,7 @@ async function getJson(url) {
     headers: { 'User-Agent': 'CryptoLiveDesk/1.0 (+https://crypto-live-desk.vercel.app)' },
     signal: AbortSignal.timeout(9000),
   });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  if (!response.ok) throw publicApiError(`Market venue HTTP ${response.status}`);
   return response.json();
 }
 
@@ -163,7 +163,7 @@ async function loadMarketMicrostructure(symbol) {
   const value = (index) => settled[index].status === 'fulfilled' ? settled[index].value : null;
   const errors = {};
   ['binance', 'orderFlow', 'coinbase', 'bybit', 'okx', 'coinbaseFx'].forEach((key, index) => {
-    if (settled[index].status === 'rejected') errors[key] = String(settled[index].reason && settled[index].reason.message || settled[index].reason);
+    if (settled[index].status === 'rejected') errors[key] = publicErrorMessage(`market-microstructure-${key}`, settled[index].reason);
   });
 
   const binance = value(0) || {};
@@ -233,7 +233,7 @@ module.exports = async function handler(request, response) {
     const payload = await loadMarketMicrostructure(symbol);
     return response.status(payload.venues.length || payload.orderFlow.trades ? 200 : 503).json(payload);
   } catch (error) {
-    return response.status(503).json({ error: String(error && error.message || error), symbol, fetchedAt: Date.now() });
+    return response.status(503).json({ error: publicErrorMessage('market-microstructure', error), symbol, fetchedAt: Date.now() });
   }
 };
 

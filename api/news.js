@@ -1,4 +1,4 @@
-const { applyApiPolicyAsync } = require('../lib/api-guard');
+const { applyApiPolicyAsync, publicApiError, publicErrorMessage } = require('../lib/api-guard');
 
 const SOURCES = [
   {
@@ -61,7 +61,7 @@ async function fetchFeed(source) {
     headers: { 'User-Agent': 'CryptoLiveDesk/1.0 (+https://crypto-live-desk.vercel.app)' },
     signal: AbortSignal.timeout(7000),
   });
-  if (!response.ok) throw new Error(`${source.name}: HTTP ${response.status}`);
+  if (!response.ok) throw publicApiError(`${source.name}: HTTP ${response.status}`);
   return parseRss(await response.text(), source);
 }
 
@@ -75,14 +75,14 @@ module.exports = async function handler(request, response) {
   const results = await Promise.allSettled(SOURCES.map(fetchFeed));
   const items = results
     .flatMap((result) => result.status === 'fulfilled' ? result.value : [])
-    .sort((a, b) => b.published - a.published)
+    .sort((a, b) => (b.published || 0) - (a.published || 0))
     .filter((item, index, rows) => rows.findIndex((row) => row.title === item.title) === index)
     .slice(0, 40);
   const sources = results.map((result, index) => ({
     name: SOURCES[index].name,
     ok: result.status === 'fulfilled' && result.value.length > 0,
     count: result.status === 'fulfilled' ? result.value.length : 0,
-    error: result.status === 'rejected' ? String(result.reason && result.reason.message || result.reason) : null,
+    error: result.status === 'rejected' ? publicErrorMessage(`news-${SOURCES[index].name}`, result.reason) : null,
   }));
 
   return response.status(items.length ? 200 : 503).json({ items, sources, fetchedAt: Date.now() });

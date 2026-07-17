@@ -1,5 +1,5 @@
 const analyticsCore = require('../lib/analytics-core');
-const { applyApiPolicyAsync } = require('../lib/api-guard');
+const { applyApiPolicyAsync, publicApiError, publicErrorMessage } = require('../lib/api-guard');
 
 const SYMBOLS = [
   { symbol: 'COIN', name: 'Coinbase', group: 'Crypto equity' },
@@ -29,7 +29,7 @@ async function loadSymbol(meta) {
     headers: { 'User-Agent': 'CryptoLiveDesk/1.0 (+https://crypto-live-desk.vercel.app)' },
     signal: AbortSignal.timeout(9000),
   });
-  if (!response.ok) throw new Error(`${meta.symbol}: HTTP ${response.status}`);
+  if (!response.ok) throw publicApiError(`${meta.symbol}: HTTP ${response.status}`);
   const payload = await response.json();
   const asset = analyticsCore.normalizeTradFiChart(payload, meta);
   asset.series = analyticsCore.normalizeTradFiRows(payload).slice(-60).map((row) => ({ date: row.date, close: row.close }));
@@ -44,7 +44,7 @@ module.exports = async function handler(request, response) {
   }
   const results = await Promise.allSettled(SYMBOLS.map(loadSymbol));
   const assets = results.flatMap((result) => result.status === 'fulfilled' ? [result.value] : []);
-  const errors = results.flatMap((result, index) => result.status === 'rejected' ? [{ symbol: SYMBOLS[index].symbol, error: String(result.reason && result.reason.message || result.reason) }] : []);
+  const errors = results.flatMap((result, index) => result.status === 'rejected' ? [{ symbol: SYMBOLS[index].symbol, error: publicErrorMessage(`tradfi-${SYMBOLS[index].symbol}`, result.reason) }] : []);
   const score = scoreMacroAssets(assets);
   const observedAt = assets.reduce((latest, asset) => {
     const parsed = analyticsCore.toFiniteNumber(asset && asset.observedAt);

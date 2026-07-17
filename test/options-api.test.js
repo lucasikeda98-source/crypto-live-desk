@@ -48,7 +48,7 @@ test('options rejeita metodo e falha total permanece no-store', async () => {
     const failed = responseMock();
     await handler({ method: 'GET', headers: { 'x-forwarded-for': '203.0.113.50' }, url: '/api/options?currency=BTC' }, failed);
     assert.equal(failed.statusCode, 503);
-    assert.match(failed.body.error, /Deribit indisponivel/);
+    assert.equal(failed.body.error, 'internal error', 'erro arbitrario do runtime nao cruza a API publica');
     assert.equal(failed.headers['Cache-Control'], 'private, no-store, max-age=0');
   } finally { global.fetch = originalFetch; }
 });

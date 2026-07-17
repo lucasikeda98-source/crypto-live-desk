@@ -47,15 +47,19 @@ class AtomicRaceRedis extends FakeRedis {
   }
   async eval(_script, keys, args) {
     const operation = this.atomicQueue.then(async () => {
-      const [key, dueKey] = keys;
+      const [key, dueKey, recordIndexKey] = keys;
       if (args.length === 1) {
         const [namespaceHash] = args;
         const fields = Array.from(this.hashes.get(key)?.keys() || []);
-        fields.forEach((field) => this.sorted.get(dueKey)?.delete(durable.dueMember(namespaceHash, field)));
+        fields.forEach((field) => {
+          const member = durable.dueMember(namespaceHash, field);
+          this.sorted.get(dueKey)?.delete(member);
+          this.sorted.get(recordIndexKey)?.delete(member);
+        });
         this.hashes.delete(key);
         return fields.length;
       }
-      if (args.length === 4) {
+      if (args.length === 4 || args.length === 5) {
         const [namespaceHash, asOf] = args;
         const entries = Array.from(this.hashes.get(key)?.entries() || []);
         const compacted = durable.compactDurableSignals(entries.map(([, value]) => {
@@ -68,19 +72,22 @@ class AtomicRaceRedis extends FakeRedis {
           if (!normalized || normalized.id !== field || !keep.has(field)) {
             this.hashes.get(key)?.delete(field);
             this.sorted.get(dueKey)?.delete(durable.dueMember(namespaceHash, field));
+            this.sorted.get(recordIndexKey)?.delete(durable.dueMember(namespaceHash, field));
           }
         });
         return Array.from(this.hashes.get(key)?.values() || []);
       }
-      const [field, serialized] = args;
+      const [field, serialized, member, asOf, _retry, _ttl, cap] = args;
       const incoming = JSON.parse(serialized);
       const existingValue = this.hashes.get(key)?.get(field);
+      if (!existingValue && (this.sorted.get(recordIndexKey)?.size || 0) >= Number(cap)) return '__DURABLE_SIGNAL_CAPACITY__';
       const parsed = existingValue ? JSON.parse(existingValue) : null;
       const existing = durable.normalizeDurableSignalRecord(parsed, NOW);
       const merged = existing && existing.id === incoming.id
         ? durable.mergeDurableSignalRecord(existing, incoming, NOW)
         : incoming;
       await super.hset(key, { [field]: JSON.stringify(merged) });
+      await super.zadd(recordIndexKey, { score: Number(asOf), member });
       return JSON.stringify(merged);
     });
     this.atomicQueue = operation.then(() => undefined, () => undefined);
@@ -263,6 +270,22 @@ test('retencao duravel protege pendentes e limita completos por idade/cap', () =
   assert.equal(compacted.some((row) => row.inputSnapshotId === 'pending'), true);
 });
 
+test('retencao duravel limita incompletos por cap mantendo os mais novos', () => {
+  const rows = Array.from({ length: durable.INCOMPLETE_CAP + 5 }, (_, index) => fixture({
+    signalCloseTime: NOW - (durable.INCOMPLETE_CAP + 4 - index) * 60_000,
+    recordedAt: NOW - (durable.INCOMPLETE_CAP + 4 - index) * 60_000 + 1000,
+    inputSnapshotId: `pending:${index}`,
+    outcome: { r1h: null, r24h: null, r7d: null }
+  }));
+  const compacted = durable.compactDurableSignals(rows, NOW);
+  assert.equal(compacted.length, durable.INCOMPLETE_CAP);
+  // Os 5 mais antigos caem; o mais novo permanece.
+  assert.equal(compacted.some((row) => row.inputSnapshotId === 'pending:0'), false);
+  assert.equal(compacted.some((row) => row.inputSnapshotId === 'pending:4'), false);
+  assert.equal(compacted.some((row) => row.inputSnapshotId === 'pending:5'), true);
+  assert.equal(compacted.some((row) => row.inputSnapshotId === `pending:${durable.INCOMPLETE_CAP + 4}`), true);
+});
+
 test('store isola namespace, agenda horizonte, atualiza e limpa', async () => {
   const redis = new FakeRedis();
   const store = durable.createDurableSignalStore(redis);
@@ -300,4 +323,19 @@ test('fila due le o lote Redis em um unico pipeline', async () => {
   const due = await store.due(NOW + 16 * 60_000, 10);
   assert.equal(due.length, 2);
   assert.equal(redis.pipelineExecutions, 1);
+});
+
+// REV-CC-02/G: membro orfao no indice de vencimento sai tambem do indice global de capacidade —
+// senao a entrada fantasma consome o teto de 10k ate a poda de 400 dias.
+test('due remove membro orfao do indice due E do indice global de capacidade', async () => {
+  const redis = new FakeRedis();
+  const store = durable.createDurableSignalStore(redis);
+  const hash = durable.namespaceHash('G'.repeat(43));
+  const member = durable.dueMember(hash, '1.0.0-test:BTCUSDT:5m:123');
+  await redis.zadd(durable.DUE_KEY, { score: 1, member });
+  await redis.zadd(durable.RECORD_INDEX_KEY, { score: 1, member });
+  const due = await store.due(NOW, 10);
+  assert.equal(due.length, 0);
+  assert.equal(redis.sorted.get(durable.DUE_KEY).has(member), false);
+  assert.equal(redis.sorted.get(durable.RECORD_INDEX_KEY).has(member), false);
 });

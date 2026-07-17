@@ -302,6 +302,8 @@ test('deploy: headers defensivos cobrem todas as rotas e permitem fontes live de
 
 test('acessibilidade: seletores e skip link mantem alvo tatil minimo', () => {
   const css = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
   assert.match(css, /\.skip-link\s*\{[^}]*min-height:\s*44px/s);
   assert.match(css, /\.field input, \.field select\s*\{[^}]*height:\s*44px/s);
   assert.match(css, /\.mini-select select\s*\{[^}]*min-height:\s*44px/s);
@@ -312,10 +314,18 @@ test('acessibilidade: seletores e skip link mantem alvo tatil minimo', () => {
   assert.doesNotMatch(css, /\.field input, \.field select\s*\{[^}]*outline:\s*0/s, 'campos preservam o foco global de teclado');
   assert.doesNotMatch(css, /\.mini-select select\s*\{[^}]*outline:\s*0/s, 'select compacto preserva o foco global de teclado');
   assert.doesNotMatch(css, /\.candle-count-label select\s*\{[^}]*outline:\s*0/s, 'seletor de candles preserva o foco global de teclado');
+  // REV-CC-02/K (Label-in-Name, WCAG 2.5.3): o nome acessivel do seletor vem do <label> que o
+  // envolve — o texto visivel "Area do ativo". Um aria-label divergente quebrava controle por voz.
+  assert.match(html, /<label class="asset-tab-mobile[^>]*>\s*<span>Area do ativo<\/span>\s*<select id="assetTabSelect">/);
+  assert.doesNotMatch(html, /id="assetTabSelect"[^>]*aria-label/, 'aria-label nao pode sobrepor o rotulo visivel');
+  assert.match(css, /@media \(max-width: 720px\)[\s\S]*\.asset-subnav \{ display: none !important; \}[\s\S]*\.asset-tab-mobile \{/);
+  assert.match(app, /var active = assetView && button\.dataset\.assetTab === state\.assetTab/);
+  assert.match(app, /on\('assetTabSelect', 'change'/);
 });
 
 test('app: estado inicial acessivel, ETF atravessa fim de semana, journal preciso e historico sob demanda', () => {
   const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
   const requestClient = fs.readFileSync(path.join(__dirname, '..', 'lib', 'request-client.js'), 'utf8');
   assert.match(app, /INSTITUTIONAL_STALE_MS\s*=\s*96\s*\*\s*60\s*\*\s*60\s*\*\s*1000/);
   assert.match(app, /syncIntervalButtons\(state\.interval\)/);
@@ -331,6 +341,18 @@ test('app: estado inicial acessivel, ETF atravessa fim de semana, journal precis
   assert.match(app, /mapSettledPool\(ASSETS, 4,/);
   assert.match(app, /createRequestBudget\(\{ maxConcurrent: 8, maxStartsPerWindow: 180, maxStartsPerSource: 60/);
   assert.match(app, /RequestClient\.createRequestClient\(\{/);
+  assert.match(html, /<h2>Saude dos dados<\/h2>/);
+  assert.match(html, /id="dataContractStatus"/);
+  assert.match(html, /id="dataContractDetail"[^>]*aria-live="polite"/);
+  assert.match(app, /market\.overview\.v1 \| qualidade/);
+  assert.match(html, /id="modelBadge" class="model-badge"/);
+  assert.match(app, /text\('modelBadge', 'Modelo ' \+ MODEL_VERSION\)/);
+  assert.equal((app.match(/preview/g) || []).length, 1, 'preview aparece somente na versao central do modelo, nao em cada score/card');
+  // REV-CC-02/I: o literal unico acima NAO garante selo unico — a versao renderiza tambem em
+  // superficies de proveniencia (updatedAt, statusText, tooltip do card, status de sinais,
+  // relatorio) alem de snapshots/journal/chaves. O total de usos de MODEL_VERSION fica PINADO:
+  // criar uma nova superficie de renderizacao exige decisao consciente aqui, nao passa em silencio.
+  assert.equal((app.match(/MODEL_VERSION/g) || []).length, 26, 'novo uso de MODEL_VERSION exige decisao consciente (selo/proveniencia/identidade)');
   assert.match(requestClient, /options\.budget\.run\(async function/);
   assert.match(app, /flowEligible = eligible && sourceObservationFresh\(flow\.observedAt \|\| flow\.lastTradeAt, MICROSTRUCTURE_STALE_MS\)/);
   assert.match(app, /venuesEligible = eligible && sourceObservationFresh\(data && data\.venuesObservedAt, MICROSTRUCTURE_STALE_MS\)/);

@@ -4,6 +4,15 @@
 > `HANDOFF_PROXIMA_SESSAO.md`. As revisoes do Claude Code estao ao final deste arquivo
 > (RC-001 a RC-007).
 
+## Estado local atual — CX-014 (2026-07-13)
+
+- Base versionada: `e25ec34` em `main`; arvore local deliberadamente nao commitada e nao publicada.
+- Plano ativo: Fase 0 com gate de codigo verde e Fase 1 em execucao com pilotos de mercado/macro, validadores, schema drift e telemetria por instancia; ver `SYSTEM_EVOLUTION_PLAN.md`.
+- Suite Codex: **336/336** testes; cobertura **97,49% linhas / 82,03% branches / 96,87% funcoes** (pisos 95/75/90, exit 0).
+- `rulesetHash` permanece no golden `4efe8ce2`; a extracao do throttle de rede nao alterou regra de score.
+- Estado de revisao deste lote: **REVISADO PELO CLAUDE CODE — COM RESSALVAS** (2026-07-17, ver REV-CC-02 ao final; correcoes exigidas A-L antes de promover o contrato de dados como confiavel). As revisoes historicas abaixo continuam validas somente para os commits e escopos que registram.
+- Producao observada: modelo `1.0.0-preview.8`. Nenhuma mudanca do CX-012/CX-013/CX-014 foi promovida.
+
 ## Objetivo
 
 Este arquivo evidencia as mudancas realizadas pelo Codex a partir do marco abaixo. Todas essas mudancas devem ser revisadas pelo Claude Code quando o acesso estiver disponivel novamente, antes de serem consideradas alinhadas definitivamente com a linha de raciocinio anterior do projeto.
@@ -701,3 +710,224 @@ Nao promover a producao. Ordem sugerida: (1) corrigir a secao A (P1 primeiro: me
 | C5 | Avaliacao de sinais com 1 fetch de 15m por simbolo (cobre todos os pendentes do par; 1000x15m ~ 10,4 dias), 1m por registro para o horizonte de 1h, teto por clique 10 -> 50. |
 
 Gate: 316/316 com cobertura acima dos pisos (3 execucoes estaveis), boot-check OK online e offline, node --check limpo. Hash de nivel app muda por design (implementacao do app.js e material do hash); pin do core (4efe8ce2) inalterado — nenhuma regra de score mudou.
+
+### CX-011 — Plano mestre de evolucao profissional do sistema
+
+- Data: 2026-07-13
+- Responsavel: Codex
+- Base versionada: `e25ec34` (`main` sincronizada com `origin/main`)
+- Estado: **REVISADO PELO CLAUDE CODE — COM RESSALVAS** (2026-07-17, REV-CC-02: plano solido-com-ressalvas; 10 questoes, emendas exigidas na correcao L)
+- Escopo:
+  - Auditoria combinada do fluxo de produto em producao, cobrindo dashboard geral, resumo do ativo, journal de sinais e viewports desktop/mobile.
+  - Inventario das fontes atuais e dos pontos cegos de qualidade, proveniencia, microestrutura, derivativos, macro, institucional, on-chain, DeFi, risco e validacao estatistica.
+  - Pesquisa em documentacao oficial de FRED/ALFRED, BLS, Coin Metrics, Deribit, DefiLlama, Etherscan, Polymarket, SEC EDGAR e CFTC para classificar novas fontes por valor, custo, licenca e risco de sobreposicao.
+  - Criacao de `SYSTEM_EVOLUTION_PLAN.md` com arquitetura-alvo, nove fases de execucao, criterios de saida, priorizacao de APIs, KPIs e guardrails.
+  - A Fase 0 foi definida como bloqueante: estabilizar a arvore local e reconciliar hash/testes/documentacao antes de adicionar APIs ou redesenhar a interface.
+- Arquivos:
+  - `SYSTEM_EVOLUTION_PLAN.md`
+  - `CODEX_HANDOFF.md`
+- Validacao Codex:
+  - Cinco capturas aceitas e inspecionadas: Geral desktop, Ativo desktop, Sinais desktop, Geral mobile e Ativo mobile.
+  - Producao observada com 24 cards, modelo `1.0.0-preview.8` e dados ao vivo durante a auditoria.
+  - Inventario mecanico das rotas, endpoints externos e registro normativo de fontes.
+  - Nenhuma regra de score, API, runtime ou interface foi alterada por esta entrada.
+- Limitacoes conhecidas:
+  - A arvore ja estava suja antes desta entrada, com alteracoes funcionais nao registradas e `run.json` nao rastreado; este lote nao atribui autoria nem aprova essas mudancas.
+  - O gate preexistente permanece vermelho: 318/319 testes por divergencia do pin de `rulesetHash` (`4efe8ce2` esperado, `893cf675` atual).
+  - A auditoria visual nao equivale a conformidade WCAG completa.
+  - Licencas e planos comerciais devem ser confirmados antes de publicar integracoes novas.
+  - O plano e proposta Codex e requer revisao conceitual real no Claude Code antes de ser tratado como alinhado.
+
+### CX-012 — Estabilizacao da base e contrato de dados piloto
+
+- Data: 2026-07-13
+- Responsavel: Codex
+- Base versionada: `e25ec34` (`main`)
+- Estado: **REVISADO PELO CLAUDE CODE — COM RESSALVAS** (2026-07-17, REV-CC-02: cap 10k/throttle/sanitizacao/compat legada confirmados; 'fail-closed' de schema refutado como redigido; correcoes A, F, G)
+- Escopo:
+  - Preservar e estabilizar a arvore local preexistente sem apagar historico nem atribuir revisao indevida.
+  - Manter o hash-ouro `4efe8ce2` ao separar o throttle de rede do material normativo do motor; nenhuma regra de score foi alterada.
+  - Centralizar a sanitizacao de erros publicos, evitando exposicao de mensagens internas de excecao.
+  - Fazer a sincronizacao falhar fechada quando o lease entre abas e perdido, abortando rede e impedindo commit local posterior.
+  - Acrescentar limite global atomico de 10.000 registros ao journal Redis, com limpeza do indice durante clear/compact e teste dos scripts Lua reais em VM.
+  - Implementar o contrato de dados `1.0.0` e migrar `market.overview.v1` como piloto, mantendo o formato legado da rota.
+  - Exibir no painel `Saude dos dados` status, cobertura, latencia, qualidade e hash do dataset piloto, declarando honestamente a migracao parcial.
+  - Reconciliar o plano mestre e os documentos operacionais com o estado local e o estado observado de producao.
+- Arquivos alterados neste lote:
+  - Documentacao: `README.md`, `SYSTEM_EVOLUTION_PLAN.md`, `ANALYTICS_COVERAGE.md`, `AUDIT_LEDGER.md`, `HANDOFF_PROXIMA_SESSAO.md`, `CODEX_HANDOFF.md`.
+  - Contrato/rede/persistencia: `lib/data-contract.js`, `lib/api-guard.js`, `lib/cross-tab-lock.js`, `lib/request-client.js`, `lib/signal-sync-client.js`, `lib/durable-signals.js`.
+  - APIs: `api/defillama.js`, `api/institutional.js`, `api/macro.js`, `api/market.js`, `api/market-microstructure.js`, `api/news.js`, `api/options.js`, `api/signal-worker.js`, `api/signals.js`, `api/tradfi.js`.
+  - Interface: `index.html`, `app.js`, `styles.css`.
+  - Suporte/testes: `scripts/dev-server.cjs`, `test/analytics-core.test.js`, `test/api-guard.test.js`, `test/cross-tab-lock.test.js`, `test/data-contract.test.js`, `test/defillama-api.test.js`, `test/dev-server.test.js`, `test/durable-signals-lua.test.js`, `test/durable-signals.test.js`, `test/features.test.js`, `test/helpers/lua-redis.cjs`, `test/institutional-api.test.js`, `test/macro-api.test.js`, `test/market-api.test.js`, `test/news-api.test.js`, `test/options-api.test.js`, `test/request-client.test.js`, `test/signals-api.test.js`, `test/tradfi-api.test.js`.
+- Validacoes Codex executadas:
+  - `npm.cmd test`: 324/324 aprovados antes do contrato piloto.
+  - `npm.cmd run test:coverage`: 329/329 aprovados; 97,45% linhas, 81,71% branches e 96,72% funcoes; exit 0.
+  - `node --check app.js`, `node --check lib/data-contract.js` e `node --check api/market.js`: limpos.
+  - Testes dirigidos de sanitizacao, perda de lease, abort signal, limite Redis/Lua e envelope de mercado: aprovados.
+- Limitacoes e pendencias:
+  - O boot-check local havia encontrado bloqueio de criacao do processo do navegador (`EPERM`); precisa ser reexecutado no ambiente permitido. Smoke e audit de dependencias tambem permanecem pendentes neste lote.
+  - A alteracao visual do painel piloto ainda precisa de verificacao local desktop/mobile antes do fechamento do lote.
+  - `run.json` ja estava nao rastreado e foi preservado; sua remocao exige decisao explicita do proprietario.
+  - `scripts/browser-boot-check.cjs` aparece modificado na arvore preexistente, mas nao integra o escopo autoral descrito acima.
+- Nenhuma mudanca deste lote foi commitada, publicada ou promovida. Testes verdes nao substituem revisao conceitual real no Claude Code.
+
+### CX-013 — Validacao de series, schema drift, bitemporalidade macro e health registry
+
+- Data: 2026-07-13
+- Responsavel: Codex
+- Base versionada: `e25ec34` (`main`), sobre o lote local CX-012
+- Estado: **REVISADO PELO CLAUDE CODE — COM RESSALVAS** (2026-07-17, REV-CC-02: health registry e bitemporal parcial confirmados; SLA de frescor NAO aplicado, schema raso, validators sem uso; correcoes B, C, D, E, H)
+- Escopo:
+  - Criar validadores reutilizaveis de numero finito e series temporais com range, futuro, ordenacao, duplicidade, amostra minima, staleness, cobertura e completude.
+  - Acrescentar contratos de schema para `market.overview.v1` e `macro.us-risk.v1`, fingerprint da forma observada e falha fechada quando campo obrigatorio muda de tipo ou desaparece.
+  - Ampliar o envelope com `vintageAt`, `decisionEligibleAt`, validacao da ordem bitemporal e dimensao de validade.
+  - Migrar macro Treasury/VIX para o envelope unificado, com SLA proprio e declaracao `backtestSafe:false` enquanto os upstreams atuais nao fornecerem o instante da primeira publicacao.
+  - Criar health registry limitado por instancia com p50/p95 de duracao, taxa de erro, cache hit, fallback, ultimo sucesso/falha, qualidade, cobertura e atraso de ingestao.
+  - Anexar telemetria a mercado e macro e exibir schema, p95, taxa de erro e escopo no detalhe do painel de saude, sem misturar esses valores ao score.
+- Arquivos alterados neste lote:
+  - Runtime: `lib/data-contract.js`, `lib/data-validators.js`, `lib/data-health-registry.js`, `api/market.js`, `api/macro.js`, `app.js`.
+  - Testes: `test/data-contract.test.js`, `test/data-validators.test.js`, `test/data-health-registry.test.js`, `test/market-api.test.js`, `test/macro-api.test.js`.
+  - Documentacao: `README.md`, `SYSTEM_EVOLUTION_PLAN.md`, `ANALYTICS_COVERAGE.md`, `AUDIT_LEDGER.md`, `HANDOFF_PROXIMA_SESSAO.md`, `CODEX_HANDOFF.md`.
+- Validacoes Codex:
+  - Testes dirigidos do lote: 26/26 aprovados.
+  - `npm.cmd run test:coverage`: **336/336** aprovados; cobertura **97,49% linhas / 82,03% branches / 96,87% funcoes**; exit 0.
+  - `node --check` em 54 arquivos JS/CJS rastreados e novos: limpo.
+  - `git diff --check`: limpo; apenas avisos de normalizacao CRLF/LF.
+  - Complemento visual do CX-012: painel local verificado em desktop e 390 x 844, sem overflow do documento e sem erros de console; capturas `07-local-data-health-panel.jpg` e `08-local-data-health-mobile.jpg` no diretorio de visualizacoes da tarefa.
+- Limitacoes:
+  - O health registry declara escopo `instance`; nao substitui agregacao distribuida, retencao operacional ou observabilidade da plataforma. Requisicoes barradas em 429 antes do handler ainda nao entram nessa amostra.
+  - Treasury/Cboe fornecem a observacao diaria atual, mas nao o instante historico de primeira publicacao/revisao usado por ALFRED; por isso o dataset permanece explicitamente nao seguro para backtest vintage.
+  - Os contratos de schema cobrem apenas os dois pilotos e usam fixtures controladas; fixtures reais minimizadas e migracao das demais rotas continuam pendentes.
+  - A auditoria de dependencias tentou consultar o registro npm, mas a divulgacao externa de metadados foi bloqueada ate autorizacao explicita do proprietario; nenhuma alternativa indireta foi usada.
+- Nenhuma mudanca foi commitada, publicada ou revisada no Claude Code.
+
+### CX-014 — Navegacao mobile compacta e versao visual centralizada
+
+- Data: 2026-07-13
+- Responsavel: Codex
+- Base versionada: `e25ec34` (`main`), sobre CX-012/CX-013 locais
+- Estado: **REVISADO PELO CLAUDE CODE — COM RESSALVAS** (2026-07-17, REV-CC-02: navegacao/a11y confirmadas ao vivo em 390x844; 'selo unico' refutado como redigido; correcoes I, J, K)
+- Escopo:
+  - Substituir no mobile a faixa horizontal de oito abas por um seletor compacto, preservando as abas existentes no desktop.
+  - Sincronizar os dois controles com `data-asset-tab`, manter a area selecionada e rolar para o controle correto em cada viewport.
+  - Remover `aria-pressed=true` das abas ocultas ao voltar para Geral, retirar esses controles da ordem de tabulacao e restaurar o estado ao reabrir Ativo.
+  - Centralizar `1.0.0-preview.8` em um unico selo de modelo e remover a repeticao visual de `preview` em cards, resumos, relatorio e rodape, sem alterar nomes ou calculos dos scores.
+- Arquivos alterados:
+  - `index.html`
+  - `styles.css`
+  - `app.js`
+  - `test/features.test.js`
+  - `README.md`
+  - `SYSTEM_EVOLUTION_PLAN.md`
+  - `CODEX_HANDOFF.md`
+- Validacoes Codex:
+  - `node --test test/features.test.js test/a11y-extended.test.js`: 23/23 aprovados.
+  - `npm.cmd run test:coverage`: 336/336 aprovados; cobertura 97,49/82,03/96,87; exit 0.
+  - `node --check app.js`: limpo. `git diff --check`: limpo, com avisos CRLF/LF.
+  - Navegador local 390 x 844: seletor alterou Resumo -> Sinais, exibiu `Registro de sinais`, documento permaneceu sem overflow e Geral deixou zero subabas com `aria-pressed=true`.
+  - Captura inspecionada: `09-local-mobile-compact-nav.jpg` no diretorio de visualizacoes da tarefa.
+- Limitacoes:
+  - Este lote fecha apenas os quick wins de navegacao/rotulo identificados na auditoria; hierarquia da home, tese/invalidacao, estados de falha, contraste/zoom e reorganizacao completa da area Ativo permanecem na Fase 2.
+  - Nenhuma regra analitica, hash-ouro ou endpoint foi alterado por este lote.
+  - Nenhuma mudanca foi commitada, publicada ou revisada no Claude Code.
+
+### CC-FIX-03 — Correcao integral dos achados da revisao de estado completo (2026-07-17)
+
+- Data: 2026-07-17
+- Responsavel: Claude Code (Fable 5), por instrucao explicita do proprietario ("eu quero corrigir tudo")
+- Base: arvore de trabalho sobre `e25ec34`; revisao de estado completo executada nesta mesma sessao (4 revisores paralelos + verificacao independente linha a linha; nenhum CRITICO, nenhum XSS)
+- Escopo (todas as correcoes aplicadas e verificadas):
+  - `scripts/dev-server.cjs`: guard de byte nulo/controles pos-decode (400) — `GET /%00` derrubava o processo via throw sincrono de `fs.realpath` fora do try/catch; testes `/%00` e `/index.html%00.png` em `test/dev-server.test.js`.
+  - `scripts/browser-boot-check.cjs`: regex `networkNoise` apertado para assinaturas ancoradas — alternativas soltas (`fetch`, `4\d\d`, `5\d\d`, `WebSocket`) engoliam erros reais do app (falso verde).
+  - `lib/api-guard.js`: `publicErrorMessage` (erros autorados passam; excecoes de runtime/bibliotecas viram genericas e vao ao log) aplicado nos catch-alls de signals/market/defillama/options/market-microstructure; `clientKey` reordenado (x-vercel-forwarded-for -> socket -> XFF) para nao confiar em header forjavel quando ha conexao real; `requestHost` com `host` antes de `x-forwarded-host` na decisao de CORS; log throttled (60s) quando o limiter distribuido degrada para `instance-fallback`.
+  - `api/macro.js`: parsers de XML/CSV em try/catch (503 gracioso, nao 500). `api/news.js`: sort null-safe de `published`.
+  - `lib/durable-signals.js`: `INCOMPLETE_CAP=500` por namespace espelhado no Lua de compactacao (ARGV[5], `removeField` limpa o membro do `DUE_KEY` global) e em `compactDurableSignals` — fecha o DoS de custo por POST nao autenticado variando `signalCloseTime`; paridade dos validadores Lua (schemaVersion==3 no merge; simbolo 5..19 chars no compact). Testes JS + Lua real (fengari) do cap.
+  - `lib/cross-tab-lock.js`: falha repetida (>=2) de heartbeat reporta `storage-lock-heartbeat-failed` via `reportDegraded` — perda de exclusividade deixou de ser silenciosa.
+  - `app.js`: consumidores da narrativa localizam buckets por `ruleId` (`componentByRule`) em vez de indice posicional; rampa continua do RSI sobrecomprado (+3 em 70 ate -8 em 80, elimina o degrau de 11 pontos em 78); `mfi` exclui candle sem volume finito (paridade com `cmf`); `escapeHTML` no simbolo/nome do card do radar (fecha a unica interpolacao sem escape); eviction de `mtfCache`/`derivativeCache` na politica do `historyCandles`; memo de confluencia com stamp grosseiro de liquidacoes (burst entre re-stamps invalida o memo); reuso do envelope de evidencia bruta quando `inputSnapshotId` nao mudou (elimina 2-3 capturas profundas por ciclo de 3s); rotulos "VWAP" renomeados para "VWAP 48c"/"VWAP movel de 48 candles" (narrativa, checklist, sweep, overlay, tooltip — que alias estava orfao: chave 'VWAP' nunca casava com o rotulo 'VWAP 48c' da tabela) e `index.html` (checkbox). "VWAP 24h" do ticker Binance mantido (e VWAP real de 24h).
+  - `lib/signal-sync-client.js`: semantica de MIGRACAO do codigo de sync documentada como decisao de produto (2026-07-17, escolha explicita do proprietario): inserir codigo ADOTA os registros locais no journal inserido, inclusive na corrida com sync em voo; `clear()` mantem a guarda oposta (`rollbackCurrentIdentity`).
+  - Limpeza: `run.json` (blob de rate-limit do GitHub, nao rastreado) removido.
+- Validacoes executadas:
+  - `npm test`: **336/336**. `npm run test:coverage`: 336/336, **97,49% linhas / 82,03% branches / 96,87% funcoes**, exit 0. `node --check` limpo nos arquivos tocados.
+  - `npm run test:boot`: **BOOT CHECK: OK** (8/8) ja com o regex apertado (0 erros de rede filtrados).
+  - Navegador local com DADOS AO VIVO (`BTCUSDT $63,314`): aba Ativo renderiza narrativa por `ruleId` ("acima do VWAP movel de 48 candles"), checklist com scores casando (Multi-TF -7, Derivativos -5), tooltip 'VWAP 48c' agora anexado, snapshot com identidade completa e envelope rastreavel; zero erros de console.
+- OCORRENCIA REGISTRADA — sincronizacao concorrente no meio da sessao:
+  - Durante a aplicacao das correcoes o OneDrive sincronizou o lote CX-011..CX-014 (mtimes de 2026-07-16 ~23:30) vindo de outra maquina, sobrepondo a arvore. Verificacao marcador a marcador confirmou que TODAS as correcoes deste lote sobreviveram a uniao, com UMA excecao equivalente: o jitter que este lote havia adicionado ao `createSourceThrottle` do analytics-core foi substituido pela extracao do throttle para `lib/request-client.js` feita pelo Codex — que ja contem jitter identico (fator 0,25, random injetavel, Retry-After intacto) e e o throttle que o `app.js` usa. O duplicado legado no analytics-core segue sem jitter e sem uso pelo app.
+  - Os gates verdes (336/336, cobertura, boot) foram executados sobre a UNIAO (correcoes CC-FIX-03 + lote CX-011..CX-014).
+- Limitacoes:
+  - CX-011..CX-014 permanecem **AGUARDANDO CLAUDE CODE**: este lote NAO os revisou; o gate verde da uniao nao equivale a aprovacao conceitual (protocolo do CLAUDE.md).
+  - `npm run test:browser` (smoke autoritativo) nao foi executado neste lote.
+  - Nada foi commitado ou publicado; a arvore local segue nao commitada, agora contendo CC-FIX-03 + CX-011..CX-014.
+
+### REV-CC-02 — Revisao cruzada independente dos lotes CX-011..CX-014 (2026-07-17)
+
+- Data: 2026-07-17
+- Revisor: Claude Code (Fable 5)
+- Base analisada: arvore de trabalho sobre `e25ec34` (uniao CX-011..CX-014 + CC-FIX-03); diff de 37 arquivos, +885/-196
+- Metodologia: adversarial (objetivo refutar, nao confirmar). Leitura pessoal do cluster de concorrencia/persistencia (durable-signals + Lua do cap global, cross-tab-lock, signal-sync-client, api/signals); 3 revisores independentes (contrato de dados CX-012/013; plano CX-011; UI/a11y CX-014); gates reexecutados de forma independente; verificacao ao vivo no navegador em desktop e 390x844 com dados reais.
+- Gates independentes: `npm test` 336/336; cobertura 97,49/82,03/96,87 exit 0; `node --check` limpo em todos os JS/CJS; pin do hash-ouro `4efe8ce2` VERDE com teste de sensibilidade (perturbar material muda o hash); boot-check OK.
+
+Veredito por entrada (todas promovidas a REVISADO COM RESSALVAS; nada exige reversao — os defeitos sao de alegacao superestimada ou de guarda fraca, nao de regressao funcional):
+
+**CX-011 (plano)** — solido-com-ressalvas. Respeita o contrato analitico (candle fechado, missing != zero, degradacao honesta). 10 questoes; principais: (1) risco geo 451 da Binance movido para Vercel sem mitigacao na Fase 4 (P0 do proprio plano); (2) taxonomia de estados do envelope (`ok/partial/...`) diverge da do contrato (`fresh/fresh_fallback/...`) sem mapeamento testado; (3) Fase 0 declarada bloqueante mas saiu com 2 itens abertos; (4) Fase 9 (seguranca/CI/limites) mal ordenada — e pre-requisito, nao capstone; (5) Fases 4-5 superdimensionadas (3-4 lotes em 1); (6) sem politica de retencao/custo para series novas; (7) licenca CoinGecko em producao nunca auditada pelo proprio criterio do plano. Fases 1, 3, 6, 7 e o metodo da 8 aprovaveis como estao.
+
+**CX-012 (estabilizacao + contrato piloto)** — nucleo confirmado:
+- CONFIRMADO (leitura pessoal): cap global 10k com desenho CORRETO — rejeicao fail-closed de registros NOVOS via sentinela atomica no Lua (`ZCARD` + sentinela de capacidade), sem remocao cruzada de dados de outros namespaces; atualizacoes de registros existentes seguem permitidas; indice mantido em merge/compact/clear; erro `DURABLE_CAPACITY` vira 503 com mensagem honesta; teste em Lua real cobre a recusa. Complementar ao INCOMPLETE_CAP por namespace do CC-FIX-03 (defesa em profundidade).
+- CONFIRMADO: extracao do throttle para request-client preservou o pin `4efe8ce2` (teste comportamental, nao afirmacao) e ja incorpora jitter com random injetavel; sanitizacao central convergiu com publicErrorMessage do CC-FIX-03; compat legada das rotas intacta (todos os campos que o app le preservados).
+- PARCIAL: fail-closed do lease entre abas — estrutura sadia (AbortSignal + assertHeld pos-tarefa impede commit apos perda; heartbeat com falha repetida escala para loseLease), MAS a perda por SUSPENSAO (aba congelada alem do lease de 120s; outra aba assume; a aba acorda e regrava o ticket) NAO e detectada. Dano contido pelo merge Lua idempotente.
+- Observacoes menores: batch em pipeline pode persistir registros anteriores ao estouro de capacidade (idempotente no retry — aceitavel, documentar); caminho fallback sem eval nao aplica o cap (so testes).
+
+**CX-013 (validadores/schema/bitemporal/health)** — plumbing solido, alegacoes de seguranca superestimadas:
+- CONFIRMADO: health registry limitado (Map por datasetId validado, anel de 256 amostras), p50/p95 nearest-rank corretos, telemetria NAO entra no score; painel "Saude dos dados" honesto sobre migracao parcial (verificado ao vivo).
+- REFUTADO como redigido: "falha fechada quando campo obrigatorio muda" — na pratica e FAIL-ANNOTATE: `status:'invalid'` + HTTP 200 com payload legado completo, e NENHUM consumidor condiciona score/elegibilidade ao envelope (app.js le `dataEnvelope` em exatamente 1 lugar, o pill do painel). Upstream corrompido continua sendo pontuado com um selo "Invalido" ao lado.
+- REFUTADO: SLA de frescor — `expiresAt = retrievedAt + maxAge` torna a checagem tautologica na criacao; nada compara idade da OBSERVACAO ao `maxAgeMs`; macro com `availableAt:null` infere latencia 0 para sempre.
+- PARCIAL: schema por caminho de topo e tipo grosseiro (drift aninhado invisivel; `treasury.y10` virando string passa); `observedShapeHash` calculado e nunca comparado, e instavel por dependencia dos dados; bitemporal: ordenacao de vintage validada de verdade, `decisionEligibleAt` e alias cosmetico de `availableAt`.
+- Defeitos: `envelope.errors` cresce sem dedupe/cap a cada refresh falho (corpo incha em outage longa); `payloadHash` nao e recalculado quando o payload servido muta (stale marking) — hash de integridade que nao bate com o corpo servido; validators de series sao codigo morto (nenhuma rota usa).
+
+**CX-014 (navegacao mobile + selo)** — comportamento confirmado, redacao e guardas fracas:
+- CONFIRMADO AO VIVO (390x844): seletor compacto visivel e rotulado, 8 abas ocultas e fora da ordem de tabulacao, sem overflow, Geral zera `aria-pressed`, area restaurada ao reabrir; sync mobile-desktop sem rebind duplicado; `MODEL_VERSION` segue fluindo para snapshots/journal (analitica intocada).
+- REFUTADO como redigido: "selo unico de versao" — apenas o LITERAL 'preview' foi deduplicado; a versao renderiza em 5 superficies (updatedAt, status bar, tooltip dos cards, status de sinais, relatorio); o teste conta o literal no fonte e nao pegaria regressao.
+- Guardas fracas: testes novos sao regex de codigo-fonte — reverter o sync passa verde; carve-out: abrir Ativo clicando num card reseta a area para 'summary' (contradiz "restaura estado"); a11y: aria-label do seletor ("Area da analise do ativo") nao contem o rotulo visivel ("Area do ativo") — WCAG 2.5.3.
+
+#### Correcoes exigidas (A-L, por prioridade)
+
+| # | Lote | Pri | Correcao |
+| --- | --- | --- | --- |
+| A | CX-012/013 | P1 | Fail-closed REAL: consumidores/rotas devem condicionar elegibilidade de decisao ao `envelope.status` (ou reescrever a alegacao para "fail-annotate" ate la) |
+| B | CX-013 | P1 | Enforcar `maxAgeMs` contra a idade da OBSERVACAO; macro nao pode inferir latencia 0 com `availableAt:null` |
+| C | CX-013 | P2 | Schema aninhado (tipos de itens de array/campos internos); comparar `observedShapeHash` com baseline ou remover a alegacao de drift |
+| D | CX-013 | P2 | Cap/dedupe de `envelope.errors` por codigo |
+| E | CX-013 | P2 | Recalcular `payloadHash` quando o corpo servido muta, ou documentar o escopo do hash |
+| F | CX-012 | P2 | Lease: detectar perda por suspensao/expiracao (verificar posse/expiry ao acordar o heartbeat), nao so falha de escrita |
+| G | CX-012 | P3 | `due()`: remover membros orfaos tambem do `RECORD_INDEX_KEY` (hoje contam contra o teto ate a poda de 400d) |
+| H | CX-013 | P3 | Ligar `data-validators` as rotas ou declara-los explicitamente pendentes (hoje codigo morto) |
+| I | CX-014 | P2 | Redacao honesta do selo OU remover a versao das 5 superficies; teste deve contar renderizacoes, nao o literal 'preview' |
+| J | CX-014 | P2 | Teste jsdom real do ciclo setView/setAssetTab (aria-pressed/tabIndex/select.value) — regex de fonte nao pega revert |
+| K | CX-014 | P3 | Label-in-Name: aria-label do seletor deve conter o rotulo visivel |
+| L | CX-011 | P2 | Emendas ao plano: mitigacao do 451 na Fase 4 + split da fase; mapeamento testado das duas taxonomias de estado; puxar seguranca/CI/limites da Fase 9 para frente; fechar os 2 itens abertos da Fase 0; auditar licenca CoinGecko |
+
+Conclusao: nenhuma reversao exigida; a uniao esta apta a COMMIT como esta (gates verdes, sem regressao funcional identificada), com as correcoes A-L registradas como divida obrigatoria ANTES de (i) confiar no contrato de dados para decisoes e (ii) declarar as alegacoes de fail-closed/SLA/selo como entregues. Prioridade sugerida: A e B antes de migrar qualquer rota adicional ao contrato.
+
+### CC-FIX-04 — Aplicacao integral das correcoes A-L da REV-CC-02 (2026-07-17)
+
+- Data: 2026-07-17
+- Responsavel: Claude Code (Fable 5), por instrucao explicita do proprietario ("aplique as correcoes A-L agora, comecando pelas P1")
+- Base: arvore de trabalho pos REV-CC-02 (uniao CC-FIX-03 + CX-011..CX-014)
+- Correcoes aplicadas (todas com teste de regressao):
+  - **A (P1)** app.js: envelope `invalid` (drift de schema/ordem temporal) torna o dataset INELEGIVEL para score em market e macro — o "fail-closed" passou de selo decorativo a gate real. Mapeamento normativo envelope->contrato registrado na emenda 2 do plano.
+  - **B (P1)** data-contract: SLA de frescor aplicado contra a idade da OBSERVACAO (`observation-age-above-sla`, ok/partial -> stale); `availableAt` inferido produz latencia NULA (desconhecida), nao zero — o macro perdeu o credito permanente de SLA. Fixtures de teste de market/macro atualizadas para datas/chaves realistas (a regra nova os pegou — funcionando como esperado).
+  - **C (P2)** data-contract: schema aninhado com caminhos `[]` (amostra de 50 itens) — `markets[].id/current_price/market_cap`, `treasury.y10/y2`, `vix.close`; pai anulavel legitimamente nulo PULA a validacao dos filhos (a nulabilidade do pai e contrato do topo — sem isso, treasury:null legitimo viraria invalid e o gate A derrubaria o dataset). `observedShapeHash` permanece informacional (drift e responsabilidade do schema declarado).
+  - **D (P2)** data-contract: `envelope.errors` deduplicado por codigo e limitado a 8 (criacao e markEnvelopeStatus) — outage longa nao incha mais o corpo da resposta.
+  - **E (P2)** data-contract + api/market: `markEnvelopeStatus` aceita o corpo mutado e recalcula `payloadHash` sobre ele (sem payload novo, hash permanece estavel — comportamento antigo preservado para quem nao muta).
+  - **F (P2)** cross-tab-lock: perda de lease por SUSPENSAO detectada — o heartbeat verifica tempo desde o ultimo batimento (> leaseMs -> `storage-lock-suspended`) e a POSSE real do ticket (`storage-lock-ticket-lost`) antes de renovar; espera de aquisicao tambem aborta em lease perdido. Fecha o gap em que a aba acordava, regravava o ticket e seguia sem exclusividade.
+  - **G (P3)** durable-signals: `due()` remove membros orfaos tambem do `RECORD_INDEX_KEY` — entrada fantasma nao consome mais o teto global de 10k ate a poda de 400 dias.
+  - **H (P3)** data-validators: cabecalho normativo declarando que os validadores NAO estao ligados a nenhuma rota (integracao = Fase 1 do plano); garantias nao podem ser citadas como ativas.
+  - **I (P2)** features.test: alem do literal unico 'preview', o total de usos de `MODEL_VERSION` fica PINADO (26) com as superficies de renderizacao documentadas — nova superficie exige decisao consciente no teste, nao passa em silencio.
+  - **J (P2)** browser-boot-check: ciclo REAL de navegacao no Chromium (selecionar area via seletor mobile -> aria-pressed sincronizado -> Geral zera pressed e tabulacao -> reabrir restaura a area) virou gate do boot-check — regex de fonte nao pega revert, o navegador pega.
+  - **K (P3)** index.html: `aria-label` divergente removido do seletor; o nome acessivel vem do `<label>` visivel "Area do ativo" (WCAG 2.5.3 Label-in-Name); teste atualizado para garantir a estrutura e proibir aria-label sobreposto.
+  - **L (P2)** SYSTEM_EVOLUTION_PLAN: bloco "EMENDAS REV-CC-02" vinculante — mitigacao do 451 + split da Fase 4 (4a/4b), mapeamento normativo das taxonomias de estado, itens de seguranca/CI da Fase 9 antecipados como pre-requisito por fase, Fase 0 fechada (resta so o smoke), auditoria de licenca CoinGecko/CoinPaprika, politica de retencao/custo antes da Fase 3. Revisao conceitual do plano promovida a REVISADO COM RESSALVAS.
+- Gates executados apos as correcoes:
+  - `npm run test:coverage`: **345/345** (9 testes de regressao novos: 6 data-contract, 2 cross-tab-lock, 1 due/indice); cobertura **97,53% linhas / 82,29% branches / 97,02% funcoes**; exit 0.
+  - `npm run test:boot`: **BOOT CHECK: OK** — inclui os 3 novos checks comportamentais de navegacao e, nesta execucao, dados ao vivo (snapshot com identidade completa + envelope rastreavel).
+  - `node --check` limpo nos arquivos tocados; varredura marcador-a-marcador confirmou todas as correcoes A-L e o CC-FIX-03 presentes na arvore (OneDrive segue sincronizando; a uniao permanece integra).
+- Estado: as ressalvas da REV-CC-02 estao FECHADAS. Divida remanescente da arvore: apenas `npm run test:browser` (smoke autoritativo) antes de commit/release, e as pendencias de infra ja conhecidas (clone fora do OneDrive, CI hospedado).
+- Nada foi commitado ou publicado.

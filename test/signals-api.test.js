@@ -66,6 +66,15 @@ test('signals API valida namespace e corpo antes de escrever', async () => {
   assert.equal(invalidBody.statusCode, 400);
 });
 
+test('signals API comunica limite global sem expor detalhe interno', async () => {
+  const redis = new FakeRedis();
+  redis.eval = async () => '__DURABLE_SIGNAL_CAPACITY__';
+  const response = responseMock();
+  await handler.handleRequest({ method: 'POST', headers: { 'x-journal-id': namespace }, body: { records: [record] } }, response, redis);
+  assert.equal(response.statusCode, 503);
+  assert.equal(response.payload.error, 'Durable journal capacity reached; local records were preserved');
+});
+
 test('signals API aplica o limite de bytes tambem ao JSON ja interpretado pela plataforma', async () => {
   const response = responseMock();
   await handler.handleRequest({

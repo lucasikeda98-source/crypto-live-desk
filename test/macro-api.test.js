@@ -80,24 +80,36 @@ test('parsers macro rejeitam observacoes futuras e derivadas com overflow', () =
 
 test('rota macro preserva fonte valida como parcial e nao cacheia falha total', async () => {
   const originalFetch = global.fetch;
+  // REV-CC-02/B: o SLA de frescor agora e aplicado contra a idade da observacao (4 dias para o
+  // macro); o fixture precisa de uma data recente relativa ao relogio real, nao fixa no passado.
+  const recentDate = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10) + 'T00:00:00';
   try {
     global.fetch = async (url) => {
-      if (String(url).includes('treasury.gov')) return { ok: true, text: async () => treasuryEntry('2026-07-10T00:00:00', '4', '4.5') };
+      if (String(url).includes('treasury.gov')) return { ok: true, text: async () => treasuryEntry(recentDate, '4', '4.5') };
       throw new Error('VIX indisponivel');
     };
     const partial = responseMock();
     await handler({ method: 'GET', headers: {}, url: '/api/macro' }, partial);
     assert.equal(partial.statusCode, 200);
     assert.equal(partial.body.dataStatus, 'partial');
-    assert.equal(partial.body.treasury.date, '2026-07-10T00:00:00');
+    assert.equal(partial.body.treasury.date, recentDate);
     assert.equal(partial.body.vix, null);
-    assert.match(partial.body.errors.vix, /VIX indisponivel/);
+    assert.equal(partial.body.errors.vix, 'internal error');
+    assert.equal(partial.body.dataEnvelope.datasetId, 'macro.us-risk.v1');
+    assert.equal(partial.body.dataEnvelope.status, 'partial');
+    assert.equal(partial.body.dataEnvelope.schemaValidation.valid, true);
+    assert.equal(partial.body.dataEnvelope.qualityFlags.includes('availability-inferred-at-retrieval'), true);
+    assert.equal(partial.body.dataEnvelope.revision.backtestSafe, false);
+    assert.equal(partial.body.dataHealth.scope, 'instance');
+    assert.equal(partial.body.dataHealth.p50DurationMs >= 0, true);
 
     global.fetch = async () => { throw new Error('upstream indisponivel'); };
     const failed = responseMock();
     await handler({ method: 'GET', headers: { 'x-forwarded-for': '203.0.113.77' }, url: '/api/macro' }, failed);
     assert.equal(failed.statusCode, 503);
     assert.equal(failed.body.dataStatus, 'error');
+    assert.equal(failed.body.dataEnvelope.status, 'error');
+    assert.equal(failed.body.dataEnvelope.schemaValidation.valid, true);
     assert.equal(failed.headers['Cache-Control'], 'private, no-store, max-age=0');
   } finally {
     global.fetch = originalFetch;

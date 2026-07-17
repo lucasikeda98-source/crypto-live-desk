@@ -86,7 +86,33 @@ const ROOT = path.join(__dirname, '..');
       pipeline.envelope.slice(0, 80));
   }
 
-  const networkNoise = /(Failed to fetch|net::|ERR_|4\d\d|5\d\d|NetworkError|Load failed|fetch|Failed to load resource|Service Unavailable|WebSocket)/i;
+  // REV-CC-02/J: ciclo REAL de navegacao Ativo/Geral no Chromium — os testes de regex de fonte
+  // nao pegariam um revert do sync do seletor mobile. Roda com ou sem dados ao vivo.
+  const assetNav = await page.evaluate(() => {
+    const select = document.getElementById('assetTabSelect');
+    const buttons = Array.from(document.querySelectorAll('button'));
+    const ativo = buttons.find((button) => button.textContent.trim() === 'Ativo');
+    const geral = buttons.find((button) => button.textContent.trim() === 'Geral');
+    if (!select || !ativo || !geral) return { ok: false, reason: 'controles ausentes' };
+    ativo.click();
+    select.value = 'signals';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    const pressedAfterSelect = document.querySelectorAll('[data-asset-tab][aria-pressed="true"]').length;
+    const signalsPressed = !!document.querySelector('[data-asset-tab="signals"][aria-pressed="true"]');
+    geral.click();
+    const pressedInGeral = document.querySelectorAll('[data-asset-tab][aria-pressed="true"]').length;
+    const hiddenStillTabbable = Array.from(document.querySelectorAll('#assetTabs [data-asset-tab]')).filter((button) => button.tabIndex >= 0).length;
+    ativo.click();
+    return { ok: true, pressedAfterSelect, signalsPressed, pressedInGeral, hiddenStillTabbable, restored: select.value };
+  });
+  ok('seletor mobile sincroniza area e aria-pressed', assetNav.ok && assetNav.signalsPressed && assetNav.pressedAfterSelect === 1, JSON.stringify(assetNav));
+  ok('voltar ao Geral zera aria-pressed e tira as abas da tabulacao', assetNav.ok && assetNav.pressedInGeral === 0 && assetNav.hiddenStillTabbable === 0, JSON.stringify(assetNav));
+  ok('reabrir Ativo restaura a area selecionada', assetNav.ok && assetNav.restored === 'signals', String(assetNav.restored));
+
+  // Assinaturas ANCORADAS de falha de rede do navegador. Alternativas soltas como `fetch`,
+  // `ERR_`, `4\d\d` ou `WebSocket` engoliam erros reais do app (ex.: "TypeError: cannot read
+  // 'fetch' of undefined" ou qualquer mensagem contendo um numero 4xx) — falso verde.
+  const networkNoise = /(Failed to fetch|net::|NetworkError|Load failed|Failed to load resource|Service Unavailable|WebSocket connection to)/i;
   const appPageErrors = pageErrors.filter((message) => !networkNoise.test(message));
   const appConsoleErrors = consoleErrors.filter((message) => !networkNoise.test(message));
   ok('zero excecoes nao capturadas do app', appPageErrors.length === 0, JSON.stringify(appPageErrors.slice(0, 3)));

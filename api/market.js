@@ -1,5 +1,7 @@
 const { toFiniteNumber, toTimestampMs } = require('../lib/analytics-core');
-const { applyApiPolicyAsync } = require('../lib/api-guard');
+const { applyApiPolicyAsync, publicApiError, publicErrorMessage } = require('../lib/api-guard');
+const { createDataEnvelope, markEnvelopeStatus } = require('../lib/data-contract');
+const { defaultDataHealthRegistry } = require('../lib/data-health-registry');
 
 const ASSET_IDS = {
   bitcoin: 'btc-bitcoin',
@@ -46,7 +48,7 @@ async function getJson(url, deadline) {
     },
     signal: AbortSignal.timeout(remainingTimeout(deadline)),
   });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  if (!response.ok) throw publicApiError(`Market provider HTTP ${response.status}`);
   return response.json();
 }
 
@@ -114,13 +116,13 @@ async function loadMarketBundle(deadline) {
   let source = 'CoinGecko public';
   const errors = {};
 
-  if (!global) errors.global = String(settled[0].reason && settled[0].reason.message || 'indisponivel');
+  if (!global) errors.global = settled[0].status === 'rejected' ? publicErrorMessage('market-global', settled[0].reason) : 'payload invalido';
   const coveredIds = new Set(markets.map((row) => row && row.id).filter(Boolean));
   const missingIds = Object.keys(ASSET_IDS).filter((id) => !coveredIds.has(id));
   if (missingIds.length) {
     errors.markets = markets.length
       ? `CoinGecko cobriu ${markets.length}/${Object.keys(ASSET_IDS).length}; faltando ${missingIds.join(',')}`
-      : String(settled[1].reason && settled[1].reason.message || 'indisponivel');
+      : settled[1].status === 'rejected' ? publicErrorMessage('market-assets', settled[1].reason) : 'payload invalido';
     try {
       const fallbackRows = await loadPaprikaFallback(deadline, missingIds);
       markets = markets.concat(fallbackRows);
@@ -130,12 +132,12 @@ async function loadMarketBundle(deadline) {
       if (!stillMissing.length) delete errors.markets;
       else errors.markets = `Cobertura parcial ${markets.length}/${Object.keys(ASSET_IDS).length}; faltando ${stillMissing.join(',')}`;
     } catch (fallbackError) {
-      errors.marketsFallback = String(fallbackError && fallbackError.message || fallbackError);
+      errors.marketsFallback = publicErrorMessage('market-fallback', fallbackError);
     }
   }
-  if (!trending) errors.trending = String(settled[2].reason && settled[2].reason.message || 'indisponivel');
+  if (!trending) errors.trending = settled[2].status === 'rejected' ? publicErrorMessage('market-trending', settled[2].reason) : 'payload invalido';
 
-  if (!global && !markets.length && !trending) throw new Error('Todas as fontes de mercado falharam: ' + Object.values(errors).join(' | '));
+  if (!global && !markets.length && !trending) throw publicApiError('Market data providers unavailable');
 
   const acquiredAt = Date.now();
   const providerTimes = markets.map((row) => row.observedAt).filter(Number.isFinite);
@@ -143,7 +145,46 @@ async function loadMarketBundle(deadline) {
   if (globalObservedAt !== null) providerTimes.push(globalObservedAt);
   const observedAt = providerTimes.length ? Math.max(...providerTimes) : null;
   if (observedAt === null) errors.observedAt = 'Fontes de mercado sem timestamp de observacao valido';
-  return { global, markets, trending, source, errors, completeness: markets.length / Object.keys(ASSET_IDS).length, observedAt, observedAtProvenance: observedAt === null ? 'missing' : 'provider-timestamp', fetchedAt: acquiredAt, stale: false };
+  const coverage = markets.length / Object.keys(ASSET_IDS).length;
+  const completeness = ((global ? 1 : 0) + (markets.length ? 1 : 0) + (trending ? 1 : 0)) / 3;
+  const payload = { global, markets, trending, source, errors, completeness: coverage, observedAt, observedAtProvenance: observedAt === null ? 'missing' : 'provider-timestamp', fetchedAt: acquiredAt, stale: false };
+  const fallbackUsed = /CoinPaprika/.test(source);
+  const primaryAvailable = /CoinGecko/.test(source);
+  payload.dataEnvelope = createDataEnvelope({
+    datasetId: 'market.overview.v1',
+    sourceId: primaryAvailable ? 'coingecko-market' : 'coinpaprika-market',
+    sourceIds: fallbackUsed ? ['coinpaprika-market'] : [],
+    sourceTier: primaryAvailable && fallbackUsed ? 'composite' : fallbackUsed ? 'fallback' : 'primary',
+    entity: 'crypto-market',
+    grain: 'server-snapshot',
+    observedAt,
+    availableAt: observedAt,
+    retrievedAt: acquiredAt,
+    cacheStoredAt: acquiredAt,
+    expiresAt: acquiredAt + 10 * 60_000,
+    vintageAt: acquiredAt,
+    unit: 'USD and percent',
+    currency: 'USD',
+    timezone: 'UTC',
+    rounding: 'raw provider precision; display rounding belongs to the client',
+    status: Object.keys(errors).length ? 'partial' : 'ok',
+    coverage,
+    completeness,
+    qualityFlags: observedAt === null ? ['provider-observation-missing'] : [],
+    provenance: primaryAvailable && fallbackUsed ? 'CoinGecko primary with CoinPaprika gap fill' : fallbackUsed ? 'CoinPaprika fallback' : 'CoinGecko primary',
+    fallbackUsed,
+    licenseClass: 'public-api-terms-apply',
+    errors: Object.entries(errors).map(([key, message]) => ({ code: `MARKET_${key}`, sourceId: key === 'marketsFallback' ? 'coinpaprika-market' : 'coingecko-market', retryable: true, message })),
+    payload,
+    validateSchema: true,
+  });
+  return payload;
+}
+
+function withDataHealth(payload, observation) {
+  if (!payload || !payload.dataEnvelope) return payload;
+  defaultDataHealthRegistry.record(payload.dataEnvelope, observation);
+  return { ...payload, dataHealth: defaultDataHealthRegistry.snapshot(payload.dataEnvelope.datasetId) };
 }
 
 function refreshMarketBundle() {
@@ -159,6 +200,7 @@ function refreshMarketBundle() {
 }
 
 module.exports = async function handler(request, response) {
+  const requestStartedAt = Date.now();
   if (!await applyApiPolicyAsync(request, response, { cacheControl: 'public, s-maxage=120, stale-while-revalidate=600' })) return;
   if (request.method !== 'GET') {
     response.setHeader('Allow', 'GET');
@@ -166,18 +208,31 @@ module.exports = async function handler(request, response) {
   }
 
   if (cachedPayload && (Date.now() - cachedAt < 120000 || Date.now() < retryAfterAt)) {
-    return response.status(200).json(cachedPayload);
+    return response.status(200).json(withDataHealth(cachedPayload, { durationMs: Date.now() - requestStartedAt, cacheHit: true }));
   }
 
   try {
     await refreshMarketBundle();
   } catch (error) {
-    if (!cachedPayload) return response.status(503).json({ error: String(error && error.message || error) });
+    if (!cachedPayload) return response.status(503).json({ error: publicErrorMessage('market', error) });
     retryAfterAt = Date.now() + RETRY_BACKOFF_MS;
-    cachedPayload = { ...cachedPayload, stale: true, errors: { ...cachedPayload.errors, refresh: String(error && error.message || error) } };
+    const refreshError = publicErrorMessage('market-refresh', error);
+    // REV-CC-02/E: o corpo servido muda (stale/errors), entao o payloadHash e recalculado sobre
+    // o corpo mutado — o hash cobre o payload legado, sem o proprio envelope.
+    const staleBody = { ...cachedPayload, stale: true, errors: { ...cachedPayload.errors, refresh: refreshError } };
+    delete staleBody.dataEnvelope;
+    delete staleBody.dataHealth;
+    cachedPayload = {
+      ...staleBody,
+      dataEnvelope: markEnvelopeStatus(cachedPayload.dataEnvelope, 'stale', { code: 'MARKET_REFRESH_FAILED', retryable: true, message: refreshError }, 'served-stale-after-refresh-failure', staleBody),
+    };
   }
 
-  return response.status(200).json(cachedPayload);
+  return response.status(200).json(withDataHealth(cachedPayload, {
+    durationMs: Date.now() - requestStartedAt,
+    cacheHit: false,
+    error: cachedPayload && cachedPayload.stale === true,
+  }));
 };
 
 module.exports.remainingTimeout = remainingTimeout;
