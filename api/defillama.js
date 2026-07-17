@@ -1,5 +1,5 @@
 const { toFiniteNumber } = require('../lib/analytics-core');
-const { applyApiPolicyAsync } = require('../lib/api-guard');
+const { applyApiPolicyAsync, publicApiError, publicErrorMessage } = require('../lib/api-guard');
 
 // Proxy for DeFiLlama /protocols. The upstream list is ~10-15MB (every DeFi protocol);
 // the client only ever matches a handful by name/slug/symbol/gecko_id and needs tvl >= $1M
@@ -37,7 +37,7 @@ async function getJson(url) {
     },
     signal: AbortSignal.timeout(18000),
   });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  if (!response.ok) throw publicApiError(`DeFiLlama HTTP ${response.status}`);
   return response.json();
 }
 
@@ -110,9 +110,9 @@ async function handler(request, response) {
   try {
     await refreshProtocols();
   } catch (error) {
-    if (!cachedPayload) return response.status(503).json({ error: String(error && error.message || error) });
+    if (!cachedPayload) return response.status(503).json({ error: publicErrorMessage('defillama', error) });
     retryAfterAt = Date.now() + RETRY_BACKOFF_MS;
-    cachedPayload = { ...cachedPayload, stale: true, errors: { ...cachedPayload.errors, refresh: String(error && error.message || error) } };
+    cachedPayload = { ...cachedPayload, stale: true, errors: { ...cachedPayload.errors, refresh: publicErrorMessage('defillama-refresh', error) } };
   }
 
   return response.status(200).json(cachedPayload);

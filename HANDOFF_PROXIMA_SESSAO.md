@@ -1,5 +1,7 @@
 # Handoff para a próxima sessão — Crypto Live Desk
 
+> **Atualizacao CX-014 (2026-07-13):** este documento preserva o checkpoint operacional de producao `preview.8`. O estado local mais novo parte de `e25ec34`, possui 336/336 testes, avancou a Fase 1 de dados e fechou quick wins da Fase 2 (navegacao mobile e selo unico de modelo), sem commit ou deploy. Para continuar o trabalho local, leia primeiro `SYSTEM_EVOLUTION_PLAN.md` e as entradas CX-012..CX-014 de `CODEX_HANDOFF.md`. Estado: **AGUARDANDO CLAUDE CODE**.
+
 Data: 2026-07-13 (substituiu o handoff da sessão RC-001..RC-007)
 Branch: `main` (produção). Último commit: `b3b080b` (merge preview.6 + ciclo D + CC-FIX-01 = `1.0.0-preview.8`).
 Produção: https://crypto-live-desk.vercel.app — deploy `dpl_E22yqtAvbuAz8K1TsKArKQnfyfer`, verificado ao vivo (24 cards, zero erro de console, v1.0.0-preview.8).

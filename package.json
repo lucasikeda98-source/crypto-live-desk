@@ -1,6 +1,6 @@
 {
   "name": "crypto-live-desk",
-  "version": "1.0.0-preview.8",
+  "version": "1.0.0-preview.9",
   "private": true,
   "description": "Crypto Live Desk analytics contracts",
   "scripts": {

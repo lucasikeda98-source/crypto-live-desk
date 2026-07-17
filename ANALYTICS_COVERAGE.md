@@ -10,6 +10,14 @@ Esta e uma versao de migracao parcial. O contrato normativo completo esta em `AN
 
 Indicadores e eventos confirmados usam apenas candles fechados. Opcoes e mempool BTC exibidos para altcoins sao proxies informativos e possuem contribuicao zero nos scores especificos e no Data Confidence do ativo.
 
+## Estado local CX-012 — em revisao
+
+- A rota `market.overview.v1` e o primeiro piloto do envelope unificado: contrato, tempos de observacao/disponibilidade/recuperacao, status, cobertura, qualidade, SLA, proveniencia, fallback e hash do payload.
+- A interface possui um bloco inicial `Saude dos dados` para o piloto. Ele declara a migracao parcial e nao transforma qualidade em sinal direcional.
+- Erros publicos passam por sanitizacao central; perda do lease entre abas interrompe sincronizacao antes do commit; o Redis possui limite global atomico de 10.000 registros alem do limite por namespace.
+- Mercado e macro possuem validacao de schema observada; macro publica `availableAt`, `vintageAt` e `backtestSafe:false` enquanto os upstreams atuais nao fornecerem a primeira publicacao. O health registry piloto mede p50/p95, erro, cache, fallback e ultimo sucesso com escopo explicitamente `instance`.
+- Gate Codex: 336/336 testes; cobertura 97,49% linhas, 82,03% branches e 96,87% funcoes. Estado: **AGUARDANDO CLAUDE CODE**; nenhuma mudanca CX-012/CX-013 foi publicada.
+
 ## Mudancas do 1.0.0-preview.6 (podem alterar resultados vs preview.5)
 
 Correcoes de logica direcional e double-counting apontadas pela revisao cruzada do Claude Code (RC-001) e aplicadas apos verificacao adversarial independente (RC-003). Como mudam a semantica de score, `rulesetHash` e a versao do modelo foram incrementados; o journal de sinais da preview.5 e segmentado por versao (nao agregado ao da preview.6).
@@ -29,19 +37,19 @@ Correcoes de logica direcional e double-counting apontadas pela revisao cruzada 
 2. A identidade do snapshot inclui as entradas em tempo real que alteram o Setup Score; o export schema 3 agora carrega tambem um envelope bruto imutavel com 12 datasets, series integrais normalizadas, manifesto e hashes verificaveis apos round-trip.
 3. Candles fechados, outcomes de 1h/24h/7d, gaps, volatilidade realizada, multi-timeframe, traps, stops e journal receberam testes causais, adversariais e de simetria long/short.
 4. APIs usam deadline absoluto, erros semanticos e parciais tipados, allowlists de ativos, cabecalhos coerentes, politica same-origin e limite local; quando Redis existe, o mesmo gate adiciona sliding window distribuido.
-5. Cache, tentativa/backoff e coalescencia reduzem fan-out; todas as chamadas do cliente compartilham budget de concorrencia, janela global, fatia por fonte, prioridade e fila. A implementacao distribuida foi testada em memoria, mas ainda nao foi ativada/provada entre instancias da Vercel.
+5. Cache, tentativa/backoff e coalescencia reduzem fan-out; todas as chamadas do cliente compartilham budget de concorrencia, janela global, fatia por fonte, prioridade e fila. A limitacao distribuida foi posteriormente ativada e sondada em producao para `preview.8`; alteracoes do CX-012 continuam locais.
 6. Interface recebeu estados indisponiveis explicitos, cobertura MTF, timezone explicito (header, journal, trades, sinais e noticias formatados via `formatDisplayTimestamp` com o fuso rotulado; UX-005 corrigido pos-REV-CC-01 com teste de virada de dia), foco visivel, alvos de toque, grafico mobile adaptativo e calculadora limitada contra `NaN`/infinito.
 7. A suite deterministica inclui fuzz com sementes fixas e contratos de API; navegador integrado validou os fluxos principais em desktop e 390 x 844 px.
 8. O registro normativo `SOURCE_REGISTRY` descreve 22 fontes com metricas, unidades, validadores, escopo, relogio, TTL, fallback, proveniencia, cache, indisponibilidade e elegibilidade; sua versao integra o ruleset e o export.
 9. Fluxos ETF recebem `reported`/`reportReason` por flag do provedor ou calendario de sessoes dos EUA; o parser atravessa envelopes MCP aninhados e preserva zero reportado em dia de negociacao.
 10. Override manual de noticias exige autor e motivo antes de mudar o score e registra ambos no snapshot, export e explicacao; voltar a `Auto` remove a trilha manual ativa.
 11. O envelope bruto foi exercitado no browser e reaberto fora da UI: BTC/5m continha 500 candles spot, seis series MTF, sete series de derivativos e 3.252 candles historicos; os 12 hashes e o hash global foram validados em um arquivo de 3.524.193 bytes.
-12. O journal ganhou cliente de sincronizacao isolado, backend Redis, retencao que nunca sacrifica horizontes pendentes e worker cron para outcomes sem aba. O codigo foi testado com Redis falso; storage/segredo ainda nao estao provisionados no projeto remoto.
+12. O journal ganhou cliente de sincronizacao isolado, backend Redis, retencao que nunca sacrifica horizontes pendentes e worker cron para outcomes sem aba. Storage, segredo, concorrencia e limpeza foram posteriormente sondados em producao para `preview.8`; o CX-012 amplia os limites locais sem afirmar deploy.
 13. Rede/orcamento e sincronizacao/persistencia foram extraidos do `app.js` para modulos UMD independentes, incluindo regressao contra vazamento entre codigos privados concorrentes.
 14. Esta rodada foi feita via Codex e recebeu revisao cruzada parcial do Claude Code (REV-CC-01, checkpoint `887ec57`): 41 achados `REVISADO PELO CLAUDE CODE`, 24 ainda `AGUARDANDO CLAUDE CODE` com correcao exigida, 7 `CONFIRMADO`. Nao declara conformidade integral com o contrato v1 e nao esta pronta para producao (2 defeitos P1). Ver `CODEX_HANDOFF.md` REV-CC-01.
-15. A persistencia passou a adotar o snapshot canonico remoto no primeiro sync, usa merge+schedule atomico em Lua para impedir que cliente atrasado apague outcome do worker e serializa limpeza contra GET/POST em voo. **Ressalva REV-CC-01 (ANL-027, P1, em aberto):** os 3 scripts Lua de producao nunca sao executados por nenhum teste (o fake `eval` reimplementa o merge em JS com resolucao OPOSTA); na colisao mesmo-candle com `inputSnapshotId` diferente o Lua real faz `incoming` vencer e pode descartar o outcome do worker, contrario ao invariante documentado.
+15. A persistencia adota o snapshot canonico remoto no primeiro sync, usa merge+schedule atomico em Lua e serializa limpeza contra GET/POST em voo. A ressalva original da REV-CC-01 foi corrigida em CC-FIX-01: os scripts de producao executam em VM Lua nos testes e a sonda remota confirmou o primeiro snapshot canonico.
 16. O worker compartilha janelas de mercado, le a fila em pipeline, usa lease distribuido e processa ate 300 itens/24s. Isso cobre um cliente 5m continuo, mas nao transforma o cron Hobby diario em arquitetura multiusuario escalavel.
-17. O gate atual possui 250 testes (reexecucao independente do Claude Code em Node 24); cobertura de 97,96% linhas, 80,03% branches e 96,42% funcoes, com pisos bloqueantes de 95%/75%/90% (o denominador NAO inclui `app.js`, que roda so no navegador — ver OPS-014). O navegador local confirmou 24 cards com dados ao vivo e zero erro de console.
+17. O gate do checkpoint historico foi revisado no Claude Code. O lote local CX-012 possui 329 testes aprovados pelo Codex e cobertura de 97,45% linhas, 81,71% branches e 96,72% funcoes, com os mesmos pisos bloqueantes; o denominador continua sem `app.js` (ver OPS-014).
 
 ## Mudancas do preview.6
 

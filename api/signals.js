@@ -1,6 +1,6 @@
 'use strict';
 
-const { applyApiPolicyAsync } = require('../lib/api-guard');
+const { applyApiPolicyAsync, publicErrorMessage } = require('../lib/api-guard');
 const { createDurableSignalStore, namespaceHash } = require('../lib/durable-signals');
 const { getRedis } = require('../lib/redis-runtime');
 
@@ -99,7 +99,12 @@ async function handleRequest(request, response, redisOverride) {
     return response.status(200).json({ configured: true, records });
   } catch (error) {
     const status = error && error.statusCode || (error instanceof TypeError ? 400 : 503);
-    return response.status(status).json({ error: String(error && error.message || error), configured: true });
+    // Erros de validacao (400/413) carregam mensagens escritas para o usuario; um 503 inesperado
+    // pode vir do Redis/Lua e nao deve vazar detalhe interno para chamador nao autenticado.
+    const message = error && error.code === 'DURABLE_CAPACITY'
+      ? 'Durable journal capacity reached; local records were preserved'
+      : status === 503 ? publicErrorMessage('signals', error) : String(error && error.message || error);
+    return response.status(status).json({ error: message, configured: true });
   }
 }
 

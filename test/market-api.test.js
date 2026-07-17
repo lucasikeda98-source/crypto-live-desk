@@ -53,7 +53,7 @@ test('rota de mercado preserva observedAt e declara fallback stale', async () =>
   global.fetch = async (url) => {
     const value = String(url);
     if (value.includes('/global')) return { ok: true, json: async () => ({ data: { market_cap_change_percentage_24h_usd: 1, updated_at: 1_000 } }) };
-    if (value.includes('/coins/markets')) return { ok: true, json: async () => [{ id: 'bitcoin', current_price: 100, last_updated: 1_000 }] };
+    if (value.includes('/coins/markets')) return { ok: true, json: async () => [{ id: 'bitcoin', current_price: 100, market_cap: null, last_updated: 1_000 }] };
     if (value.includes('/search/trending')) return { ok: true, json: async () => ({ coins: [] }) };
     throw new Error('URL inesperada');
   };
@@ -68,6 +68,14 @@ test('rota de mercado preserva observedAt e declara fallback stale', async () =>
     assert.equal(first.body.fetchedAt, now);
     assert.equal(first.body.observedAt, now);
     assert.equal(first.body.observedAtProvenance, 'provider-timestamp');
+    assert.equal(first.body.dataEnvelope.datasetId, 'market.overview.v1');
+    assert.equal(first.body.dataEnvelope.schemaVersion, '1.0.0');
+    assert.equal(first.body.dataEnvelope.retrievedAt, now);
+    assert.equal(first.body.dataEnvelope.status, 'partial');
+    assert.match(first.body.dataEnvelope.payloadHash, /^[a-f0-9]{64}$/);
+    assert.equal(first.body.dataEnvelope.schemaValidation.valid, true);
+    assert.equal(first.body.dataHealth.scope, 'instance');
+    assert.equal(first.body.dataHealth.p50DurationMs >= 0, true);
     assert.equal(first.headers['Access-Control-Allow-Origin'], undefined);
     assert.equal(first.headers.Vary, 'Origin');
 
@@ -85,7 +93,9 @@ test('rota de mercado preserva observedAt e declara fallback stale', async () =>
     assert.equal(fallback.statusCode, 200);
     assert.equal(fallback.body.stale, true);
     assert.equal(fallback.body.fetchedAt, 1_000_000);
-    assert.match(fallback.body.errors.refresh, /falha simulada/);
+    assert.equal(fallback.body.errors.refresh, 'Market data providers unavailable');
+    assert.equal(fallback.body.dataEnvelope.status, 'stale');
+    assert.equal(fallback.body.dataEnvelope.qualityFlags.includes('served-stale-after-refresh-failure'), true);
     assert.equal(fallback.headers['Access-Control-Allow-Origin'], undefined);
     assert.equal(fallback.headers.Vary, 'Origin');
 
@@ -117,6 +127,9 @@ test('rota de mercado complementa resposta parcial sem descartar CoinGecko valid
     assert.match(bundle.source, /gap fill/);
     assert.ok(bundle.completeness > 0 && bundle.completeness < 1);
     assert.match(bundle.errors.markets, /Cobertura parcial/);
+    assert.equal(bundle.dataEnvelope.sourceTier, 'composite');
+    assert.equal(bundle.dataEnvelope.fallbackUsed, true);
+    assert.equal(bundle.dataEnvelope.qualityFlags.includes('coverage-below-sla'), true);
   } finally { global.fetch = originalFetch; }
 });
 
@@ -146,7 +159,10 @@ test('rota de mercado coalesce atualizacoes frias concorrentes', async () => {
     ]);
     assert.equal(calls, 3, 'global, markets e trending sao chamados uma vez cada');
     assert.equal(first.statusCode, 200);
-    assert.deepEqual(second.body, first.body);
+    const { dataHealth: firstHealth, ...firstPayload } = first.body;
+    const { dataHealth: secondHealth, ...secondPayload } = second.body;
+    assert.deepEqual(secondPayload, firstPayload);
+    assert.equal(secondHealth.sampleCount >= firstHealth.sampleCount, true, 'telemetria por requisicao pode avancar sem repetir upstream');
   } finally {
     global.fetch = originalFetch;
   }

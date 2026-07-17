@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const AnalyticsCore = require('../lib/analytics-core');
 const { createDurableSignalStore } = require('../lib/durable-signals');
+const { publicErrorMessage } = require('../lib/api-guard');
 const { getRedis } = require('../lib/redis-runtime');
 
 const RETRY_DELAY_MS = 15 * 60_000;
@@ -215,7 +216,7 @@ async function handleRequest(request, response, dependencies = {}) {
       evaluatedAt: now
     });
   } catch (error) {
-    return response.status(503).json({ error: String(error && error.message || error) });
+    return response.status(503).json({ error: publicErrorMessage('signal-worker', error) });
   }
 }
 

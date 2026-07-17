@@ -4,7 +4,7 @@ Dashboard de acompanhamento de mercado cripto com radar multiativos, leitura tec
 
 Producao atual: https://crypto-live-desk.vercel.app
 
-> **Divergencia operacional conhecida:** a producao ainda responde com um contrato anterior e nao contem a arvore Codex descrita abaixo. O checkpoint remoto mais novo inspecionado e um preview `READY` do commit `b124fcb`; nenhuma mudanca desta rodada foi publicada ou promovida. A arvore desta rodada foi commitada e pushada como `887ec57` (branch `codex/cycle-d-sources`), mas **nao deployada**: nao existe preview nem producao para esse commit.
+> **Estado observado em 2026-07-13:** a producao responde com o modelo `1.0.0-preview.8`, 24 ativos e a infraestrutura Redis descrita no handoff operacional. A arvore local contem mudancas Codex posteriores ao commit `e25ec34`; essas mudancas ainda nao foram commitadas, publicadas nem revisadas no Claude Code.
 
 > **Transicao de desenvolvimento:** mudancas posteriores ao commit `803eb67` estao sendo realizadas pelo Codex e permanecem sujeitas a revisao independente no Claude Code. O marco, a autoria, os testes e o estado de cada conjunto de mudancas estao em [`CODEX_HANDOFF.md`](CODEX_HANDOFF.md).
 
@@ -37,7 +37,7 @@ Abra `http://127.0.0.1:5173`.
 
 ## Testes
 
-O checkpoint atual possui 250 testes unitarios/de integracao deterministas (reexecutados de forma independente pelo Claude Code em Node 24), com fontes remotas substituidas por fixtures/mocks. O CI tambem bloqueia cobertura abaixo de 95% linhas, 75% branches e 90% funcoes e audita dependencias (nota: o denominador de cobertura nao inclui `app.js`, que roda so no navegador — ver `OPS-014`):
+O estado local atual possui 336 testes unitarios/de integracao deterministas aprovados pelo Codex, com fontes remotas substituidas por fixtures/mocks. A cobertura medida e 97,49% linhas, 82,03% branches e 96,87% funcoes, acima dos pisos bloqueantes de 95%/75%/90%. O denominador nao inclui `app.js`, que roda so no navegador (ver `OPS-014`). Estes resultados ainda aguardam revisao independente no Claude Code:
 
 ```powershell
 npm.cmd test
@@ -58,7 +58,11 @@ O workflow `.github/workflows/quality.yml` executa a suite deterministica em Nod
 ## Estrutura
 
 - `lib/analytics-core.js`: funcoes puras e testaveis do motor.
+- `lib/data-contract.js`: envelope unificado, qualidade, proveniencia, SLA e hash dos datasets normalizados.
+- `lib/data-validators.js`: validacao reutilizavel de numeros e series temporais.
+- `lib/data-health-registry.js`: telemetria limitada por instancia com p50/p95, erro, cache, fallback e ultimo sucesso.
 - `lib/request-client.js`: rede do navegador, budget, cooldown e fallback.
+- `lib/cross-tab-lock.js`: exclusividade entre abas com deteccao de perda de lease.
 - `lib/signal-sync-client.js`: identidade, conciliacao e sincronizacao do journal.
 - `lib/durable-signals.js`: schema, retencao e fila duravel Redis.
 - `app.js`: estado, composicao das fontes e interface; rede/persistencia ja possuem fronteiras extraidas.
@@ -69,7 +73,9 @@ O workflow `.github/workflows/quality.yml` executa a suite deterministica em Nod
 
 ## Funcionalidades analiticas
 
-- Aba **Sinais**: registro segmentado por versao do modelo, com avaliacao posterior do retorno em 1h/24h/7d e acerto por faixa. Pendentes sao protegidos do cap. O codigo inclui sincronizacao privada Redis, merge atomico e worker independente da aba com lease, janelas compartilhadas e ate 300 itens/24s por invocacao; sem Redis/cron provisionados na Vercel, a UI preserva o fallback local e declara que a durabilidade remota esta indisponivel.
+- Aba **Sinais**: registro segmentado por versao do modelo, com avaliacao posterior do retorno em 1h/24h/7d e acerto por faixa. Pendentes sao protegidos do cap. A producao `preview.8` possui Redis e cron ativos conforme a sonda registrada em `HANDOFF_PROXIMA_SESSAO.md`; a arvore local acrescenta limite global atomico de 10.000 registros e falha fechada quando a exclusividade entre abas e perdida, ainda sem deploy.
+- Painel **Saude dos dados**: a rota piloto de mercado publica contrato, status, cobertura, latencia, qualidade e hash do payload. A migracao ainda e parcial e aparece como tal na interface.
+- Navegacao mobile do ativo: seletor compacto substitui a faixa horizontal de oito abas; a versao do modelo aparece em um unico selo e os cards deixam de repetir `preview`.
 - **Alertas** opcionais do navegador em transicoes confirmadas: cruzamento de score, mudanca de vies/regime, funding extremo e pico de liquidacoes.
 - **Exportar snapshot**: JSON schema 3 com modelo, hash de regras, registro versionado das 22 fontes, identificacao e componentes do snapshot, contribuicoes e um envelope bruto schema 1. O envelope congela 12 grupos de entradas normalizadas (incluindo candles spot/MTF/historicos e series de derivativos), registra fontes/horarios, cria manifesto por dataset e detecta adulteracao por hashes apos round-trip. Implementacao Codex ainda aguarda revisao independente do Claude Code (`ANL-002`).
 - **Correlacao cross-asset**: correlacao, beta e forca relativa vs BTC/ETH no timeframe atual e correlacao diaria vs QQQ/SPY.
@@ -81,12 +87,12 @@ O workflow `.github/workflows/quality.yml` executa a suite deterministica em Nod
 
 ## Ativacao da persistencia
 
-O backend duravel exige `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` e um `CRON_SECRET` com ao menos 24 caracteres. Consulte [`OPERATIONS_RUNBOOK.md`](OPERATIONS_RUNBOOK.md) antes de configurar preview/producao. Codigo implementado sem credenciais e teste com storage falso nao equivalem a persistencia comprovada.
+O backend duravel exige `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` e um `CRON_SECRET` com ao menos 24 caracteres. A ativacao de `preview.8` foi sondada em producao e esta registrada no handoff operacional. Consulte [`OPERATIONS_RUNBOOK.md`](OPERATIONS_RUNBOOK.md) antes de alterar credenciais, cron, retencao ou limites; teste com storage falso continua nao equivalendo a prova do ambiente remoto.
 
 ## Limites
 
 - Scores sao heuristicas direcionais, nao recomendacoes ou probabilidades calibradas.
 - Preco de liquidacao e aproximado; brackets e taxas reais dependem da conta.
-- Backtesting walk-forward e calibracao de probabilidade ainda nao existem. O backend duravel esta implementado, mas nao foi ativado nem comprovado em ambiente remoto; ate la, os registros efetivos continuam sujeitos aos limites do navegador. Persistencia tambem nao substitui tamanho amostral, segmentacao por versao e validacao fora da amostra.
+- Backtesting walk-forward e calibracao de probabilidade ainda nao existem. A persistencia remota foi sondada em producao para o contrato `preview.8`, mas nao substitui tamanho amostral, segmentacao por versao, validacao fora da amostra nem os novos limites locais ainda nao publicados.
 - O cron Hobby diario cobre aproximadamente um unico cliente 5m continuamente aberto; multiusuario, timeframes curtos e backlog acumulado exigem execucao mais frequente ou fila/workflow duravel (`OPS-012`).
 - O diretorio Git atual e `.git`, mas o repositorio continua dentro do OneDrive. O runbook define a migracao por clone limpo depois de commit/push autorizado; a pasta suja nao deve ser movida manualmente.

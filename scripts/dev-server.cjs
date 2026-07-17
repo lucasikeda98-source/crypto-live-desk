@@ -53,6 +53,13 @@ const server = http.createServer((request, response) => {
     response.writeHead(400).end('Bad request');
     return;
   }
+  // Um byte nulo decodificado (/%00) passa pelos guards lexicais e derruba o processo:
+  // fs.realpath valida o argumento SINCRONAMENTE e lanca fora de qualquer try/catch.
+  // Caracteres de controle nunca sao legitimos em um caminho servivel.
+  if (/[\u0000-\u001f\u007f]/.test(pathname)) {
+    response.writeHead(400).end('Bad request');
+    return;
+  }
   if (apiHandlers[pathname]) {
     const handler = require(apiHandlers[pathname]);
     request.query = Object.fromEntries(requestUrl.searchParams.entries());

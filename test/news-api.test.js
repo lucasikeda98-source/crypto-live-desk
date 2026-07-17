@@ -61,7 +61,7 @@ test('rota de noticias rejeita metodo e expõe falha total sem cache publico', a
     await handler({ method: 'GET', headers: { 'x-forwarded-for': '203.0.113.48' }, url: '/api/news' }, failed);
     assert.equal(failed.statusCode, 503);
     assert.equal(failed.body.items.length, 0);
-    assert.equal(failed.body.sources.every((source) => source.ok === false && /indisponivel/.test(source.error)), true);
+    assert.equal(failed.body.sources.every((source) => source.ok === false && source.error === 'internal error'), true);
     assert.equal(failed.headers['Cache-Control'], 'private, no-store, max-age=0');
   } finally {
     global.fetch = originalFetch;

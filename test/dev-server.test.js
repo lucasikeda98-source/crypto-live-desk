@@ -58,6 +58,12 @@ test('dev server sobrevive a URL malformada e bloqueia dotfiles e traversal', as
     const malformed = await fetch(base + '/%', { signal: AbortSignal.timeout(2000) });
     assert.equal(malformed.status, 400, 'URL malformada deve retornar 400');
 
+    const nullByte = await fetch(base + '/%00', { signal: AbortSignal.timeout(2000) });
+    assert.equal(nullByte.status, 400, 'byte nulo decodificado deve retornar 400, nao derrubar o processo');
+
+    const nullByteSuffix = await fetch(base + '/index.html%00.png', { signal: AbortSignal.timeout(2000) });
+    assert.equal(nullByteSuffix.status, 400, 'byte nulo embutido deve retornar 400');
+
     const afterMalformed = await fetch(base + '/', { signal: AbortSignal.timeout(2000) });
     assert.equal(afterMalformed.status, 200, 'servidor deve continuar vivo apos URL malformada');
     assert.equal(afterMalformed.headers.get('x-content-type-options'), 'nosniff');

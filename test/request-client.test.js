@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createRequestClient, requestPriority } = require('../lib/request-client');
+const { createRequestClient, createSourceThrottle, requestPriority } = require('../lib/request-client');
 
 function setup(fetchImpl, overrides = {}) {
   const health = [];
@@ -47,6 +47,31 @@ test('prioriza APIs e Binance e rebaixa historico/MTF', () => {
   assert.equal(requestPriority('https://example.test', 'RSS'), 0);
 });
 
+test('source throttle bloqueia fonte apos rate limit e reinicia backoff no sucesso', () => {
+  const throttle = createSourceThrottle({ baseCooldownMs: 1_000, maxCooldownMs: 60_000, random: () => 0 });
+  assert.equal(throttle.isBlocked('Binance', 0), false);
+  assert.equal(throttle.penalize('Binance', 0, 0), 1_000);
+  assert.equal(throttle.isBlocked('Binance', 500), true);
+  assert.equal(throttle.retryAt('Binance'), 1_000);
+  assert.equal(throttle.penalize('Binance', 3_000, 0), 3_000, 'Retry-After maior prevalece');
+  assert.equal(throttle.isBlocked('Binance', 3_001), false);
+  throttle.succeed('Binance');
+  assert.equal(throttle.penalize('Binance', 0, 10_000), 1_000);
+});
+
+test('source throttle aplica jitter limitado sem alterar Retry-After maior', () => {
+  const throttle = createSourceThrottle({ baseCooldownMs: 1_000, maxCooldownMs: 60_000, random: () => 1 });
+  assert.equal(throttle.penalize('Binance', 0, 0), 1_250);
+  assert.equal(throttle.penalize('Binance', 30_000, 2_000), 30_000);
+});
+
+test('source throttle isola chaves especiais e tolera random invalido', () => {
+  const throttle = createSourceThrottle({ baseCooldownMs: 1_000, maxCooldownMs: 60_000, random: () => NaN });
+  assert.equal(throttle.penalize('__proto__', 0, 0), 1_000);
+  assert.equal(throttle.isBlocked('__proto__', 500), true);
+  assert.equal(throttle.isBlocked('constructor', 500), false);
+});
+
 test('executa fetch pelo budget, forca no-store e registra saude', async () => {
   let receivedOptions;
   const { client, health, budgetCalls, throttle } = setup(async (_url, options) => {
@@ -59,6 +84,21 @@ test('executa fetch pelo budget, forca no-store e registra saude', async () => {
   assert.deepEqual(budgetCalls, [{ source: 'Fonte', priority: 2 }]);
   assert.deepEqual(throttle.successes, ['Fonte']);
   assert.deepEqual(health.at(-1), ['Fonte', true, 'online']);
+});
+
+test('propaga cancelamento externo para a requisicao em curso', async () => {
+  const external = new AbortController();
+  let observedSignal;
+  const { client } = setup(async (_url, options) => {
+    observedSignal = options.signal;
+    return new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true });
+    });
+  });
+  const running = client.fetchJSON('/api/test', 10_000, 'Fonte', { signal: external.signal });
+  external.abort(new Error('lease lost'));
+  await assert.rejects(running, (error) => error.name === 'AbortError');
+  assert.equal(observedSignal.aborted, true);
 });
 
 test('429 aplica cooldown e nao espalha tentativa para host alternativo', async () => {

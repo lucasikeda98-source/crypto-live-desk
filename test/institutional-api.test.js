@@ -58,17 +58,17 @@ test('ETF MCP aceita SSE multiline e ignora eventos auxiliares', () => {
   const body = 'event: ping\ndata: {"ping":true}\n\nevent: message\ndata: ' + envelope.slice(0, split) + '\ndata: ' + envelope.slice(split) + '\n\n';
   assert.deepEqual(handler.parseEtfMcpBody(body), payload);
   assert.deepEqual(handler.parseEtfMcpBody(envelope), payload, 'JSON-RPC direto tambem e aceito');
-  assert.throws(() => handler.parseEtfMcpBody('{"jsonrpc":"2.0","error":{"message":"negado"}}'), /negado/);
-  assert.throws(() => handler.parseEtfMcpBody('event: ping\ndata: {"ping":true}\n\n'), /payload JSON-RPC valido/);
+  assert.throws(() => handler.parseEtfMcpBody('{"jsonrpc":"2.0","error":{"message":"negado"}}'), /semantic error/);
+  assert.throws(() => handler.parseEtfMcpBody('event: ping\ndata: {"ping":true}\n\n'), /invalid payload/);
 });
 
 test('ETF MCP degrada com erro controlado quando content tem formato inesperado', () => {
   const nonArrayContent = JSON.stringify({ jsonrpc: '2.0', result: { content: { type: 'text', text: '{}' } } });
-  assert.throws(() => handler.parseEtfMcpBody(nonArrayContent), /sem conteudo/, 'content nao-array nao pode virar TypeError');
+  assert.throws(() => handler.parseEtfMcpBody(nonArrayContent), /no content/, 'content nao-array nao pode virar TypeError');
   const nullItem = JSON.stringify({ jsonrpc: '2.0', result: { content: [null, { type: 'text', text: '{"ok":1}' }] } });
   assert.deepEqual(handler.parseEtfMcpBody(nullItem), { ok: 1 }, 'item nulo no content nao pode derrubar o parser');
   const textless = JSON.stringify({ jsonrpc: '2.0', result: { content: [{ type: 'image' }] } });
-  assert.throws(() => handler.parseEtfMcpBody(textless), /sem conteudo/);
+  assert.throws(() => handler.parseEtfMcpBody(textless), /no content/);
 });
 
 test('calendario de sessoes cobre feriados moveis dos EUA sem apagar meio-dia de vespera', () => {
@@ -132,7 +132,7 @@ test('rota institucional declara degradacao parcial de ETF/CFTC e bloqueia metod
     assert.equal(partial.body.dataStatus, 'partial');
     assert.equal(partial.body.etf.flows.rows[0].reported, true);
     assert.equal(partial.body.etf.flows.rows[0].reportReason, 'nonzero-observation');
-    assert.match(partial.body.errors.cftc, /indisponivel/);
+    assert.equal(partial.body.errors.cftc, 'internal error');
 
     const method = responseMock();
     await handler({ method: 'POST', headers: { 'x-forwarded-for': '203.0.113.122' }, url: '/api/institutional' }, method);

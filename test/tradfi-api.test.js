@@ -81,6 +81,7 @@ test('rota TradFi retorna 503 quando nenhuma cotacao e valida', async () => {
     assert.equal(response.statusCode, 503);
     assert.equal(response.body.assets.length, 0);
     assert.equal(response.body.errors.length, 10);
+    assert.equal(response.body.errors.every((item) => item.error === 'internal error'), true);
     assert.equal(response.body.observedAt, null);
   } finally {
     global.fetch = originalFetch;

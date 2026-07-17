@@ -1,5 +1,5 @@
 const { toFiniteNumber, toTimestampMs } = require('../lib/analytics-core');
-const { applyApiPolicyAsync } = require('../lib/api-guard');
+const { applyApiPolicyAsync, publicApiError, publicErrorMessage } = require('../lib/api-guard');
 
 const MONTHS = { JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5, JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11 };
 
@@ -12,7 +12,7 @@ async function getJson(url, deadline) {
     headers: { 'User-Agent': 'CryptoLiveDesk/1.0 (+https://crypto-live-desk.vercel.app)' },
     signal: AbortSignal.timeout(remainingTimeout(deadline)),
   });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  if (!response.ok) throw publicApiError(`Deribit HTTP ${response.status}`);
   return response.json();
 }
 
@@ -122,9 +122,9 @@ function normalizeDvolRows(rows, asOf = Date.now()) {
 async function orderBook(instrumentName, deadline) {
   if (!instrumentName) return null;
   const payload = await getJson('https://www.deribit.com/api/v2/public/get_order_book?depth=1&instrument_name=' + encodeURIComponent(instrumentName), deadline);
-  if (payload && payload.error) throw new Error('Deribit book: ' + String(payload.error.message || payload.error.code || 'erro semantico'));
+  if (payload && payload.error) throw publicApiError('Deribit book unavailable');
   const result = payload && payload.result;
-  if (!result || typeof result !== 'object') throw new Error('Deribit book sem result valido');
+  if (!result || typeof result !== 'object') throw publicApiError('Deribit book returned an invalid payload');
   return {
     instrumentName,
     markIv: result.mark_iv,
@@ -162,13 +162,13 @@ module.exports = async function handler(request, response) {
       getJson('https://www.deribit.com/api/v2/public/get_book_summary_by_currency?currency=' + summaryCurrency + '&kind=option', deadline),
       getJson('https://www.deribit.com/api/v2/public/get_volatility_index_data?currency=' + currency + '&start_timestamp=' + start + '&end_timestamp=' + now + '&resolution=3600', deadline),
     ]);
-    if (summarySettled.status !== 'fulfilled') throw new Error(String(summarySettled.reason && summarySettled.reason.message || 'Deribit indisponivel'));
+    if (summarySettled.status !== 'fulfilled') throw summarySettled.reason;
     const summaryPayload = summarySettled.value;
     const dvolPayload = dvolSettled.status === 'fulfilled' ? dvolSettled.value : null;
-    if (!Array.isArray(summaryPayload && summaryPayload.result)) throw new Error('Deribit summary sem result valido');
+    if (!Array.isArray(summaryPayload && summaryPayload.result)) throw publicApiError('Deribit summary returned an invalid payload');
     const summaryRows = summaryPayload.result.filter((row) => !instrumentPrefix || String(row.instrument_name || '').startsWith(instrumentPrefix));
     const options = summaryRows.map(parseInstrument).filter((row) => row && Number.isFinite(row.strike) && row.expiry > now);
-    if (!options.length) throw new Error('Sem opcoes ativas para ' + currency);
+    if (!options.length) throw publicApiError('No active options for ' + currency);
     const expiries = [...new Set(options.map((row) => row.expiry))].sort((a, b) => a - b);
     const nearestExpiry = expiries.find((expiry) => options.some((row) => {
       const openInterest = toFiniteNumber(row.open_interest);
@@ -213,10 +213,10 @@ module.exports = async function handler(request, response) {
     const dvolLatest = dvolRows.length ? dvolRows[dvolRows.length - 1].close : null;
     const dvolChange7d = dvolFirst ? ((dvolLatest - dvolFirst) / dvolFirst) * 100 : null;
     const errors = {};
-    if (dvolSettled.status === 'rejected') errors.dvol = String(dvolSettled.reason && dvolSettled.reason.message || dvolSettled.reason);
+    if (dvolSettled.status === 'rejected') errors.dvol = publicErrorMessage('options-dvol', dvolSettled.reason);
     else if (!dvolRows.length) errors.dvol = 'Deribit DVOL sem pontos validos';
-    if (books[0].status === 'rejected') errors.callBook = String(books[0].reason && books[0].reason.message || books[0].reason);
-    if (books[1].status === 'rejected') errors.putBook = String(books[1].reason && books[1].reason.message || books[1].reason);
+    if (books[0].status === 'rejected') errors.callBook = publicErrorMessage('options-call-book', books[0].reason);
+    if (books[1].status === 'rejected') errors.putBook = publicErrorMessage('options-put-book', books[1].reason);
     if ([callOi, putOi, callVolumeUsd, putVolumeUsd].some((value) => value === null)) errors.numeric = 'Agregado Deribit excedeu o intervalo numerico seguro';
     const summaryTimes = options.map((row) => observedTimestamp(row.creation_timestamp, now)).filter(Number.isFinite);
     const summaryObservedAt = summaryTimes.length ? Math.max(...summaryTimes) : null;
@@ -259,7 +259,7 @@ module.exports = async function handler(request, response) {
       dvol: { latest: dvolLatest, change7d: dvolChange7d, points: dvolRows.length, observedAt: dvolRows.length ? dvolRows[dvolRows.length - 1].timestamp : null },
     });
   } catch (error) {
-    return response.status(503).json({ error: error.message, currency, fetchedAt: Date.now() });
+    return response.status(503).json({ error: publicErrorMessage('options', error), currency, fetchedAt: Date.now() });
   }
 };
 

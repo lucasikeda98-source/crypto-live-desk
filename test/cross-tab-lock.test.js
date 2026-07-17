@@ -111,3 +111,115 @@ test('falha do storage degrada para fila da propria aba sem perder a operacao', 
   assert.equal(await coordinator.run('journal', () => 'preserved'), 'preserved');
   assert.deepEqual(reasons, ['storage-lock-unavailable']);
 });
+
+test('perda repetida do heartbeat aborta a tarefa e falha fechado antes de confirmar sucesso', async () => {
+  const storage = new FakeStorage();
+  const originalSetItem = storage.setItem.bind(storage);
+  const reasons = [];
+  let heartbeat = null;
+  let failWrites = false;
+  let releaseTask;
+  let markStarted;
+  const started = new Promise((resolve) => { markStarted = resolve; });
+  const taskGate = new Promise((resolve) => { releaseTask = resolve; });
+  storage.setItem = function setItem(key, value) {
+    if (failWrites) throw new Error('quota exceeded');
+    return originalSetItem(key, value);
+  };
+  const coordinator = createCoordinator({
+    storage,
+    participantId: 'tab-heartbeat',
+    leaseMs: 5000,
+    setInterval(callback) { heartbeat = callback; return 1; },
+    clearInterval() {},
+    onDegraded: (reason) => reasons.push(reason),
+  });
+
+  let context;
+  const running = coordinator.run('journal', async (lock) => {
+    context = lock;
+    markStarted();
+    await taskGate;
+    return 'must-not-commit';
+  });
+  await started;
+  failWrites = true;
+  heartbeat();
+  heartbeat();
+  assert.equal(context.signal.aborted, true);
+  assert.throws(() => context.assertHeld(), (error) => error.code === 'LOCK_LEASE_LOST');
+  releaseTask();
+  await assert.rejects(running, (error) => error.code === 'LOCK_LEASE_LOST');
+  assert.deepEqual(reasons, ['storage-lock-heartbeat-failed']);
+});
+
+// REV-CC-02/F: aba suspensa alem do lease acorda SEM exclusividade — antes, o heartbeat
+// simplesmente regravava o ticket e a tarefa seguia com outra aba dentro da secao critica.
+test('suspensao alem do lease perde a exclusividade ao acordar (fail-closed)', async () => {
+  const storage = new FakeStorage();
+  const reasons = [];
+  let heartbeat = null;
+  let clock = 1_000;
+  let releaseTask;
+  let markStarted;
+  const started = new Promise((resolve) => { markStarted = resolve; });
+  const taskGate = new Promise((resolve) => { releaseTask = resolve; });
+  const coordinator = createCoordinator({
+    storage,
+    participantId: 'tab-suspensa',
+    leaseMs: 5000,
+    now: () => clock,
+    setInterval(callback) { heartbeat = callback; return 1; },
+    clearInterval() {},
+    onDegraded: (reason) => reasons.push(reason),
+  });
+  let context;
+  const running = coordinator.run('journal', async (lock) => {
+    context = lock;
+    markStarted();
+    await taskGate;
+    return 'must-not-commit';
+  });
+  await started;
+  clock += 5001;
+  heartbeat();
+  assert.equal(context.signal.aborted, true);
+  assert.throws(() => context.assertHeld(), (error) => error.code === 'LOCK_LEASE_LOST');
+  releaseTask();
+  await assert.rejects(running, (error) => error.code === 'LOCK_LEASE_LOST');
+  assert.deepEqual(reasons, ['storage-lock-suspended']);
+});
+
+// REV-CC-02/F: posse real do ticket verificada a cada batimento — ticket tomado/limpo por outra
+// aba (apos expiracao) derruba a exclusividade em vez de ser regravado silenciosamente.
+test('ticket perdido para outra aba e detectado no batimento seguinte', async () => {
+  const storage = new FakeStorage();
+  const reasons = [];
+  let heartbeat = null;
+  let releaseTask;
+  let markStarted;
+  const started = new Promise((resolve) => { markStarted = resolve; });
+  const taskGate = new Promise((resolve) => { releaseTask = resolve; });
+  const coordinator = createCoordinator({
+    storage,
+    participantId: 'tab-dona',
+    leaseMs: 5000,
+    setInterval(callback) { heartbeat = callback; return 1; },
+    clearInterval() {},
+    onDegraded: (reason) => reasons.push(reason),
+  });
+  let context;
+  const running = coordinator.run('journal', async (lock) => {
+    context = lock;
+    markStarted();
+    await taskGate;
+    return 'must-not-commit';
+  });
+  await started;
+  storage.setItem('cld-cross-tab-lock:v1:journal:tab-dona', JSON.stringify({ id: 'tab-invasora', choosing: false, number: 1, expiresAt: Date.now() + 5000 }));
+  heartbeat();
+  assert.throws(() => context.assertHeld(), (error) => error.code === 'LOCK_LEASE_LOST');
+  releaseTask();
+  await assert.rejects(running, (error) => error.code === 'LOCK_LEASE_LOST');
+  assert.deepEqual(reasons, ['storage-lock-ticket-lost']);
+});

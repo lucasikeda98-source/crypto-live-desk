@@ -14,7 +14,7 @@
         <div class="identity">
           <div class="mark" aria-hidden="true">B</div>
           <div>
-            <h1>Crypto Live Desk Pro</h1>
+            <div class="identity-title"><h1>Crypto Live Desk Pro</h1><span id="modelBadge" class="model-badge">Modelo --</span></div>
             <p id="sourceLine">Binance + Coin Metrics + DeFiLlama + CoinGecko + Treasury/Cboe + TradFi + noticias</p>
           </div>
         </div>
@@ -63,6 +63,19 @@
         <button type="button" data-asset-tab="signals">Sinais</button>
         <button type="button" data-asset-tab="calculator">Calculadora</button>
       </nav>
+      <label class="asset-tab-mobile view-asset" id="assetTabMobile">
+        <span>Area do ativo</span>
+        <select id="assetTabSelect">
+          <option value="summary">Resumo</option>
+          <option value="chart">Grafico</option>
+          <option value="history">Historico e padroes</option>
+          <option value="futures">Futuros</option>
+          <option value="institutional">Institucional</option>
+          <option value="macro">Macro e fluxo</option>
+          <option value="signals">Sinais</option>
+          <option value="calculator">Calculadora</option>
+        </select>
+      </label>
 
       <section class="overview-hero panel view-dashboard">
         <div class="section-head compact board-head">
@@ -269,11 +282,18 @@
         </div>
         <div class="panel source-panel view-dashboard">
           <div class="section-head compact">
-            <h2>Fontes gratuitas</h2>
+            <h2>Saude dos dados</h2>
             <span id="sourceCount">--</span>
           </div>
+          <div class="metric-grid data-contract-grid" aria-label="Contrato de qualidade do mercado">
+            <div><span>Contrato piloto</span><strong id="dataContractStatus">--</strong></div>
+            <div><span>Cobertura</span><strong id="dataContractCoverage">--</strong></div>
+            <div><span>Atraso de ingestao</span><strong id="dataContractLatency">--</strong></div>
+            <div><span>Identidade do payload</span><strong id="dataContractHash">--</strong></div>
+          </div>
           <div id="dataSources" class="source-list"></div>
-          <p class="mini-caption">Dados sem chave atualizam em ciclos diferentes: ativo em foco 3s, radar multiativos 30-60s, contexto externo 2min, noticias 5min.</p>
+          <p id="dataContractDetail" class="mini-caption" aria-live="polite">O contrato unificado esta sendo migrado fonte por fonte.</p>
+          <p class="mini-caption">Ciclos: ativo em foco 3s, radar multiativos 30-60s, contexto externo 2min e noticias 5min. Status direcional e qualidade do dado sao exibidos separadamente.</p>
         </div>
       </section>
 
@@ -289,7 +309,7 @@
                 <label><input type="checkbox" data-overlay="ema50" checked /> EMA 50</label>
                 <label><input type="checkbox" data-overlay="ema200" /> EMA 200</label>
                 <label><input type="checkbox" data-overlay="bb" /> Bollinger</label>
-                <label><input type="checkbox" data-overlay="vwap" /> VWAP</label>
+                <label><input type="checkbox" data-overlay="vwap" /> VWAP 48c</label>
                 <label><input type="checkbox" data-overlay="supertrend" /> Supertrend</label>
                 <label><input type="checkbox" data-overlay="levels" checked /> Niveis</label>
                 <label><input type="checkbox" data-overlay="fib" /> Fibonacci</label>
@@ -583,7 +603,7 @@
           <p id="calculatorNote" class="mini-caption">As taxas exatas dependem do VIP, maker/taker, desconto BNB, bracket de manutencao e modo de margem da conta.</p>
         </div>
       </section>
-      <footer class="status-bar"><span id="statusText" role="status" aria-live="polite">Inicializando painel...</span><span>Migracao v1 preview | Radar Score e Setup Score nao representam probabilidade nem recomendacao</span></footer>
+      <footer class="status-bar"><span id="statusText" role="status" aria-live="polite">Inicializando painel...</span><span>Migracao v1 | Radar Score e Setup Score nao representam probabilidade nem recomendacao</span></footer>
     </main>
     <script src="lib/analytics-core.js"></script>
     <script src="lib/request-client.js"></script>
